@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Third Molar Extraction Assessment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F5F6F3;
+    --surface: #FFFFFF;
+    --ink: #1A1F1A;
+    --ink-soft: #4A5249;
+    --teal: #2E7D6B;
+    --teal-deep: #1B5C4D;
+    --border: #D8DDD8;
+    --serif: 'Source Serif 4', Georgia, serif;
+    --sans: 'IBM Plex Sans', system-ui, sans-serif;
+    --mono: 'IBM Plex Mono', monospace;
+  }
+
+  body {
+    background: var(--bg);
+    font-family: var(--sans);
+    min-height: 100vh;
+    padding: 40px 24px;
+    color: var(--ink);
+  }
+
+  .shell {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  header { margin-bottom: 34px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--teal);
+    text-transform: uppercase;
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-size: 26px;
+    color: var(--ink);
+    margin-top: 6px;
+    font-weight: 600;
+  }
+
+  /* Progress bar */
+  .progress-wrap { margin-bottom: 28px; }
+  .progress-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 8px;
+  }
+  .progress-bar-bg {
+    background: var(--border);
+    border-radius: 4px;
+    height: 4px;
+  }
+  .progress-bar-fill {
+    background: var(--teal);
+    height: 4px;
+    border-radius: 4px;
+    transition: width 300ms ease;
+  }
+
+  /* Card */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    margin-bottom: 20px;
+  }
+
+  /* Tag */
+  .tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--teal-deep);
+    background: #E7EEF9;
+    border: 1px solid #C9D9F0;
+    border-radius: 4px;
+    padding: 3px 7px;
+    display: inline-block;
+    margin-bottom: 14px;
+  }
+
+  /* Question text */
+  .question {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--ink);
+    line-height: 1.35;
+    margin-top: 4px;
+  }
+
+  .helper {
+    font-family: var(--sans);
+    font-size: 14px;
+    color: var(--ink-soft);
+    margin-top: 8px;
+    line-height: 1.55;
+  }
+
+  /* Yes/No buttons */
+  .yesno {
+    display: flex;
+    gap: 12px;
+    margin-top: 22px;
+  }
+
+  /* Single select */
+  .single-select, .multi-select {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 22px;
+  }
+
+  .option-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    font-family: var(--sans);
+    font-size: 15px;
+    padding: 13px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    transition: all 120ms ease;
+    width: 100%;
+  }
+
+  .option-btn.selected {
+    border-color: var(--teal-deep);
+    background: #E8EEF9;
+  }
+
+  .option-btn.yesno-btn {
+    font-weight: 600;
+    padding: 12px 28px;
+    flex-direction: row;
+    width: auto;
+  }
+
+  .option-btn.yesno-btn.selected {
+    background: var(--teal);
+    color: #fff;
+    border-color: var(--teal-deep);
+  }
+
+  .radio-icon {
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .radio-icon.checked {
+    border-color: var(--teal);
+    background: var(--teal);
+  }
+
+  .radio-icon.checked::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: white;
+  }
+
+  .check-icon {
+    width: 17px;
+    height: 17px;
+    border-radius: 3px;
+    border: 2px solid var(--border);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .check-icon.checked {
+    border-color: var(--teal);
+    background: var(--teal);
+  }
+
+  .check-icon.checked::after {
+    content: '✓';
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  /* Nav buttons */
+  .nav { display: flex; justify-content: space-between; margin-top: 30px; }
+
+  .btn-back {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--sans);
+    font-size: 14px;
+    color: var(--ink-soft);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 11px 0;
+  }
+
+  .btn-back:disabled { color: #B7BDB7; cursor: default; }
+
+  .btn-next {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--teal-deep);
+    border: none;
+    border-radius: 8px;
+    padding: 11px 20px;
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+
+  .btn-next:disabled { background: #B7BDB7; cursor: default; }
+
+  /* Results */
+  .result-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-family: var(--sans);
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 18px;
+  }
+
+  .badge-straightforward { background: #D4EDDA; color: #1A6630; }
+  .badge-moderate { background: #FFF3CD; color: #7D5A00; }
+  .badge-complex { background: #F8D7DA; color: #721C24; }
+  .badge-refer { background: #F8D7DA; color: #721C24; }
+
+  .result-heading {
+    font-family: var(--serif);
+    font-size: 20px;
+    color: var(--ink);
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+
+  .result-body {
+    font-family: var(--sans);
+    font-size: 14px;
+    color: var(--ink-soft);
+    line-height: 1.6;
+    margin-bottom: 14px;
+  }
+
+  .factors-heading {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink-soft);
+    margin-top: 10px;
+    margin-bottom: 6px;
+  }
+
+  .factors-list {
+    margin: 0 0 6px 0;
+    padding-left: 18px;
+    list-style-type: disc;
+  }
+
+  .factors-list li {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+    margin-bottom: 3px;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 20px 0;
+  }
+
+  .source-note {
+    font-family: var(--sans);
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    font-style: italic;
+    margin-top: 14px;
+  }
+
+  .btn-restart {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--teal-deep);
+    background: transparent;
+    border: 1.5px solid var(--teal-deep);
+    border-radius: 8px;
+    padding: 11px 20px;
+    cursor: pointer;
+    margin-top: 26px;
+  }
+
+  /* Halted screen */
+  .halt-box {
+    background: #FFF3CD;
+    border: 1px solid #FFEAA0;
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+
+  .halt-title {
+    font-family: var(--serif);
+    font-size: 20px;
+    color: #7D5A00;
+    margin-bottom: 10px;
+  }
+
+  .halt-body {
+    font-family: var(--sans);
+    font-size: 14px;
+    color: #7D5A00;
+    line-height: 1.6;
+  }
+
+  /* Summary rows */
+  .summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .summary-row:last-child { border-bottom: none; }
+  .summary-label { color: var(--ink-soft); flex: 1; }
+  .summary-value { color: var(--ink); font-weight: 500; text-align: right; max-width: 60%; }
+
+  /* Subquestion indent */
+  .subq {
+    margin-top: 16px;
+    padding-left: 16px;
+    border-left: 3px solid var(--border);
+  }
+
+  .subq .question { font-size: 17px; }
+
+  /* none-selected hint */
+  .none-hint {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink-soft);
+    font-style: italic;
+    margin-top: 10px;
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="eyebrow">Oral Surgery · Chairside support tool</div>
+    <h1>Third Molar Extraction Assessment</h1>
+  </header>
+  <div id="app"></div>
+</div>
+
+<script>
+// ─── Data ────────────────────────────────────────────────────────────────────
+
+const MEDICAL_ITEMS = [
+  { id: "chemoRadio",     label: "Currently undergoing chemotherapy or radiotherapy" },
+  { id: "bisphosphonates",label: "IV bisphosphonates, or oral bisphosphonates taken for longer than 5 years" },
+  { id: "diabetes",       label: "Type I or Type II diabetes" },
+  { id: "anticoag",       label: "Anticoagulant or antiplatelet therapy" },
+  { id: "ie",             label: "Deemed at high risk of infective endocarditis" },
+  { id: "haemophilia",    label: "Haemophilia or von Willebrand disease" },
+  { id: "adrenal",        label: "Adrenal insufficiency or long-term corticosteroid therapy" },
+];
+
+const IAN_SIGNS = [
+  { id: "darkRoot",   label: "Darkening of the root" },
+  { id: "deflection", label: "Deflection of the root" },
+  { id: "tramline",   label: "Interruption of the radiopaque canal lines (tramlines)" },
+  { id: "diversion",  label: "Diversion of the inferior alveolar canal" },
+  { id: "narrowing",  label: "Narrowing of the inferior alveolar canal" },
+  { id: "bifidApex",  label: "Dark and bifid root apex" },
+];
+
+const STEPS = [
+  "justification",
+  "radiograph",
+  "medicalHistory",
+  "socialHistory",
+  "mouthOpening",
+  "rootMorphology",
+  "angulation",
+  "depth",
+  "spaceAvailable",
+  "ianSigns",
+];
+
+// ─── State ───────────────────────────────────────────────────────────────────
+
+let state = {
+  step: 0,
+  halted: false,
+  finished: false,
+  answers: {
+    justification: null,
+    radiograph: null,
+    medicalHistory: null,
+    medicalItems: [],
+    smoker: null,
+    alcohol: null,
+    alcoholOver14: null,
+    mouthOpening: null,
+    rootMorphology: null,
+    angulation: null,
+    depth: null,
+    spaceAvailable: null,
+    ianSigns: [],
+  }
+};
+
+function set(key, value) {
+  state.answers[key] = value;
+  render();
+}
+
+function handleSingle(btn) {
+  set(btn.dataset.key, btn.dataset.val);
+}
+
+function toggleList(key, id) {
+  const list = state.answers[key];
+  state.answers[key] = list.includes(id) ? list.filter(x => x !== id) : [...list, id];
+  render();
+}
+
+function restart() {
+  state = {
+    step: 0, halted: false, finished: false,
+    answers: {
+      justification: null, radiograph: null, medicalHistory: null,
+      medicalItems: [], smoker: null, alcohol: null, alcoholOver14: null,
+      mouthOpening: null, rootMorphology: null, angulation: null,
+      depth: null, spaceAvailable: null, ianSigns: [],
+    }
+  };
+  render();
+}
+
+// ─── Scoring ─────────────────────────────────────────────────────────────────
+
+function computeResult() {
+  const a = state.answers;
+
+  // Immediate refer triggers
+  if (a.medicalItems.includes("chemoRadio") || a.medicalItems.includes("bisphosphonates") || a.medicalItems.includes("haemophilia")) {
+    return { tier: "refer", label: "Refer to Hospital / Specialist" };
+  }
+
+  // IAN proximity score
+  const ianCount = a.ianSigns.length;
+
+  // Score-based assessment (Pederson-influenced)
+  let score = 0;
+
+  // Angulation
+  if (a.angulation === "Mesioangular") score += 1;
+  else if (a.angulation === "Horizontal" || a.angulation === "Transverse") score += 3;
+  else if (a.angulation === "Distoangular") score += 3;
+  else if (a.angulation === "Vertical") score += 1;
+
+  // Depth (Winter's classification level)
+  if (a.depth === "Level A – coronal third of adjacent molar") score += 1;
+  else if (a.depth === "Level B – between CEJ and mid root of adjacent molar") score += 2;
+  else if (a.depth === "Level C – below mid root of adjacent molar") score += 3;
+
+  // Space available (ramus relationship)
+  if (a.spaceAvailable === "Class I – sufficient space") score += 1;
+  else if (a.spaceAvailable === "Class II – reduced space") score += 2;
+  else if (a.spaceAvailable === "Class III – no space / within ramus") score += 3;
+
+  // Root morphology
+  if (a.rootMorphology === "Fused or conical roots (single root)") score += 0;
+  else if (a.rootMorphology === "Separate, straight roots") score += 1;
+  else if (a.rootMorphology === "Curved, dilacerated or hypercementosed roots") score += 2;
+
+  // Mouth opening
+  if (a.mouthOpening === "Yes") score += 2;
+
+  // IAN
+  if (ianCount >= 1) score += 2;
+  if (ianCount >= 3) score += 1; // extra for high-risk pattern
+
+  // Medical complexity modifiers
+  const medComplexity = a.medicalItems.length > 0;
+  const smoker = a.smoker === "Yes";
+  const heavyAlcohol = a.alcoholOver14 === "Yes";
+
+  if (medComplexity) score += 1;
+
+  // Tier
+  let tier;
+  if (score <= 4) tier = "straightforward";
+  else if (score <= 8) tier = "moderate";
+  else tier = "complex";
+
+  // Social factors advice additions
+  const socialFlags = [];
+  if (smoker) socialFlags.push("Patient smokes — counsel on increased dry socket and delayed healing risk; advise cessation prior to surgery.");
+  if (heavyAlcohol) socialFlags.push("Alcohol intake >14 units/week — consider impact on healing, consent, and compliance.");
+
+  return { tier, score, socialFlags, ianCount, medComplexity };
+}
+
+function tierLabel(tier) {
+  if (tier === "straightforward") return "Straightforward";
+  if (tier === "moderate") return "Moderate Difficulty";
+  if (tier === "complex") return "Complex — Consider Referral";
+  if (tier === "refer") return "Refer to Hospital / Specialist";
+  return "";
+}
+
+function tierBadgeClass(tier) {
+  if (tier === "straightforward") return "badge-straightforward";
+  if (tier === "moderate") return "badge-moderate";
+  return "badge-complex";
+}
+
+function tierDescription(result) {
+  const { tier, score, ianCount, medComplexity } = result;
+  if (tier === "refer") {
+    return "This patient has a medical history that significantly increases the risks associated with third molar surgery in a primary care setting. Referral to a hospital oral surgery unit or specialist is indicated.";
+  }
+  if (tier === "straightforward") {
+    return "The clinical and radiographic assessment indicates this extraction is likely to be within the scope of a competent general dental practitioner with appropriate surgical training. Standard pre- and post-operative protocols apply.";
+  }
+  if (tier === "moderate") {
+    return "The assessment indicates moderate surgical difficulty. The case may be appropriate for a GDP with advanced surgical training, or referral to a specialist/oral surgery unit should be considered. Careful pre-operative planning and patient consent are essential.";
+  }
+  if (tier === "complex") {
+    return "Multiple high-difficulty factors are present. Referral to secondary care or a specialist oral surgery service is strongly recommended. Attempting this extraction in primary care without appropriate experience and facilities may increase patient risk.";
+  }
+}
+
+function buildFactors(result) {
+  const a = state.answers;
+  const { tier, ianCount, socialFlags } = result;
+  const factors = [];
+  const surgical = [];
+
+  // Medical
+  if (a.medicalItems.length > 0) {
+    factors.push("Relevant medical history noted — review implications for surgical management and post-operative care.");
+  }
+  if (a.smoker === "Yes") factors.push("Active smoker — increased dry socket risk.");
+  if (a.alcoholOver14 === "Yes") factors.push("Alcohol intake above recommended limits.");
+
+  // Radiographic
+  if (!a.radiograph || a.radiograph === "No") {
+    surgical.push("No pre-operative radiograph available — radiograph is mandatory before undertaking third molar surgery.");
+  }
+
+  // Angulation
+  if (a.angulation === "Horizontal" || a.angulation === "Transverse") surgical.push("Horizontal/transverse angulation — increased bone removal likely required.");
+  if (a.angulation === "Distoangular") surgical.push("Distoangular angulation — one of the most technically demanding impaction types.");
+
+  // Depth
+  if (a.depth === "Level C – below mid root of adjacent molar") surgical.push("Deep impaction (Winter's Level C) — extensive bone removal and possible sectioning required.");
+  else if (a.depth === "Level B – between CEJ and mid root of adjacent molar") surgical.push("Intermediate depth (Winter's Level B) — likely requires bone removal.");
+
+  // Space
+  if (a.spaceAvailable === "Class III – no space / within ramus") surgical.push("Class III ramus relationship — severe space limitation, high surgical complexity.");
+  else if (a.spaceAvailable === "Class II – reduced space") surgical.push("Class II ramus relationship — reduced delivery space.");
+
+  // Roots
+  if (a.rootMorphology === "Curved, dilacerated or hypercementosed roots") surgical.push("Abnormal root morphology — increased risk of root fracture; consider sectioning.");
+
+  // Mouth opening
+  if (a.mouthOpening === "Yes") surgical.push("Limited mouth opening — access and instrument use will be restricted; increases surgical difficulty.");
+
+  // IAN
+  if (ianCount >= 1) {
+    surgical.push(`${ianCount} radiographic sign(s) of IAN proximity — enhanced consent for altered sensation required. Consider CBCT if ≥3 signs present.`);
+  }
+
+  // Social flags
+  socialFlags.forEach(f => factors.push(f));
+
+  return { factors, surgical };
+}
+
+// ─── Can advance ─────────────────────────────────────────────────────────────
+
+function canAdvance() {
+  const a = state.answers;
+  switch (STEPS[state.step]) {
+    case "justification":   return a.justification !== null;
+    case "radiograph":      return a.radiograph !== null;
+    case "medicalHistory":  return a.medicalHistory !== null;
+    case "socialHistory":   return a.smoker !== null && a.alcohol !== null && (a.alcohol !== "Yes" || a.alcoholOver14 !== null);
+    case "mouthOpening":    return a.mouthOpening !== null;
+    case "rootMorphology":  return a.rootMorphology !== null;
+    case "angulation":      return a.angulation !== null;
+    case "depth":           return a.depth !== null;
+    case "spaceAvailable":  return a.spaceAvailable !== null;
+    case "ianSigns":        return true;
+    default: return false;
+  }
+}
+
+function goNext() {
+  if (STEPS[state.step] === "justification" && state.answers.justification === "No") {
+    state.halted = true;
+    render(); return;
+  }
+  if (state.step === STEPS.length - 1) {
+    state.finished = true;
+    render(); return;
+  }
+  state.step++;
+  render();
+}
+
+function goBack() {
+  if (state.step > 0) { state.step--; render(); }
+}
+
+// ─── Render helpers ───────────────────────────────────────────────────────────
+
+function radioIcon(selected) {
+  return `<span class="radio-icon${selected ? ' checked' : ''}"></span>`;
+}
+
+function checkIcon(checked) {
+  return `<span class="check-icon${checked ? ' checked' : ''}"></span>`;
+}
+
+function yesNo(key, value) {
+  return `
+    <div class="yesno">
+      ${["Yes","No"].map(opt => `
+        <button class="option-btn yesno-btn${value === opt ? ' selected' : ''}" onclick="set('${key}','${opt}')">${opt}</button>
+      `).join('')}
+    </div>`;
+}
+
+function singleSelect(key, options, value) {
+  return `
+    <div class="single-select">
+      ${options.map(opt => {
+        const safeOpt = opt.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+        return `
+        <button class="option-btn${value === opt ? ' selected' : ''}" data-key="${key}" data-val="${safeOpt}" onclick="handleSingle(this)">
+          ${radioIcon(value === opt)} ${opt}
+        </button>`;
+      }).join('')}
+    </div>`;
+}
+
+function multiSelect(key, items, values) {
+  return `
+    <div class="multi-select">
+      ${items.map(it => `
+        <button class="option-btn${values.includes(it.id) ? ' selected' : ''}" data-key="${key}" data-id="${it.id}" onclick="handleMulti(this)">
+          ${checkIcon(values.includes(it.id))} ${it.label}
+        </button>
+      `).join('')}
+    </div>`;
+}
+
+function handleMulti(btn) {
+  toggleList(btn.dataset.key, btn.dataset.id);
+}
+
+function navBar() {
+  const advance = canAdvance();
+  const isLast = state.step === STEPS.length - 1;
+  return `
+    <div class="nav">
+      <button class="btn-back" onclick="goBack()" ${state.step === 0 ? 'disabled' : ''}>← Back</button>
+      <button class="btn-next" onclick="goNext()" ${!advance ? 'disabled' : ''}>${isLast ? 'View Summary →' : 'Continue →'}</button>
+    </div>`;
+}
+
+function progressBar() {
+  const pct = Math.round(((state.step) / STEPS.length) * 100);
+  return `
+    <div class="progress-wrap">
+      <div class="progress-label">Step ${state.step + 1} of ${STEPS.length}</div>
+      <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+    </div>`;
+}
+
+// ─── Step screens ─────────────────────────────────────────────────────────────
+
+function stepHTML() {
+  const a = state.answers;
+  const key = STEPS[state.step];
+
+  if (key === "justification") return `
+    <div class="card">
+      <span class="tag">Clinical Indication</span>
+      <div class="question">Is there a clear clinical justification for extraction of this third molar?</div>
+      <div class="helper">Refer to NICE TA1 (2000) and the RCS Faculty of Dental Surgery guidance (2021). Indications include recurrent pericoronitis, unrestorable caries, non-treatable pulpal or periapical pathology, resorption of adjacent tooth, cyst or tumour formation, and tooth in fracture line when appropriate.</div>
+      ${yesNo("justification", a.justification)}
+    </div>`;
+
+  if (key === "radiograph") return `
+    <div class="card">
+      <span class="tag">Radiographic Assessment</span>
+      <div class="question">Is a pre-operative radiograph available for assessment?</div>
+      <div class="helper">A dental panoramic tomogram (DPT) is the standard radiograph. Periapical views may supplement this. CBCT is reserved for cases where conventional radiography suggests close proximity to the IAN and management would be altered.</div>
+      ${yesNo("radiograph", a.radiograph)}
+      ${a.radiograph === "No" ? `<div class="helper" style="margin-top:14px;color:#721C24;font-weight:600;">⚠ A pre-operative radiograph is mandatory before undertaking third molar surgery.</div>` : ''}
+    </div>`;
+
+  if (key === "medicalHistory") return `
+    <div class="card">
+      <span class="tag">Medical History</span>
+      <div class="question">Does the patient have any relevant medical history?</div>
+      <div class="helper">Select all that apply, or indicate none relevant.</div>
+      ${yesNo("medicalHistory", a.medicalHistory)}
+      ${a.medicalHistory === "Yes" ? `
+        <div style="margin-top:18px;">
+          <div class="helper" style="font-weight:600;margin-bottom:0;">Select all conditions that apply:</div>
+          ${multiSelect("medicalItems", MEDICAL_ITEMS, a.medicalItems)}
+          ${a.medicalItems.length === 0 ? `<div class="none-hint">Select all that apply, or tap No above if none.</div>` : ''}
+        </div>
+      ` : ''}
+    </div>`;
+
+  if (key === "socialHistory") return `
+    <div class="card">
+      <span class="tag">Social History</span>
+      <div class="question">Smoking and alcohol history</div>
+      <div class="helper">Does the patient smoke?</div>
+      ${yesNo("smoker", a.smoker)}
+      <div class="helper" style="margin-top:20px;">Does the patient drink alcohol?</div>
+      ${yesNo("alcohol", a.alcohol)}
+      ${a.alcohol === "Yes" ? `
+        <div class="subq">
+          <div class="helper" style="font-weight:600;">Does the patient drink more than 14 units per week?</div>
+          ${yesNo("alcoholOver14", a.alcoholOver14)}
+        </div>` : ''}
+    </div>`;
+
+  if (key === "mouthOpening") return `
+    <div class="card">
+      <span class="tag">Clinical Assessment</span>
+      <div class="question">Does the patient have limited mouth opening?</div>
+      <div class="helper">Adequate mouth opening is considered 35 mm or more (maximum interincisal distance). Answer Yes if the patient's opening is reduced or severely restricted.</div>
+      ${yesNo("mouthOpening", a.mouthOpening)}
+    </div>`;
+
+  if (key === "rootMorphology") return `
+    <div class="card">
+      <span class="tag">Radiographic Assessment</span>
+      <div class="question">What is the root morphology of the third molar?</div>
+      <div class="helper">Assess on the pre-operative radiograph.</div>
+      ${singleSelect("rootMorphology", [
+        "Fused or conical roots (single root)",
+        "Separate, straight roots",
+        "Curved, dilacerated or hypercementosed roots"
+      ], a.rootMorphology)}
+    </div>`;
+
+  if (key === "angulation") return `
+    <div class="card">
+      <span class="tag">Impaction Classification</span>
+      <div class="question">What is the angulation of the impacted third molar?</div>
+      <div class="helper">Winter's classification of angulation relative to the long axis of the second molar.</div>
+      ${singleSelect("angulation", [
+        "Vertical",
+        "Mesioangular",
+        "Distoangular",
+        "Horizontal",
+        "Transverse",
+        "Inverted"
+      ], a.angulation)}
+    </div>`;
+
+  if (key === "depth") return `
+    <div class="card">
+      <span class="tag">Impaction Classification</span>
+      <div class="question">What is the depth of impaction?</div>
+      <div class="helper">Winter's classification based on the position of the highest point of the third molar relative to the adjacent second molar.</div>
+      ${singleSelect("depth", [
+        "Level A – coronal third of adjacent molar",
+        "Level B – between CEJ and mid root of adjacent molar",
+        "Level C – below mid root of adjacent molar"
+      ], a.depth)}
+    </div>`;
+
+  if (key === "spaceAvailable") return `
+    <div class="card">
+      <span class="tag">Impaction Classification</span>
+      <div class="question">What is the available space (ramus relationship)?</div>
+      <div class="helper">Pell and Gregory classification based on space between the anterior border of the ramus and the distal surface of the second molar.</div>
+      ${singleSelect("spaceAvailable", [
+        "Class I – sufficient space",
+        "Class II – reduced space",
+        "Class III – no space / within ramus"
+      ], a.spaceAvailable)}
+    </div>`;
+
+  if (key === "ianSigns") return `
+    <div class="card">
+      <span class="tag">IAN Proximity</span>
+      <div class="question">Are any radiographic signs of IAN proximity present?</div>
+      <div class="helper">Select all signs visible on the radiograph. If none are present, proceed without selecting any.</div>
+      ${multiSelect("ianSigns", IAN_SIGNS, a.ianSigns)}
+      ${a.ianSigns.length === 0 ? `<div class="none-hint">No signs selected — tap Continue to proceed.</div>` : ''}
+    </div>`;
+
+  return '';
+}
+
+// ─── Results screen ───────────────────────────────────────────────────────────
+
+function resultsHTML() {
+  const result = computeResult();
+  const { tier } = result;
+  const { factors, surgical } = buildFactors(result);
+  const a = state.answers;
+
+  return `
+    <div class="card">
+      <span class="tag">Assessment Complete</span>
+      <div class="result-badge ${tierBadgeClass(tier)}">
+        ${tier === "straightforward" ? '✓' : tier === "moderate" ? '⚠' : '⛔'} ${tierLabel(tier)}
+      </div>
+      <div class="result-body">${tierDescription(result)}</div>
+
+      ${(factors.length > 0 || surgical.length > 0) ? `<hr class="divider">` : ''}
+
+      ${surgical.length > 0 ? `
+        <div class="factors-heading">Surgical difficulty factors</div>
+        <ul class="factors-list">${surgical.map(f => `<li>${f}</li>`).join('')}</ul>
+      ` : ''}
+
+      ${factors.length > 0 ? `
+        <div class="factors-heading">Patient-related considerations</div>
+        <ul class="factors-list">${factors.map(f => `<li>${f}</li>`).join('')}</ul>
+      ` : ''}
+
+      <hr class="divider">
+
+      <div class="result-heading">Clinical Summary</div>
+      <div class="summary-row"><span class="summary-label">Justification for extraction</span><span class="summary-value">${a.justification}</span></div>
+      <div class="summary-row"><span class="summary-label">Radiograph available</span><span class="summary-value">${a.radiograph}</span></div>
+      <div class="summary-row"><span class="summary-label">Relevant medical history</span><span class="summary-value">${a.medicalHistory}${a.medicalItems.length > 0 ? ': ' + a.medicalItems.map(id => MEDICAL_ITEMS.find(m=>m.id===id)?.label).join('; ') : ''}</span></div>
+      <div class="summary-row"><span class="summary-label">Smoker</span><span class="summary-value">${a.smoker}</span></div>
+      <div class="summary-row"><span class="summary-label">Alcohol</span><span class="summary-value">${a.alcohol}${a.alcoholOver14 ? ' (>14 units/week: ' + a.alcoholOver14 + ')' : ''}</span></div>
+      <div class="summary-row"><span class="summary-label">Mouth opening</span><span class="summary-value">${a.mouthOpening}</span></div>
+      <div class="summary-row"><span class="summary-label">Root morphology</span><span class="summary-value">${a.rootMorphology}</span></div>
+      <div class="summary-row"><span class="summary-label">Angulation (Winter's)</span><span class="summary-value">${a.angulation}</span></div>
+      <div class="summary-row"><span class="summary-label">Depth (Winter's)</span><span class="summary-value">${a.depth}</span></div>
+      <div class="summary-row"><span class="summary-label">Space available (Pell & Gregory)</span><span class="summary-value">${a.spaceAvailable}</span></div>
+      <div class="summary-row"><span class="summary-label">IAN signs</span><span class="summary-value">${a.ianSigns.length === 0 ? 'None identified' : a.ianSigns.map(id => IAN_SIGNS.find(s=>s.id===id)?.label).join('; ')}</span></div>
+
+      <p class="source-note">This tool is a clinical decision-support aid and does not replace clinical judgement. Source: Royal College of Surgeons of England / Faculty of Dental Surgery, The Management of Patients with Third Molar Teeth, April 2021.</p>
+
+      <button class="btn-restart" onclick="restart()">↺ Start New Assessment</button>
+    </div>`;
+}
+
+// ─── Halted screen ────────────────────────────────────────────────────────────
+
+function haltedHTML() {
+  return `
+    <div class="halt-box">
+      <div class="halt-title">⚠ No clear justification for extraction</div>
+      <div class="halt-body">
+        Based on the information provided, there is no identifiable clinical indication for extraction of this third molar at this time.<br><br>
+        Refer to NICE Technology Appraisal Guidance No. 1 (2000) and the RCS Faculty of Dental Surgery guidance (2021) for current indications. Prophylactic removal of disease-free, pathology-free third molars is not recommended.<br><br>
+        Consider active monitoring with periodic radiographic review if indicated.
+      </div>
+    </div>
+    <button class="btn-restart" onclick="restart()">↺ Start New Assessment</button>`;
+}
+
+// ─── Main render ──────────────────────────────────────────────────────────────
+
+function render() {
+  const app = document.getElementById('app');
+  if (state.halted) { app.innerHTML = haltedHTML(); return; }
+  if (state.finished) { app.innerHTML = resultsHTML(); return; }
+  app.innerHTML = progressBar() + stepHTML() + navBar();
+}
+
+render();
+</script>
+</body>
+</html>
