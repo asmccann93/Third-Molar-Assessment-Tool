@@ -1,4 +1,4 @@
-const CACHE = "tma-v1-3-2";
+const CACHE = "tma-v1-4-13";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
@@ -24,8 +24,13 @@ self.addEventListener("fetch", (e) => {
     e.respondWith(
       fetch(e.request)
         .then((resp) => {
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
+          // Only cache a good response. A 404 or 500 - a bad deploy, a half
+          // uploaded zip - would otherwise be pinned here and served from the
+          // cache until the next version bump clears it.
+          if (resp && resp.ok) {
+            const copy = resp.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, copy));
+          }
           return resp;
         })
         .catch(() => caches.match(e.request).then((r) => r || caches.match("./index.html")))
@@ -39,8 +44,12 @@ self.addEventListener("fetch", (e) => {
       (cached) =>
         cached ||
         fetch(e.request).then((resp) => {
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
+          // resp.ok is false for opaque cross-origin responses (the web fonts),
+          // which are still worth keeping, so allow those through as well.
+          if (resp && (resp.ok || resp.type === "opaque")) {
+            const copy = resp.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, copy));
+          }
           return resp;
         })
     )
