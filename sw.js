@@ -10,7 +10,16 @@ self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) =>
+        Promise.all(
+          keys
+            // Only tidy up THIS tool's own caches. The sedation tool shares this
+            // domain and owns caches prefixed "sedation-"; deleting those would
+            // wipe its offline copy every time this tool is opened.
+            .filter((k) => k.startsWith("tma-") && k !== CACHE)
+            .map((k) => caches.delete(k))
+        )
+      )
       .then(() => self.clients.claim())
   );
 });
