@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#FFFFFF" />
+<meta name="color-scheme" content="light only" />
+<title>Oral Surgery Assessment Tools</title>
+<meta name="description" content="Chairside decision-support tools for oral surgery: third molar extraction assessment and adult sedation pre-assessment." />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: light only;
+    --ink:#0F2F63; --soft:#3F5A8A; --muted:#4A6FA5;
+    --line:#D6DCE8; --accent:#1E4D9B; --navy:#0F2F63; --tint:#EDF3FC;
+    --serif:"Source Serif 4","Iowan Old Style",Georgia,ui-serif,serif;
+    --sans:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",monospace;
+  }
+  *,*::before,*::after { box-sizing:border-box; }
+  html { background:#fff; }
+  body { margin:0; background:#fff; font-family:var(--sans); color:var(--ink);
+    -webkit-font-smoothing:antialiased; padding:40px 24px; }
+  @media (prefers-color-scheme: dark) { html, body { background:#fff !important; color:var(--ink) !important; } }
+
+  .wrap { max-width:640px; margin:0 auto; }
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--accent); text-transform:uppercase; }
+  h1 { font-family:var(--serif); font-size:30px; font-weight:700; margin:8px 0 0; line-height:1.15; letter-spacing:-0.01em; }
+  .byline { font-size:13px; color:var(--soft); margin-top:6px; }
+  .lede { font-size:16px; line-height:1.65; color:var(--soft); margin:22px 0 0; }
+
+  .tools { margin-top:34px; display:flex; flex-direction:column; gap:14px; }
+  a.tool { display:flex; align-items:flex-start; gap:16px; text-decoration:none; color:inherit;
+    border:1.5px solid var(--line); border-radius:10px; padding:20px;
+    transition:border-color .15s ease, background .15s ease; }
+  a.tool:hover, a.tool:focus-visible { border-color:var(--navy); background:var(--tint); }
+  .tool-icon { flex-shrink:0; width:42px; height:42px; border-radius:9px; background:var(--tint);
+    color:var(--accent); display:flex; align-items:center; justify-content:center; }
+  a.tool:hover .tool-icon { background:#fff; }
+  .tool-name { font-family:var(--serif); font-size:19px; font-weight:600; line-height:1.25; }
+  .tool-desc { font-size:14px; line-height:1.55; color:var(--soft); margin-top:6px; }
+  .tool-go { margin-left:auto; align-self:center; color:var(--accent); flex-shrink:0; }
+
+  footer { margin-top:40px; padding-top:22px; border-top:1px solid var(--line);
+    font-size:12.5px; line-height:1.6; color:var(--soft); }
+  a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+  @media (max-width:600px) { body { padding:28px 18px; } h1 { font-size:26px; } }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="eyebrow">Oral Surgery · Chairside support tools</div>
+  <h1>Assessment Tools</h1>
+  <div class="byline">Developed by Aiden McCann</div>
+
+  <p class="lede">
+    Chairside decision-support for oral surgery. Each tool works through an assessment in a
+    structured order and produces a summary you can print or save to the patient's records.
+    Both work offline once added to your home screen.
+  </p>
+
+  <nav class="tools">
+    <a class="tool" href="third-molar/">
+      <span class="tool-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2C8 2 6 4 6 8c0 4 1 6 1.5 9.5C7.8 19.5 8.5 21 10 21c1.2 0 1.6-1 1.8-2.5L12 16l.2 2.5c.2 1.5.6 2.5 1.8 2.5 1.5 0 2.2-1.5 2.5-3.5C17 14 18 12 18 8c0-4-2-6-6-6z"/>
+        </svg>
+      </span>
+      <span>
+        <span class="tool-name">Third Molar Assessment</span>
+        <span class="tool-desc">Assess upper and lower third molars when extraction is being considered.
+          Indicates anticipated surgical difficulty and the appropriate level of clinician.</span>
+      </span>
+      <span class="tool-go" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/>
+        </svg>
+      </span>
+    </a>
+
+    <a class="tool" href="sedation/">
+      <span class="tool-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="8" y="2" width="8" height="4" rx="1"/>
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+          <path d="M8 12h8M8 16h5"/>
+        </svg>
+      </span>
+      <span>
+        <span class="tool-name">Sedation Pre-Assessment</span>
+        <span class="tool-desc">Structured pre-sedation record for adults aged 18 and over, with automatic
+          BMI, MDAS and IOSN scoring and a signed, printable summary.</span>
+      </span>
+      <span class="tool-go" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/>
+        </svg>
+      </span>
+    </a>
+  </nav>
+
+  <footer>
+    These are chairside decision-support tools. They do not replace clinical judgement, a full
+    medical history, or the assessing clinician's responsibility for the care of the patient.
+  </footer>
+</main>
+</body>
+</html>
