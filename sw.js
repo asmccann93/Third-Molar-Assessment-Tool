@@ -1,61 +1,94 @@
-const CACHE = "tma-v1-4-15";
+/* Sedation Pre-Assessment — offline support.
+   Bump CACHE when index.html changes, or clients will keep serving the old copy. */
+var CACHE = "sedation-v2";
 
-self.addEventListener("install", (e) => {
+var SHELL = [
+  "./",
+  "./index.html",
+  "./manifest.webmanifest",
+  "./icon-192.png",
+  "./icon-512.png",
+  "./icon-maskable-512.png",
+  "./apple-touch-icon.png",
+  "./favicon-32.png"
+];
+
+self.addEventListener("install", function (e) {
   e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(["./", "./index.html"])).then(() => self.skipWaiting())
+    caches.open(CACHE).then(function (c) {
+      /* Cache entries individually so one missing file can't fail the whole install */
+      return Promise.all(SHELL.map(function (url) {
+        return c.add(url).catch(function () { return null; });
+      }));
+    }).then(function () { return self.skipWaiting(); })
   );
 });
 
-self.addEventListener("activate", (e) => {
+self.addEventListener("activate", function (e) {
   e.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys
-        // Only tidy up THIS tool's old versions. Other tools share this
-        // origin and own their own caches — deleting theirs breaks them.
-        .filter((k) => k.startsWith("tma-") && k !== CACHE)
-        .map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
+    caches.keys().then(function (keys) {
+      return Promise.all(keys.map(function (k) {
+        /* Only tidy up THIS tool's old versions. Other tools share this origin
+           and own their own caches — deleting theirs breaks them. */
+        var mine = k.indexOf("sedation-") === 0;
+        return (mine && k !== CACHE) ? caches.delete(k) : null;
+      }));
+    }).then(function () { return self.clients.claim(); })
   );
 });
 
-self.addEventListener("fetch", (e) => {
-  if (e.request.method !== "GET") return;
+self.addEventListener("fetch", function (e) {
+  var req = e.request;
+  if (req.method !== "GET") return;
 
-  // Network-first for page loads: users always get the latest deployed
-  // version when online, and the cached copy when offline.
-  if (e.request.mode === "navigate") {
+  var url = new URL(req.url);
+  var sameOrigin = url.origin === self.location.origin;
+
+  /* Navigations: try the network so updates land, fall back to the cached shell.
+     This is what keeps the form usable with no signal in the surgery. */
+  if (req.mode === "navigate") {
     e.respondWith(
-      fetch(e.request)
-        .then((resp) => {
-          // Only cache a good response. A 404 or 500 - a bad deploy, a half
-          // uploaded zip - would otherwise be pinned here and served from the
-          // cache until the next version bump clears it.
-          if (resp && resp.ok) {
-            const copy = resp.clone();
-            caches.open(CACHE).then((c) => c.put(e.request, copy));
-          }
-          return resp;
-        })
-        .catch(() => caches.match(e.request).then((r) => r || caches.match("./index.html")))
+      fetch(req).then(function (res) {
+        var copy = res.clone();
+        caches.open(CACHE).then(function (c) { c.put("./index.html", copy); });
+        return res;
+      }).catch(function () {
+        return caches.match("./index.html").then(function (hit) {
+          return hit || caches.match("./");
+        });
+      })
     );
     return;
   }
 
-  // Cache-first for static assets (icons, manifest).
-  e.respondWith(
-    caches.match(e.request).then(
-      (cached) =>
-        cached ||
-        fetch(e.request).then((resp) => {
-          // resp.ok is false for opaque cross-origin responses (the web fonts),
-          // which are still worth keeping, so allow those through as well.
-          if (resp && (resp.ok || resp.type === "opaque")) {
-            const copy = resp.clone();
-            caches.open(CACHE).then((c) => c.put(e.request, copy));
+  /* Same-origin assets: cache first, since the shell rarely changes. */
+  if (sameOrigin) {
+    e.respondWith(
+      caches.match(req).then(function (hit) {
+        return hit || fetch(req).then(function (res) {
+          if (res && res.status === 200) {
+            var copy = res.clone();
+            caches.open(CACHE).then(function (c) { c.put(req, copy); });
           }
-          return resp;
-        })
-    )
+          return res;
+        });
+      }).catch(function () { return caches.match("./index.html"); })
+    );
+    return;
+  }
+
+  /* Cross-origin (the Google Fonts stylesheet and font files): serve from cache
+     when offline so type doesn't fall back mid-assessment. */
+  e.respondWith(
+    caches.match(req).then(function (hit) {
+      if (hit) return hit;
+      return fetch(req).then(function (res) {
+        if (res && (res.status === 200 || res.type === "opaque")) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(req, copy); });
+        }
+        return res;
+      }).catch(function () { return hit; });
+    })
   );
 });
