@@ -1,0 +1,96 @@
+<!-- ==========================================================================
+     TOOL SWITCHER - three builds of the same block.
+
+     Only one line differs between them: which link carries aria-current="page".
+     Paste the matching block into that app's html_head.txt, above the #root div.
+
+     Path assumed for the new tool: /local-anaesthetic/
+     If you deploy it somewhere else, change the href in all three blocks.
+     ========================================================================== -->
+
+
+<!-- ==========================================================================
+     1 of 3 - LOCAL ANAESTHETIC build (new)
+     ========================================================================== -->
+
+<!-- Tool switcher. Sits outside the app's own markup, so it is unaffected by
+     the app and does not affect it. Remove this block to take it out again. -->
+<style>
+  .ostb { display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+    font-family:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    background:#FFFFFF; border-bottom:1px solid #D6DCE8;
+    padding:8px clamp(16px,4vw,32px); }
+  .ostb-label { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10px;
+    letter-spacing:.08em; text-transform:uppercase; color:#4A6FA5; margin-right:10px; }
+  .ostb a { font-size:13px; font-weight:600; color:#3F5A8A; text-decoration:none;
+    padding:6px 12px; border-radius:7px; border:1px solid transparent; line-height:1.2; }
+  .ostb a:hover { color:#0F2F63; background:#EDF3FC; }
+  .ostb a[aria-current="page"] { color:#0F2F63; background:#E8EEF9; border-color:#C9D9F0; }
+  .ostb a:focus-visible { outline:2px solid #1E4D9B; outline-offset:2px; }
+  @media print { .ostb { display:none !important; } }
+  @media (max-width:480px) { .ostb-label { width:100%; margin-bottom:2px; } }
+</style>
+<nav class="ostb" aria-label="Assessment tools">
+  <span class="ostb-label">Oral Surgery Tools</span>
+  <a href="/">Third Molar</a>
+  <a href="/sedation/">Sedation</a>
+  <a href="/local-anaesthetic/" aria-current="page">Local Anaesthetic</a>
+</nav>
+
+
+<!-- ==========================================================================
+     2 of 3 - THIRD MOLAR build (replaces the block already there)
+     ========================================================================== -->
+
+<!-- Tool switcher. Sits outside the app's own markup, so it is unaffected by
+     the app and does not affect it. Remove this block to take it out again. -->
+<style>
+  .ostb { display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+    font-family:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    background:#FFFFFF; border-bottom:1px solid #D6DCE8;
+    padding:8px clamp(16px,4vw,32px); }
+  .ostb-label { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10px;
+    letter-spacing:.08em; text-transform:uppercase; color:#4A6FA5; margin-right:10px; }
+  .ostb a { font-size:13px; font-weight:600; color:#3F5A8A; text-decoration:none;
+    padding:6px 12px; border-radius:7px; border:1px solid transparent; line-height:1.2; }
+  .ostb a:hover { color:#0F2F63; background:#EDF3FC; }
+  .ostb a[aria-current="page"] { color:#0F2F63; background:#E8EEF9; border-color:#C9D9F0; }
+  .ostb a:focus-visible { outline:2px solid #1E4D9B; outline-offset:2px; }
+  @media print { .ostb { display:none !important; } }
+  @media (max-width:480px) { .ostb-label { width:100%; margin-bottom:2px; } }
+</style>
+<nav class="ostb" aria-label="Assessment tools">
+  <span class="ostb-label">Oral Surgery Tools</span>
+  <a href="/" aria-current="page">Third Molar</a>
+  <a href="/sedation/">Sedation</a>
+  <a href="/local-anaesthetic/">Local Anaesthetic</a>
+</nav>
+
+
+<!-- ==========================================================================
+     3 of 3 - SEDATION build (replaces the block already there)
+     ========================================================================== -->
+
+<!-- Tool switcher. Sits outside the app's own markup, so it is unaffected by
+     the app and does not affect it. Remove this block to take it out again. -->
+<style>
+  .ostb { display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+    font-family:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    background:#FFFFFF; border-bottom:1px solid #D6DCE8;
+    padding:8px clamp(16px,4vw,32px); }
+  .ostb-label { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10px;
+    letter-spacing:.08em; text-transform:uppercase; color:#4A6FA5; margin-right:10px; }
+  .ostb a { font-size:13px; font-weight:600; color:#3F5A8A; text-decoration:none;
+    padding:6px 12px; border-radius:7px; border:1px solid transparent; line-height:1.2; }
+  .ostb a:hover { color:#0F2F63; background:#EDF3FC; }
+  .ostb a[aria-current="page"] { color:#0F2F63; background:#E8EEF9; border-color:#C9D9F0; }
+  .ostb a:focus-visible { outline:2px solid #1E4D9B; outline-offset:2px; }
+  @media print { .ostb { display:none !important; } }
+  @media (max-width:480px) { .ostb-label { width:100%; margin-bottom:2px; } }
+</style>
+<nav class="ostb" aria-label="Assessment tools">
+  <span class="ostb-label">Oral Surgery Tools</span>
+  <a href="/">Third Molar</a>
+  <a href="/sedation/" aria-current="page">Sedation</a>
+  <a href="/local-anaesthetic/">Local Anaesthetic</a>
+</nav>

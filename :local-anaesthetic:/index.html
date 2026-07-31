@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#FFFFFF" />
+<meta name="color-scheme" content="light only" />
+<title>Local Anaesthetic Maximum Dose</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="LA Dose" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: light only;
+    /* Values taken from the sedation tool, which documents them as contrast-checked
+       on white. The third molar tool uses slightly different ink and amber. */
+    --ink:#0F2F63; --soft:#3F5A8A; --muted:#4A6FA5;
+    --bg:#FFFFFF; --surface:#FFFFFF;
+    --line:#D6DCE8; --accent:#1E4D9B; --navy:#0F2F63;
+    --clay:#A11D2E; --amber:#C43A32;
+    --tint:#E8EEF9; --tint-soft:#F2F7FE; --chip-bg:#E7EEF9; --chip-line:#C9D9F0;
+    --alert-bg:#FDF2F2;
+    --placeholder:#5C7BAE; --disabled:#9FB0CC;
+    --serif:"Source Serif 4","Iowan Old Style",Georgia,ui-serif,serif;
+    --sans:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { background:#FFFFFF; }
+  body { margin:0; background:#FFFFFF; font-family:var(--sans); color:var(--ink); -webkit-text-size-adjust:100%; }
+  /* Never let a browser's automatic dark mode invert a clinical figure. */
+  @media (prefers-color-scheme: dark) {
+    html, body, .shell { background:#FFFFFF !important; color:var(--ink) !important; }
+  }
+  button { font:inherit; cursor:pointer; }
+
+  .shell { min-height:100vh; padding:40px 24px; }
+  .wrap-narrow { max-width:640px; margin:0 auto; }
+
+  header.app { margin-bottom:34px; }
+  .eyebrow-top { font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--accent); text-transform:uppercase; }
+  h1.app { font-family:var(--serif); font-size:26px; color:var(--ink); margin:6px 0 0; font-weight:700; line-height:1.2; }
+  .byline { font-size:13px; color:var(--soft); margin-top:4px; }
+
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:22px; margin-bottom:18px; }
+  .card.accented { border-color:var(--navy); border-width:1.5px; }
+  .card.empty { border-style:dashed; text-align:center; color:var(--soft); font-size:15px; line-height:1.6; }
+
+  h2.block { font-family:var(--serif); font-size:19px; color:var(--ink); margin:0 0 4px; font-weight:600; }
+  p.lede { font-size:14px; color:var(--soft); margin:0 0 18px; line-height:1.55; }
+
+  .chip { display:inline-block; font-family:var(--mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--navy); background:var(--chip-bg); border:1px solid var(--chip-line); border-radius:4px; padding:3px 7px; }
+
+  .field { margin-bottom:20px; }
+  .field:last-child { margin-bottom:0; }
+  .field-label { font-size:15px; font-weight:600; color:var(--ink); }
+  .field-hint { font-size:13px; color:var(--soft); margin-top:3px; line-height:1.5; }
+
+  .weight-row { display:flex; align-items:center; gap:10px; margin-top:8px; }
+  input.weight { font-family:var(--mono); font-size:22px; width:140px; padding:10px 12px; border-radius:8px;
+    border:1.5px solid var(--line); background:var(--surface); color:var(--ink); }
+  input.weight:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  input.weight[aria-invalid="true"] { border-color:var(--clay); }
+  input.weight::placeholder { color:var(--placeholder); }
+  .unit { font-size:16px; color:var(--soft); }
+
+  .opts-row { display:flex; gap:12px; margin-top:8px; }
+  .opt { display:flex; align-items:center; justify-content:center; font-size:15px;
+    font-weight:600; padding:13px 16px; border-radius:8px; border:1.5px solid var(--line);
+    background:var(--surface); color:var(--ink); transition:border-color 120ms ease, background 120ms ease; flex:1; }
+  .opt[aria-pressed="true"] { background:var(--navy); color:#fff; border-color:var(--navy); }
+  .opt:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* --- mix rows --- */
+  .mixrow { border:1.5px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  .mixrow-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .mixrow-name { font-size:15px; font-weight:600; color:var(--ink); line-height:1.35; }
+  .mixrow-sub { font-family:var(--mono); font-size:12px; color:var(--soft); margin-top:3px; }
+  .drop { background:transparent; border:none; color:var(--soft); font-size:20px; line-height:1;
+    padding:2px 6px; border-radius:6px; }
+  .drop:hover { color:var(--clay); background:var(--alert-bg); }
+  .drop:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  .stepper { display:flex; align-items:center; gap:12px; margin-top:12px; }
+  .step-btn { font-size:20px; font-weight:600; width:44px; height:44px; border-radius:8px;
+    border:1.5px solid var(--line); background:var(--surface); color:var(--ink); }
+  .step-btn:hover { border-color:var(--navy); }
+  .step-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .step-read { min-width:74px; text-align:center; }
+  .step-read .n { font-family:var(--mono); font-size:24px; font-weight:600; color:var(--ink); line-height:1.1; }
+  .step-read .l { font-size:11px; color:var(--soft); }
+  .rowshare { margin-left:auto; text-align:right; font-family:var(--mono); font-size:12px; color:var(--soft); line-height:1.6; }
+
+  select.addagent { font-family:var(--sans); font-size:14px; font-weight:600; color:var(--ink);
+    background:var(--surface); border:1.5px dashed var(--line); border-radius:8px; padding:11px 14px; width:100%; }
+  select.addagent:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  .callout { display:flex; gap:10px; align-items:flex-start; border-radius:8px; padding:12px 14px; margin-top:12px;
+    font-size:14px; line-height:1.6; }
+  .callout.info { background:var(--tint-soft); border:1px solid var(--chip-line); color:var(--ink); }
+  .callout.warn { background:var(--alert-bg); border:1px solid #EFCBD1; color:var(--ink); }
+  .callout .glyph { flex-shrink:0; font-family:var(--mono); font-weight:600; }
+  .callout.info .glyph { color:var(--accent); }
+  .callout.warn .glyph { color:var(--clay); }
+
+  .headline { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .headline .num { font-family:var(--mono); font-size:46px; font-weight:600; color:var(--navy); line-height:1; }
+  .headline .unit-long { font-size:17px; color:var(--ink); }
+  .restated { font-size:15px; color:var(--soft); margin-top:10px; line-height:1.6; }
+  .restated strong { color:var(--ink); }
+
+  .bar { height:10px; background:#EDF1F7; border-radius:999px; overflow:hidden; margin-top:16px; }
+  .bar > span { display:block; height:100%; transition:width 160ms ease, background 160ms ease; }
+
+  .dual { display:flex; gap:14px; margin-top:16px; flex-wrap:wrap; }
+  .dual > div { flex:1; min-width:150px; border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  .dual .k { font-family:var(--mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--soft); }
+  .dual .v { font-family:var(--mono); font-size:20px; font-weight:600; color:var(--ink); margin-top:4px; }
+  .dual .s { font-size:12px; color:var(--soft); margin-top:2px; }
+
+  .working { margin-top:18px; padding-top:16px; border-top:1px solid var(--line);
+    font-family:var(--mono); font-size:13px; color:var(--soft); line-height:1.8; }
+
+  .headroom .hr-row { display:flex; justify-content:space-between; gap:12px; font-size:14px;
+    padding:9px 0; border-bottom:1px solid var(--line); line-height:1.4; }
+  .headroom .hr-row:last-child { border-bottom:none; }
+  .headroom .hr-n { font-family:var(--mono); font-weight:600; color:var(--ink); white-space:nowrap; }
+  .headroom .hr-n.none { color:var(--clay); }
+
+  .actions { display:flex; gap:12px; margin:4px 0 26px; }
+  .btn-quiet { font-size:14px; font-weight:600; color:var(--ink); background:var(--surface);
+    border:1.5px solid var(--line); border-radius:8px; padding:11px 18px; }
+  .btn-quiet:hover { border-color:var(--navy); }
+  .btn-quiet:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  .disclaimer { font-size:13px; color:var(--soft); line-height:1.7; border-top:1px solid var(--line); padding-top:16px; }
+
+  @media print {
+    .noprint { display:none !important; }
+    body { background:#fff !important; }
+    .shell { padding:0; }
+  }
+
+  /* Tool switcher. Sits outside the app's own markup, so it is unaffected by
+     the app and does not affect it. Remove this block to take it out again. */
+  .ostb { display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+    font-family:var(--sans); background:#FFFFFF; border-bottom:1px solid var(--line);
+    padding:8px clamp(16px,4vw,32px); }
+  .ostb-label { font-family:var(--mono); font-size:10px;
+    letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-right:10px; }
+  .ostb a { font-size:13px; font-weight:600; color:var(--soft); text-decoration:none;
+    padding:6px 12px; border-radius:7px; border:1px solid transparent; line-height:1.2; }
+  .ostb a:hover { color:var(--navy); background:#EDF3FC; }
+  .ostb a[aria-current="page"] { color:var(--navy); background:var(--tint); border-color:var(--chip-line); }
+  .ostb a:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  @media print { .ostb { display:none !important; } }
+  @media (max-width:480px) { .ostb-label { width:100%; margin-bottom:2px; } }
+</style>
+
+<script>
+  // Service workers need http/https. Opening this file straight from disk
+  // (file://) previews fine, but registration is impossible there, so don't
+  // attempt it and don't warn about it either.
+  (function () {
+    var served = location.protocol === "http:" || location.protocol === "https:";
+    if (!("serviceWorker" in navigator) || !served) return;
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function (err) {
+        console.info("Offline support unavailable (" + ((err && err.message) || err) +
+          "). The calculator itself is unaffected.");
+      });
+    });
+  })();
+</script>
+</head>
+<body>
+
+<nav class="ostb" aria-label="Assessment tools">
+  <span class="ostb-label">Oral Surgery Tools</span>
+  <a href="/">Third Molar</a>
+  <a href="/sedation/">Sedation</a>
+  <a href="/local-anaesthetic/" aria-current="page">Local Anaesthetic</a>
+</nav>
+
+<div class="shell">
+<div class="wrap-narrow">
+
+  <header class="app">
+    <div class="eyebrow-top">Oral Surgery &middot; Chairside support tool</div>
+    <h1 class="app">Local Anaesthetic Maximum Dose</h1>
+    <div class="byline">Developed by Aiden McCann &middot; v<span id="ver"></span></div>
+  </header>
+
+  <section class="card">
+    <h2 class="block">Patient</h2>
+    <p class="lede">Nothing entered here is saved or leaves this device.</p>
+
+    <div class="field">
+      <div class="field-label">Weight</div>
+      <div class="field-hint">Use an actual weight. An estimate wide of the mark moves the limit by the same proportion.</div>
+      <div class="weight-row">
+        <input class="weight" id="weight" type="number" inputmode="decimal" min="1" max="250" step="0.1"
+               placeholder="0" aria-label="Patient weight in kilograms" aria-invalid="false" />
+        <span class="unit">kg</span>
+      </div>
+      <div id="weight-msg"></div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">Patient group</div>
+      <div class="opts-row" id="group-opts">
+        <button type="button" class="opt" data-group="adult" aria-pressed="true">Adult</button>
+        <button type="button" class="opt" data-group="child" aria-pressed="false">Child</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">Cardiac disease limiting adrenaline</div>
+      <div class="field-hint">Unstable angina, recent infarction, uncontrolled hypertension, uncontrolled arrhythmia, or a lower ceiling advised by the patient's physician.</div>
+      <div class="opts-row" id="cardiac-opts">
+        <button type="button" class="opt" data-cardiac="no" aria-pressed="true">No</button>
+        <button type="button" class="opt" data-cardiac="yes" aria-pressed="false">Yes</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="block">Agents given</h2>
+    <p class="lede">Add every agent used this appointment. Cartridges are pre-filled and are not
+      physically combined &mdash; this is the cumulative dose across the visit.</p>
+    <div id="mix"></div>
+    <div id="add-wrap"></div>
+    <div id="mix-cautions"></div>
+  </section>
+
+  <div id="result"></div>
+
+  <div class="actions noprint">
+    <button type="button" class="btn-quiet" id="clear">Clear</button>
+    <button type="button" class="btn-quiet" id="print">Print</button>
+  </div>
+
+  <p class="disclaimer">
+    This is a chairside decision-support tool. It is not designed to replace clinical
+    judgement, a full history and examination, or the consent process.
+  </p>
+
+</div>
+</div>
+
+<script>
+"use strict";
+
+var APP_VERSION = "0.2.0";
+document.getElementById("ver").textContent = APP_VERSION;
+
+/* ---------- clinical content ---------- */
+
+/* UK dental cartridge. The 1.8 ml figure in much of the American literature is the
+   single most likely source of a wrong answer here, so it is named once, used
+   everywhere, and never inlined. */
+var CARTRIDGE_ML = 2.2;
+
+/* Adrenaline ceilings, total across the appointment. The cardiac figure is the one
+   that matters: it is reached long before any of the lidocaine limits. */
+var ADRENALINE_CEILING_UG = 200;
+var ADRENALINE_CEILING_CARDIAC_UG = 40;
+
+/* Answers key off id, never off label. Wording can be edited freely; changing an id
+   is the breaking operation.
+
+   `drug` groups presentations of the same molecule. Two articaine products share one
+   allowance rather than getting one each - the additive model below handles that
+   without a special case, because both carry the same mgPerKg and capMg.
+
+   mgPerKg and capMg follow standard UK dental school teaching, not the
+   manufacturers' SPCs. THESE NEED SIGNING OFF BEFORE DEPLOYMENT - they are all in
+   this one block for exactly that reason. */
+var AGENTS = [
+  { id:"lido2adr80",   drug:"lidocaine",   label:"Lidocaine 2% with adrenaline 1:80,000",
+    mgPerMl:20, mgPerKg:4.4, childMgPerKg:4.4, capMg:300, adrenalineUgPerMl:12.5 },
+  { id:"artic4adr100", drug:"articaine",   label:"Articaine 4% with adrenaline 1:100,000",
+    mgPerMl:40, mgPerKg:7, childMgPerKg:5, capMg:500, adrenalineUgPerMl:10,
+    childNote:"Articaine is not recommended below four years of age." },
+  { id:"artic4adr200", drug:"articaine",   label:"Articaine 4% with adrenaline 1:200,000",
+    mgPerMl:40, mgPerKg:7, childMgPerKg:5, capMg:500, adrenalineUgPerMl:5,
+    childNote:"Articaine is not recommended below four years of age." },
+  { id:"prilo4plain",  drug:"prilocaine",  label:"Prilocaine 4% plain",
+    mgPerMl:40, mgPerKg:6, childMgPerKg:6, capMg:400, adrenalineUgPerMl:0, methaemoglobin:true },
+  { id:"prilo3fely",   drug:"prilocaine",  label:"Prilocaine 3% with felypressin 0.03 IU/ml",
+    mgPerMl:30, mgPerKg:6, childMgPerKg:6, capMg:400, adrenalineUgPerMl:0,
+    felypressinIuPerMl:0.03, methaemoglobin:true },
+  { id:"mepi3plain",   drug:"mepivacaine", label:"Mepivacaine 3% plain",
+    mgPerMl:30, mgPerKg:4.4, childMgPerKg:4.4, capMg:300, adrenalineUgPerMl:0 },
+  { id:"mepi2adr100",  drug:"mepivacaine", label:"Mepivacaine 2% with adrenaline 1:100,000",
+    mgPerMl:20, mgPerKg:4.4, childMgPerKg:4.4, capMg:300, adrenalineUgPerMl:10 }
+];
+
+var CAUTIONS = {
+  methaemoglobin:"Prilocaine carries a risk of methaemoglobinaemia. Avoid in congenital or idiopathic methaemoglobinaemia, in glucose-6-phosphate dehydrogenase deficiency, and in infants under six months. Take care where other oxidising drugs are already in use.",
+  felypressin:"Felypressin is a vasopressin analogue rather than a catecholamine, so it adds nothing to the adrenaline total. It is conventionally avoided in pregnancy."
+};
+
+function agentById(id) {
+  for (var i = 0; i < AGENTS.length; i++) if (AGENTS[i].id === id) return AGENTS[i];
+  return null;
+}
+
+/* ---------- calculation ----------
+   Pure functions, no DOM, so the regression suite can call them directly rather
+   than driving the page to test arithmetic. */
+
+/* Never round a maximum upwards. Every figure shown is floored. */
+function floorTo(value, dp) {
+  var f = Math.pow(10, dp);
+  return Math.floor(value * f) / f;
+}
+
+var WEIGHT_MIN_KG = 1;
+var WEIGHT_MAX_KG = 250;
+/* Below this, a mistyped adult weight and a real infant weight look the same. */
+var WEIGHT_CHECK_BELOW_KG = 12;
+
+function weightProblem(raw) {
+  if (raw === "") return null;
+  var n = Number(raw);
+  if (!isFinite(n) || n <= 0) return "Enter the weight in kilograms.";
+  if (n < WEIGHT_MIN_KG || n > WEIGHT_MAX_KG)
+    return "Enter a weight between " + WEIGHT_MIN_KG + " and " + WEIGHT_MAX_KG + " kg.";
+  return null;
+}
+
+/* The limit for one agent used on its own. */
+function anaestheticLimit(agent, weightKg, isChild) {
+  var perKg = isChild ? agent.childMgPerKg : agent.mgPerKg;
+  var byWeightMg = perKg * weightKg;
+  var capMg = agent.capMg;
+  var maxMg = Math.min(byWeightMg, capMg);
+  var maxMl = maxMg / agent.mgPerMl;
+  return {
+    perKg: perKg,
+    byWeightMg: byWeightMg,
+    capMg: capMg,
+    cappedByAbsolute: byWeightMg > capMg,
+    maxMg: maxMg,
+    maxMl: maxMl,
+    maxCartridges: maxMl / CARTRIDGE_ML
+  };
+}
+
+function adrenalineCeiling(cardiac) {
+  return cardiac ? ADRENALINE_CEILING_CARDIAC_UG : ADRENALINE_CEILING_UG;
+}
+
+/* ---------- the mix ----------
+   Toxicity is treated as additive: each agent contributes its dose as a fraction of
+   its own maximum, and those fractions sum. Half the lidocaine allowance plus half
+   the articaine allowance is a full dose, not two half doses.
+
+   This also handles two presentations of the same molecule correctly without a
+   special case: both articaine products share one mgPerKg and one capMg, so their
+   fractions add against the same denominator. */
+function mixLoad(mix, weightKg, isChild, cardiac) {
+  var rows = [];
+  var laFraction = 0;
+  var adrenalineUg = 0;
+
+  for (var i = 0; i < mix.length; i++) {
+    var agent = agentById(mix[i].agentId);
+    if (!agent) continue;
+    var limit = anaestheticLimit(agent, weightKg, isChild);
+    var mg = mix[i].cartridges * CARTRIDGE_ML * agent.mgPerMl;
+    var fraction = limit.maxMg > 0 ? mg / limit.maxMg : 0;
+    var ug = mix[i].cartridges * agent.adrenalineUgPerMl * CARTRIDGE_ML;
+
+    laFraction += fraction;
+    adrenalineUg += ug;
+
+    rows.push({
+      agent: agent, cartridges: mix[i].cartridges, mg: mg,
+      fraction: fraction, adrenalineUg: ug, limit: limit
+    });
+  }
+
+  var ceiling = adrenalineCeiling(cardiac);
+  var adrFraction = adrenalineUg / ceiling;
+
+  return {
+    rows: rows,
+    laFraction: laFraction,
+    adrenalineUg: adrenalineUg,
+    adrenalineCeilingUg: ceiling,
+    adrFraction: adrFraction,
+    /* Whichever ceiling is nearer decides how much room is really left. */
+    governedBy: adrFraction > laFraction ? "adrenaline" : "anaesthetic",
+    load: Math.max(laFraction, adrFraction)
+  };
+}
+
+/* How many more cartridges of one agent the remaining headroom allows, limited by
+   whichever ceiling runs out first. */
+function headroom(agent, weightKg, isChild, cardiac, load) {
+  var limit = anaestheticLimit(agent, weightKg, isChild);
+  var remainingLa = Math.max(0, 1 - load.laFraction);
+  var left = remainingLa * limit.maxCartridges;
+
+  if (agent.adrenalineUgPerMl > 0) {
+    var perCart = agent.adrenalineUgPerMl * CARTRIDGE_ML;
+    var remainingUg = Math.max(0, load.adrenalineCeilingUg - load.adrenalineUg);
+    left = Math.min(left, remainingUg / perCart);
+  }
+  return left;
+}
+
+/* ---------- state ---------- */
+var state = {
+  weight: "", group: "adult", cardiac: "no",
+  mix: [{ agentId: AGENTS[0].id, cartridges: 0 }]
+};
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c];
+  });
+}
+
+function callout(tone, html) {
+  var glyph = tone === "warn" ? "!" : "i";
+  return '<div class="callout ' + tone + '"><span class="glyph">' + glyph + '</span><div>' + html + "</div></div>";
+}
+
+function isReady() {
+  return state.weight !== "" && !weightProblem(state.weight);
+}
+
+/* ---------- rendering ----------
+   The weight field is static markup with its listener bound once, so typing never
+   costs focus. Everything below it re-renders. */
+
+function renderMix() {
+  var ready = isReady();
+  var load = ready
+    ? mixLoad(state.mix, Number(state.weight), state.group === "child", state.cardiac === "yes")
+    : null;
+
+  var html = state.mix.map(function (row, i) {
+    var agent = agentById(row.agentId);
+    var share = "";
+    if (load) {
+      var r = load.rows[i];
+      share = floorTo(r.mg, 0) + " mg<br>" + Math.round(r.fraction * 100) + "% of its own max";
+    }
+    return '<div class="mixrow">' +
+      '<div class="mixrow-top"><div>' +
+        '<div class="mixrow-name">' + esc(agent.label) + "</div>" +
+        '<div class="mixrow-sub">' + (agent.mgPerMl * CARTRIDGE_ML) + " mg per cartridge" +
+          (agent.adrenalineUgPerMl
+            ? " &middot; " + floorTo(agent.adrenalineUgPerMl * CARTRIDGE_ML, 1) + " &micro;g adrenaline"
+            : "") +
+        "</div></div>" +
+        (state.mix.length > 1
+          ? '<button type="button" class="drop" data-drop="' + i + '" aria-label="Remove ' + esc(agent.label) + '">&times;</button>'
+          : "") +
+      "</div>" +
+      '<div class="stepper">' +
+        '<button type="button" class="step-btn" data-minus="' + i + '" aria-label="Remove half a cartridge">&minus;</button>' +
+        '<div class="step-read"><div class="n">' + row.cartridges.toFixed(1) + '</div><div class="l">cartridges</div></div>' +
+        '<button type="button" class="step-btn" data-plus="' + i + '" aria-label="Add half a cartridge">+</button>' +
+        (share ? '<div class="rowshare">' + share + "</div>" : "") +
+      "</div></div>";
+  }).join("");
+
+  document.getElementById("mix").innerHTML = html;
+
+  var used = state.mix.map(function (r) { return r.agentId; });
+  var spare = AGENTS.filter(function (a) { return used.indexOf(a.id) === -1; });
+  document.getElementById("add-wrap").innerHTML = spare.length
+    ? '<select class="addagent" id="add-agent" aria-label="Add another agent">' +
+      '<option value="">+ Add another agent</option>' +
+      spare.map(function (a) { return '<option value="' + a.id + '">' + esc(a.label) + "</option>"; }).join("") +
+      "</select>"
+    : "";
+}
+
+function renderMixCautions() {
+  var out = "";
+  var seen = {};
+  state.mix.forEach(function (row) {
+    var agent = agentById(row.agentId);
+    if (agent.methaemoglobin && !seen.meth) { out += callout("info", esc(CAUTIONS.methaemoglobin)); seen.meth = 1; }
+    if (agent.felypressinIuPerMl && !seen.fely) { out += callout("info", esc(CAUTIONS.felypressin)); seen.fely = 1; }
+    if (state.group === "child" && agent.childNote && !seen.child) {
+      out += callout("warn", esc(agent.childNote)); seen.child = 1;
+    }
+  });
+  document.getElementById("mix-cautions").innerHTML = out;
+}
+
+function renderWeightMsg() {
+  var problem = weightProblem(state.weight);
+  document.getElementById("weight").setAttribute("aria-invalid", problem ? "true" : "false");
+  var out = "";
+  if (problem) {
+    out = callout("warn", esc(problem));
+  } else if (state.weight !== "" && Number(state.weight) < WEIGHT_CHECK_BELOW_KG) {
+    out = callout("warn", esc(state.weight) +
+      " kg is an infant or small child weight. Confirm it is right before using this figure.");
+  }
+  document.getElementById("weight-msg").innerHTML = out;
+}
+
+function renderResult() {
+  var host = document.getElementById("result");
+  if (!isReady()) {
+    host.innerHTML = '<section class="card empty">Enter a weight to calculate the maximum dose.</section>';
+    return;
+  }
+
+  var weightKg = Number(state.weight);
+  var isChild = state.group === "child";
+  var cardiac = state.cardiac === "yes";
+  var load = mixLoad(state.mix, weightKg, isChild, cardiac);
+
+  var pct = load.load * 100;
+  var over = load.load > 1;
+  var colour = over ? "var(--clay)" : (pct >= 75 ? "var(--amber)" : "var(--accent)");
+
+  var html = '<section class="card accented">';
+  html += '<div style="margin-bottom:14px"><span class="chip">Combined load</span></div>';
+  html += '<div class="headline"><span class="num">' + Math.round(pct) + '%</span>' +
+          '<span class="unit-long">of this patient&rsquo;s maximum</span></div>';
+  html += '<div class="restated">Governed by the <strong>' +
+          (load.governedBy === "adrenaline" ? "adrenaline ceiling" : "anaesthetic total") + "</strong>.</div>";
+  html += '<div class="bar"><span style="width:' + Math.min(100, pct) + "%;background:" + colour + '"></span></div>';
+
+  html += '<div class="dual">' +
+    '<div><div class="k">Anaesthetic</div><div class="v">' + Math.round(load.laFraction * 100) + '%</div>' +
+    '<div class="s">sum of each agent&rsquo;s share</div></div>' +
+    '<div><div class="k">Adrenaline</div><div class="v">' + floorTo(load.adrenalineUg, 1) + ' &micro;g</div>' +
+    '<div class="s">of ' + load.adrenalineCeilingUg + " &micro;g ceiling &middot; " +
+      Math.round(load.adrFraction * 100) + "%</div></div></div>";
+
+  html += '<div class="working">';
+  load.rows.forEach(function (r) {
+    html += "<div>" + esc(r.agent.label.split(" with ")[0]) + " " + floorTo(r.mg, 0) + " of " +
+      floorTo(r.limit.maxMg, 0) + " mg = " + Math.round(r.fraction * 100) + "%</div>";
+  });
+  html += "<div>combined " + Math.round(load.laFraction * 100) + "%</div></div>";
+
+  if (over) {
+    html += callout("warn", "This exceeds the maximum for this patient. Stop and reassess before giving any more.");
+  } else if (pct >= 75) {
+    html += callout("warn", "Approaching the maximum. Check the figure before the next cartridge.");
+  }
+
+  html += callout("info", "Toxicity is treated as additive: each agent counts as a share of its own " +
+    "maximum and the shares are summed. Two presentations of the same drug share one allowance.");
+  html += "</section>";
+
+  /* Headroom is the question actually asked chairside: what can I still give? */
+  html += '<section class="card noprint"><h2 class="block">Still available</h2>' +
+    '<p class="lede">How much more of each agent the remaining headroom allows.</p><div class="headroom">';
+  AGENTS.forEach(function (a) {
+    var left = floorTo(headroom(a, weightKg, isChild, cardiac, load), 1);
+    html += '<div class="hr-row"><span>' + esc(a.label) + "</span>" +
+      '<span class="hr-n' + (left <= 0 ? " none" : "") + '">' +
+      (left <= 0 ? "none" : left.toFixed(1) + " cart") + "</span></div>";
+  });
+  html += "</div></section>";
+
+  host.innerHTML = html;
+}
+
+function renderAll() {
+  renderMix();
+  renderMixCautions();
+  renderWeightMsg();
+  renderResult();
+}
+
+/* ---------- listeners ---------- */
+document.getElementById("mix").addEventListener("click", function (e) {
+  var minus = e.target.closest("[data-minus]");
+  var plus = e.target.closest("[data-plus]");
+  var drop = e.target.closest("[data-drop]");
+  if (minus) {
+    var i = Number(minus.getAttribute("data-minus"));
+    state.mix[i].cartridges = Math.max(0, floorTo(state.mix[i].cartridges - 0.5, 1));
+  } else if (plus) {
+    var j = Number(plus.getAttribute("data-plus"));
+    state.mix[j].cartridges = floorTo(state.mix[j].cartridges + 0.5, 1);
+  } else if (drop) {
+    state.mix.splice(Number(drop.getAttribute("data-drop")), 1);
+  } else {
+    return;
+  }
+  renderAll();
+});
+
+document.getElementById("add-wrap").addEventListener("change", function (e) {
+  if (e.target.id !== "add-agent" || !e.target.value) return;
+  state.mix.push({ agentId: e.target.value, cartridges: 0 });
+  renderAll();
+});
+
+document.getElementById("group-opts").addEventListener("click", function (e) {
+  var btn = e.target.closest("[data-group]");
+  if (!btn) return;
+  state.group = btn.getAttribute("data-group");
+  [].forEach.call(this.querySelectorAll("[data-group]"), function (b) {
+    b.setAttribute("aria-pressed", String(b === btn));
+  });
+  renderAll();
+});
+
+document.getElementById("cardiac-opts").addEventListener("click", function (e) {
+  var btn = e.target.closest("[data-cardiac]");
+  if (!btn) return;
+  state.cardiac = btn.getAttribute("data-cardiac");
+  [].forEach.call(this.querySelectorAll("[data-cardiac]"), function (b) {
+    b.setAttribute("aria-pressed", String(b === btn));
+  });
+  renderAll();
+});
+
+document.getElementById("weight").addEventListener("input", function () {
+  state.weight = this.value;
+  renderAll();
+});
+
+document.getElementById("clear").addEventListener("click", function () {
+  state.weight = ""; state.group = "adult"; state.cardiac = "no";
+  state.mix = [{ agentId: AGENTS[0].id, cartridges: 0 }];
+  document.getElementById("weight").value = "";
+  [].forEach.call(document.querySelectorAll("[data-group]"), function (b) {
+    b.setAttribute("aria-pressed", String(b.getAttribute("data-group") === "adult"));
+  });
+  [].forEach.call(document.querySelectorAll("[data-cardiac]"), function (b) {
+    b.setAttribute("aria-pressed", String(b.getAttribute("data-cardiac") === "no"));
+  });
+  renderAll();
+  document.getElementById("weight").focus();
+});
+
+document.getElementById("print").addEventListener("click", function () { window.print(); });
+
+renderAll();
+</script>
+</body>
+</html>
