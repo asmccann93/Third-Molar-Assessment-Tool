@@ -1,4 +1,4 @@
-const CACHE = "tma-v1-4-19";
+const CACHE = "tma-v1-4-22";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
@@ -10,7 +10,16 @@ self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      // Only tidy up THIS tool's old versions. Other tools share this origin and
+      // own their own caches - deleting theirs breaks their offline support until
+      // the user next opens them with a signal, which is exactly the situation
+      // the offline support exists for. Without the prefix test this removes
+      // sedation-* and la-* on every deploy.
+      .then((keys) =>
+        Promise.all(
+          keys.filter((k) => k.indexOf("tma-") === 0 && k !== CACHE).map((k) => caches.delete(k))
+        )
+      )
       .then(() => self.clients.claim())
   );
 });
