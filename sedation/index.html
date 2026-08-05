@@ -188,6 +188,44 @@
   .agechip { display:inline-block; margin-top:12px; font-size:13.5px; color:var(--navy);
     background:var(--tint); border:1px solid var(--chip-line); border-radius:8px; padding:8px 13px; }
 
+  .sec { display:block; }
+
+  /* Outcome band — the decision, stated once, at the top */
+  .outcome { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+    border:1.5px solid var(--line); border-left-width:5px; border-radius:8px;
+    padding:11px 14px; margin-top:14px; }
+  .outcome-verdict { font-family:var(--serif); font-size:17px; font-weight:600; }
+  .outcome-detail { font-size:13.5px; color:var(--soft); }
+  .outcome[data-tone="go"]      { border-color:var(--line); border-left-color:var(--accent); }
+  .outcome[data-tone="go"] .outcome-verdict { color:var(--navy); }
+  .outcome[data-tone="stop"]    { border-color:#A11D2E33; border-left-color:var(--clay); background:var(--alert-bg); }
+  .outcome[data-tone="stop"] .outcome-verdict { color:var(--clay); }
+  .outcome[data-tone="pending"] { border-color:var(--line); border-left-color:var(--muted); }
+  .outcome[data-tone="pending"] .outcome-verdict { color:var(--muted); }
+
+  /* Severity-ranked advisory flags */
+  .flaggroup { margin-top:14px; }
+  .flaggroup:first-of-type { margin-top:12px; }
+  .flaghead { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700;
+    letter-spacing:.04em; text-transform:uppercase; }
+  .flagcount { display:inline-flex; align-items:center; justify-content:center;
+    min-width:20px; height:20px; padding:0 5px; border-radius:5px;
+    font-family:var(--mono); font-size:11px; font-weight:500; }
+  .flagnote { font-size:12px; color:var(--soft); margin-top:3px; line-height:1.4; }
+  .flaggroup .flaglist { margin-top:7px; }
+  .flagdot { flex-shrink:0; width:5px; height:5px; border-radius:50%; margin-top:7px; }
+
+  .flaggroup[data-level="stop"]   .flaghead  { color:var(--clay); }
+  .flaggroup[data-level="stop"]   .flagcount { background:var(--clay); color:#fff; }
+  .flaggroup[data-level="stop"]   .flagdot   { background:var(--clay); }
+  .flaggroup[data-level="stop"]   .flag      { font-weight:600; }
+  .flaggroup[data-level="review"] .flaghead  { color:var(--amber); }
+  .flaggroup[data-level="review"] .flagcount { background:var(--amber); color:#fff; }
+  .flaggroup[data-level="review"] .flagdot   { background:var(--amber); }
+  .flaggroup[data-level="note"]   .flaghead  { color:var(--soft); }
+  .flaggroup[data-level="note"]   .flagcount { background:var(--line); color:var(--ink); }
+  .flaggroup[data-level="note"]   .flagdot   { background:var(--muted); }
+
   /* Allergy banner — the record's most safety-critical field, always visible */
   .allergy-bar { display:flex; gap:10px; align-items:flex-start; border-radius:8px;
     padding:11px 14px; margin-bottom:18px; font-size:14px; line-height:1.5; border:1.5px solid; }
@@ -259,24 +297,53 @@
        exists to fit it onto as few sheets as possible without losing content. */
     .spa-noprint { display:none !important; }
     body, .shell { background:#fff !important; padding:0 !important; }
-    .shell { padding-top:13px !important; }
     .wrap, .wrap-narrow { max-width:none !important; }
     body { font-size:9.5pt; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 
-    /* Headings and titles */
-    header.app { margin-bottom:7px !important; }
-    .eyebrow-top { font-size:7pt !important; }
-    h1.app { font-size:14pt !important; margin:2px 0 0 !important; }
-    .eyebrow { font-size:7.5pt !important; }
-    h2.summary { font-size:13pt !important; margin:2px 0 0 !important; }
-    .byline { font-size:8pt !important; margin-top:1px !important; }
-    h3.block { font-size:10.5pt !important; margin:9px 0 2px !important;
+    /* Masthead. On screen the title, an eyebrow and a section label all appear;
+       in print they say the same thing three times, so only the title and the
+       patient identity block are kept. */
+    header.app { margin-bottom:0 !important; }
+    .eyebrow-top { display:none !important; }
+    .eyebrow { display:none !important; }
+    h1.app { font-size:11pt !important; font-weight:600 !important; margin:0 !important;
+      color:var(--soft) !important; letter-spacing:.01em; }
+    h2.summary { font-size:15pt !important; margin:7px 0 0 !important; line-height:1.15 !important; }
+    .byline { font-size:8pt !important; margin-top:2px !important;
+      padding-bottom:7px; border-bottom:1.5px solid var(--navy); }
+
+    /* Section headings sit on a rule, so the eye finds them at a glance */
+    h3.block { font-size:9.5pt !important; font-weight:700 !important;
+      text-transform:uppercase; letter-spacing:.06em; color:var(--accent) !important;
+      margin:11px 0 0 !important; padding-bottom:2px; border-bottom:1px solid var(--line);
       break-after:avoid; page-break-after:avoid; }
+
+    /* The advisory list is the longest block on the page — run it in two columns */
+    .outcome { padding:6px 10px !important; margin-top:7px !important;
+      border-left-width:4px !important; break-inside:avoid; }
+    .outcome-verdict { font-size:11.5pt !important; }
+    .outcome-detail { font-size:8.5pt !important; }
+    .flaggroup { margin-top:8px !important; break-inside:avoid; page-break-inside:avoid; }
+    .flaghead { font-size:8pt !important; }
+    .flagcount { min-width:15px; height:14px; font-size:7pt !important; }
+    .flagnote { font-size:7pt !important; margin-top:1px !important; }
+    .flagdot { width:3.5px; height:3.5px; margin-top:5px; }
+    /* The two urgent tiers stay full width so they read as a list, not a grid.
+       Only "for awareness" is compressed into columns. */
+    .flaggroup[data-level="note"] .flaglist { column-count:2; column-gap:14px; }
+    .flaglist .flag { break-inside:avoid; page-break-inside:avoid; }
 
     /* Field panels flow into two columns, label stacked above value.
        This is where most of the page saving comes from. */
+    /* Keep a section whole, and keep it with its heading. break-after on the
+       heading and break-before on the panel are honoured independently, so
+       setting both is what actually holds them together. */
+    /* A section is heading + panel wrapped together, so one rule keeps the
+       heading with its content and stops the content splitting. */
+    .sec { break-inside:avoid; page-break-inside:avoid; }
     .panel { padding:6px 9px !important; margin-top:4px !important;
-      column-count:2; column-gap:14px; break-inside:auto; page-break-inside:auto; }
+      column-count:2; column-gap:14px;
+      break-inside:avoid; page-break-inside:avoid; }
     .srow { display:block !important; padding:1.5px 0 !important; border-top:none !important;
       break-inside:avoid; page-break-inside:avoid; }
     .skey { display:block; font-size:6.8pt !important; color:var(--muted) !important;
@@ -309,14 +376,14 @@
     .signame { font-size:8.5pt !important; }
     .sigtime { font-size:6.8pt !important; margin-top:1px !important; }
 
-    /* Repeating identifier, and the provenance stamp */
-    .print-head {
-      display:flex !important; justify-content:space-between; gap:16px;
-      position:fixed; top:0; left:0; right:0;
-      font-family:var(--mono); font-size:7pt; letter-spacing:.02em;
-      color:var(--ink); border-bottom:1px solid var(--line);
-      padding-bottom:3px; background:#fff;
-    }
+    /* No running header. A fixed-position element repeats on every page, but
+       space is only reserved for it on the first, so on later pages the content
+       flows underneath and is clipped — and it can land mid-page over clinical
+       text. The patient identity is on page one; for an identifier on every
+       sheet, tick "Headers and footers" in the print dialogue, which prints the
+       document title (patient name and date) and page numbers.
+       Kept in the markup so the on-screen layout is unchanged. */
+    .print-head { display:none !important; }
     .print-foot { display:block !important; margin-top:9px !important; padding-top:4px !important;
       border-top:1px solid var(--line); font-family:var(--mono); font-size:6.8pt; color:var(--muted); }
   }
@@ -361,7 +428,6 @@
   <span class="ostb-label">Oral Surgery Tools</span>
   <a href="/">Third Molar</a>
   <a href="/sedation/" aria-current="page">Sedation</a>
-  <a href="/local-anaesthetic/">Local Anaesthetic</a>
 </nav>
 <div id="root"></div>
 
@@ -447,7 +513,7 @@ var HISTORY_GROUPS = [
   ]},
   { title: "Respiratory", items: [
     { id: "asthma", label: "Asthma", flag: "Asthma — confirm control and that an inhaler is brought to the appointment." },
-    { id: "copd", label: "COPD", flag: "COPD — reduced respiratory reserve; consider anaesthetic input." },
+    { id: "copd", label: "COPD", flag: "COPD — reduced respiratory reserve. Consider hospital-based care." },
     { id: "recentURTI", label: "Recent chest or throat infection", flag: "Recent respiratory infection — consider deferring sedation." }
   ]},
   { title: "Endocrine & metabolic", items: [
@@ -469,7 +535,7 @@ var HISTORY_GROUPS = [
     { id: "anticoagulant", label: "Anticoagulant or antiplatelet", flag: "On anticoagulant or antiplatelet — check INR or last dose and bleeding plan." },
     { id: "bleedingDisorder", label: "Bleeding disorder", flag: "Bleeding disorder — liaise with haematology before treatment." }
   ]},
-{ title: "No significant medical history", items: [
+  { title: "No significant medical history", items: [
     { id: "none", label: "None of the above", exclusive: true }
   ]}
 ];
@@ -762,82 +828,83 @@ function ageFromDOB() {
 function clinicalFlags() {
   var f = [];
   var asa = get("asa");
-  if (asa === "III") f.push("ASA III — severe systemic disease. Confirm suitability for conscious sedation in this setting.");
-  if (asa === "IV")  f.push("ASA IV — incapacitating disease. Conscious sedation in primary care is not usually appropriate.");
+  if (asa === "III") f.push({ level: "review", text: "ASA III — severe systemic disease. Confirm suitability for conscious sedation in this setting." });
+  if (asa === "IV")  f.push({ level: "stop", text: "ASA IV — incapacitating disease. Conscious sedation in primary care is not usually appropriate." });
 
   var b = computeBMI();
   if (b) {
-    if (b.bmi >= 40) f.push("BMI " + b.bmi.toFixed(1) + " — obesity class III. Consider specialist or hospital-based care.");
-    else if (b.bmi >= 35) f.push("BMI " + b.bmi.toFixed(1) + " — obesity class II. Consider anaesthetic input and airway planning.");
+    if (b.bmi >= 40) f.push({ level: "review", text: "BMI " + b.bmi.toFixed(1) + " — obesity class III. Consider hospital-based care." });
+    else if (b.bmi >= 35) f.push({ level: "review", text: "BMI " + b.bmi.toFixed(1) + " — obesity class II. Consider hospital-based care." });
+    else if (b.bmi >= 30) f.push({ level: "review", text: "BMI " + b.bmi.toFixed(1) + " — obesity class I. Consider hospital-based care." });
   }
 
   if (get("mallampati") === "III" || get("mallampati") === "IV")
-    f.push("Mallampati " + get("mallampati") + " — anticipated difficult airway view.");
-  if (get("mouthOpening") === "<2cm") f.push("Mouth opening under 2cm — significant access and airway limitation.");
-  else if (get("mouthOpening") === "2–3cm") f.push("Reduced mouth opening (2–3cm) — anticipate restricted access.");
-  if (get("neck") === "Immobile") f.push("Neck immobile — airway positioning will be limited.");
-  else if (get("neck") === "Limited") f.push("Limited neck mobility — airway positioning may be restricted.");
-  if (get("facialAbn") === "Yes") f.push("Facial or jaw abnormality recorded — review airway management plan.");
+    f.push({ level: "review", text: "Mallampati " + get("mallampati") + " — anticipated difficult airway view." });
+  if (get("mouthOpening") === "<2cm") f.push({ level: "review", text: "Mouth opening under 2cm — significant access and airway limitation." });
+  else if (get("mouthOpening") === "2–3cm") f.push({ level: "review", text: "Reduced mouth opening (2–3cm) — anticipate restricted access." });
+  if (get("neck") === "Immobile") f.push({ level: "review", text: "Neck immobile — airway positioning will be limited." });
+  else if (get("neck") === "Limited") f.push({ level: "review", text: "Limited neck mobility — airway positioning may be restricted." });
+  if (get("facialAbn") === "Yes") f.push({ level: "review", text: "Facial or jaw abnormality recorded — review airway management plan." });
 
   var mt = mdasTotal();
-  if (mt.complete && mt.sum >= 19) f.push("MDAS " + mt.sum + "/25 — indicates severe dental anxiety.");
+  if (mt.complete && mt.sum >= 19) f.push({ level: "review", text: "MDAS " + mt.sum + "/25 — indicates severe dental anxiety." });
 
   var drugs = get("drugs") || [];
-  if (drugs.indexOf("Opioids") >= 0) f.push("Opioid use reported — consider tolerance and interaction with sedative agents.");
-  if (drugs.indexOf("Cocaine") >= 0) f.push("Cocaine use reported — cardiovascular risk. Confirm abstinence interval before sedation.");
+  if (drugs.indexOf("Opioids") >= 0) f.push({ level: "review", text: "Opioid use reported — consider tolerance and interaction with sedative agents." });
+  if (drugs.indexOf("Cocaine") >= 0) f.push({ level: "review", text: "Cocaine use reported — cardiovascular risk. Confirm abstinence interval before sedation." });
 
   var units = parseFloat(get("alcohol"));
-  if (!isNaN(units) && units > 14) f.push("Alcohol " + units + " units/week — above UK low-risk guideline; consider tolerance to sedative agents.");
+  if (!isNaN(units) && units > 14) f.push({ level: "note", text: "Alcohol " + units + " units/week — above UK low-risk guideline; consider tolerance to sedative agents." });
 
   /* Systems enquiry */
   (get("history") || []).forEach(function (id) {
     var item = historyItem(id);
-    if (item && item.flag) f.push(item.flag);
+    if (item && item.flag) f.push({ level: "review", text: item.flag });
   });
-  if (get("anaesProblem") === "Yes") f.push("Previous problem with anaesthesia or sedation — review the details before proceeding.");
-  if (get("anaesFamily") === "Yes") f.push("Family history of anaesthetic problems — consider malignant hyperthermia risk and seek advice.");
+  if (get("anaesProblem") === "Yes") f.push({ level: "review", text: "Previous problem with anaesthesia or sedation — review the details before proceeding." });
+  if (get("anaesFamily") === "Yes") f.push({ level: "review", text: "Family history of anaesthetic problems — consider malignant hyperthermia risk and seek advice." });
 
   /* Baseline observations */
   var sys = parseFloat(get("bpSys")), dia = parseFloat(get("bpDia"));
   if (!isNaN(sys) && !isNaN(dia)) {
-    if (sys >= 180 || dia >= 120) f.push("Blood pressure " + sys + "/" + dia + " — severely raised. Do not sedate; arrange urgent medical review.");
-    else if (sys >= 160 || dia >= 100) f.push("Blood pressure " + sys + "/" + dia + " — raised. Recheck and consider deferring pending medical review.");
-    else if (sys < 90) f.push("Blood pressure " + sys + "/" + dia + " — low. Establish the cause before sedation.");
+    if (sys >= 180 || dia >= 120) f.push({ level: "stop", text: "Blood pressure " + sys + "/" + dia + " — severely raised. Do not sedate; arrange urgent medical review." });
+    else if (sys >= 160 || dia >= 100) f.push({ level: "review", text: "Blood pressure " + sys + "/" + dia + " — raised. Recheck and consider deferring pending medical review." });
+    else if (sys < 90) f.push({ level: "review", text: "Blood pressure " + sys + "/" + dia + " — low. Establish the cause before sedation." });
   }
   var pulse = parseFloat(get("pulse"));
   if (!isNaN(pulse)) {
-    if (pulse > 100) f.push("Pulse " + pulse + " bpm — tachycardic. Establish the cause before sedation.");
-    else if (pulse < 50) f.push("Pulse " + pulse + " bpm — bradycardic. Establish the cause before sedation.");
+    if (pulse > 100) f.push({ level: "review", text: "Pulse " + pulse + " bpm — tachycardic. Establish the cause before sedation." });
+    else if (pulse < 50) f.push({ level: "review", text: "Pulse " + pulse + " bpm — bradycardic. Establish the cause before sedation." });
   }
   var spo2 = parseFloat(get("spo2"));
-  if (!isNaN(spo2) && spo2 < 95) f.push("Oxygen saturation " + spo2 + "% — below 95% on air. Investigate before sedation.");
+  if (!isNaN(spo2) && spo2 < 95) f.push({ level: "review", text: "Oxygen saturation " + spo2 + "% — below 95% on air. Investigate before sedation." });
 
   /* Escort and discharge arrangements */
   var ivPlanned = get("technique") && get("technique").indexOf("IV") === 0;
   var arranged = get("arrangements") || [];
   var pending = ARRANGEMENTS.filter(function (a) { return arranged.indexOf(a) < 0; });
   if (ivPlanned && arranged.indexOf(ARRANGEMENTS[0]) < 0)
-    f.push("No escort confirmed for a planned intravenous technique — the appointment should not proceed as arranged.");
+    f.push({ level: "stop", text: "No escort confirmed for a planned intravenous technique — the appointment should not proceed as arranged." });
   if (pending.length)
-    f.push("Arrangements outstanding: " + pending.join("; ").toLowerCase() + ".");
+    f.push({ level: "review", text: "Arrangements outstanding: " + pending.join("; ").toLowerCase() + "." });
 
   /* Age */
   var age = computeAge();
   if (age != null) {
-    if (age < 18) f.push("Age " + age + " — under 18 and outside the scope of this form. Use your paediatric sedation pathway.");
-    else if (age >= 80) f.push("Age " + age + " — consider reduced sedative dosing and slower titration.");
-    else if (age >= 65) f.push("Age " + age + " — older adults are more sensitive to sedative agents; titrate cautiously.");
+    if (age < 18) f.push({ level: "stop", text: "Age " + age + " — under 18 and outside the scope of this form. Use your paediatric sedation pathway." });
+    else if (age >= 80) f.push({ level: "review", text: "Age " + age + " — consider reduced sedative dosing and slower titration." });
+    else if (age >= 65) f.push({ level: "note", text: "Age " + age + " — older adults are more sensitive to sedative agents; titrate cautiously." });
   }
 
   if (get("osa") === "Yes")
-    f.push("Obstructive sleep apnoea or snoring reported — heightened risk of airway obstruction under sedation.");
+    f.push({ level: "review", text: "Obstructive sleep apnoea or snoring reported — heightened risk of airway obstruction under sedation." });
 
   /* Airway extras */
-  if (get("mallampati") === "Unable to assess") f.push("Mallampati could not be assessed — plan for an unpredicted difficult airway.");
-  if (get("beard") === "Yes") f.push("Beard or heavy facial hair — may compromise nasal mask seal for inhalation sedation.");
+  if (get("mallampati") === "Unable to assess") f.push({ level: "review", text: "Mallampati could not be assessed — plan for an unpredicted difficult airway." });
+  if (get("beard") === "Yes") f.push({ level: "note", text: "Beard or heavy facial hair — may compromise nasal mask seal for inhalation sedation." });
   var dent = get("dentition") || [];
-  if (dent.indexOf("Loose teeth") >= 0) f.push("Loose teeth recorded — aspiration risk. Document and consider stabilising before sedation.");
-  if (dent.indexOf("Removable denture") >= 0) f.push("Removable denture — agree before treatment whether it stays in or out.");
+  if (dent.indexOf("Loose teeth") >= 0) f.push({ level: "review", text: "Loose teeth recorded — aspiration risk. Document and consider stabilising before sedation." });
+  if (dent.indexOf("Removable denture") >= 0) f.push({ level: "note", text: "Removable denture — agree before treatment whether it stays in or out." });
 
   /* Pregnancy and technique interaction */
   var preg = get("pregnancy");
@@ -853,11 +920,11 @@ function clinicalFlags() {
     else
       f.push(word + " recorded — review the sedation technique and timing, and seek specialist advice.");
   }
-  if (get("breastfeeding") === "Yes") f.push("Breastfeeding — advise on timing of feeds relative to sedation.");
+  if (get("breastfeeding") === "Yes") f.push({ level: "note", text: "Breastfeeding — advise on timing of feeds relative to sedation." });
 
   /* Capacity */
   if (get("capacity") === "No")
-    f.push("Patient lacks capacity to consent — a documented best-interests decision is required before treatment.");
+    f.push({ level: "stop", text: "Patient lacks capacity to consent — a documented best-interests decision is required before treatment." });
 
   return f;
 }
@@ -1027,7 +1094,7 @@ function rangeWarnings() {
     var v = parseFloat(get(k));
     if (isNaN(v)) return;
     var r = RANGES[k];
-    if (v < r[0] || v > r[1]) out.push(r[2] + " of " + v + " is outside the expected range (" + r[0] + "–" + r[1] + "). Check for a typing error.");
+    if (v < r[0] || v > r[1]) out.push({ level: "note", text: r[2] + " of " + v + " is outside the expected range (" + r[0] + "–" + r[1] + "). Check for a typing error." });
   });
   return out;
 }
@@ -1454,7 +1521,7 @@ var STEPS = [
       return '<h2 class="step" tabindex="-1">Physical status</h2>' +
         '<p class="lede">ASA grade, body mass index, and baseline observations.</p>' +
         subLabel("ASA classification") + radioList("asa", ASA) +
-        '<h3 class="block">Height &amp; weight</h3>' +
+        '<section class="sec"><h3 class="block">Height &amp; weight</h3>' +
         '<div class="opts-row" style="margin-top:14px;">' +
           '<button type="button" class="opt opt-compact" aria-pressed="' + (units === "metric") + '" data-act="radio" data-key="units" data-val="metric">Metric</button>' +
           '<button type="button" class="opt opt-compact" aria-pressed="' + (units === "imperial") + '" data-act="radio" data-key="units" data-val="imperial">Imperial</button>' +
@@ -1915,6 +1982,27 @@ function row(k, v) {
     '<span class="sval' + (empty ? " empty" : "") + '">' + esc(empty ? "Not recorded" : val) + "</span></div>";
 }
 
+/* The outcome of the assessment, surfaced at the top. Without this the
+   fitness decision and planned technique sit on the last page, in the same
+   weight as every other field. */
+function outcomeBand() {
+  var fit = get("fit");
+  var tech = get("technique");
+  var it = iosnTotal();
+  var tone = fit === "No" ? "stop" : fit === "Yes" ? "go" : "pending";
+  var verdict = fit === "Yes" ? "Fit for sedation"
+              : fit === "No"  ? "Not fit for sedation"
+              : "Fitness for sedation not recorded";
+  var bits = [];
+  if (tech) bits.push(tech);
+  if (it != null) bits.push("IOSN " + it + "/12 \u00B7 " + iosnBand(it).label.toLowerCase() + " need");
+  if (fit === "No" && get("unfitReason")) bits.push(get("unfitReason"));
+  return '<div class="outcome" data-tone="' + tone + '">' +
+    '<span class="outcome-verdict">' + esc(verdict) + "</span>" +
+    (bits.length ? '<span class="outcome-detail">' + esc(bits.join(" \u00B7 ")) + "</span>" : "") +
+    "</div>";
+}
+
 function summaryView() {
   var b = computeBMI();
   var mt = mdasTotal();
@@ -1939,21 +2027,43 @@ function summaryView() {
         '<span class="chip" style="margin-left:auto;">' + esc(band.label) + " need</span>" +
       "</div>" +
       '<p class="lede">' + (mt.complete ? "MDAS " + mt.sum + "/25" + (mt.sum >= 19 ? " (severe dental phobia)" : "") + " \u00B7 " : "") +
-        (b ? "BMI " + b.bmi.toFixed(1) + " (" + bmiCategory(b.bmi).label.toLowerCase() + ") \u00B7 " : "") +
+        (b ? "BMI " + b.bmi.toFixed(1) + " (" + bmiCategory(b.bmi).label + ") \u00B7 " : "") +
         (get("asa") ? "ASA " + get("asa") : "ASA not recorded") + "</p></div>";
   }
 
-  var flagsHTML = flags.length
-    ? '<div class="resultcard" aria-live="polite" style="border-color:var(--amber);">' +
-        '<div style="display:flex;gap:9px;align-items:center;"><span style="color:var(--amber);">' + I.alert + "</span>" +
-        '<span class="eyebrow-soft" style="color:var(--amber);">Points for consideration</span></div>' +
-        '<div style="margin-top:10px;">' + flags.map(function (f) {
-          return '<div class="flag"><span style="color:var(--amber);flex-shrink:0;">&bull;</span><span>' + esc(f) + "</span></div>";
-        }).join("") + "</div>" +
-        '<p class="lede" style="margin-top:12px;">These are prompts for clinical consideration, not determinations. ' +
-        "The decision on fitness for sedation rests with the assessing clinician.</p></div>"
-    : '<div class="panel"><span class="eyebrow-soft">Points for consideration</span>' +
-        '<p class="lede">No advisory flags raised from the responses recorded.</p></div>';
+  var GROUPS = [
+    { key: "stop",   title: "Address before proceeding",
+      note: "These would ordinarily stop the appointment or change it materially." },
+    { key: "review", title: "Requires a decision or plan",
+      note: "Each needs an active management decision before the appointment." },
+    { key: "note",   title: "For awareness", note: "" }
+  ];
+
+  var flagsHTML;
+  if (!flags.length) {
+    flagsHTML = '<div class="panel"><span class="eyebrow-soft">Points for consideration</span>' +
+      '<p class="lede">No advisory flags raised from the responses recorded.</p></div>';
+  } else {
+    var topTone = flags.some(function (x) { return x.level === "stop"; }) ? "var(--clay)" : "var(--amber)";
+    var groupsHTML = GROUPS.map(function (g) {
+      var items = flags.filter(function (x) { return x.level === g.key; });
+      if (!items.length) return "";
+      return '<div class="flaggroup" data-level="' + g.key + '">' +
+        '<div class="flaghead"><span class="flagcount">' + items.length + "</span>" +
+        "<span>" + esc(g.title) + "</span></div>" +
+        (g.note ? '<div class="flagnote">' + esc(g.note) + "</div>" : "") +
+        '<div class="flaglist">' + items.map(function (x) {
+          return '<div class="flag"><span class="flagdot"></span><span>' + esc(x.text) + "</span></div>";
+        }).join("") + "</div></div>";
+    }).join("");
+
+    flagsHTML = '<div class="resultcard" aria-live="polite" style="border-color:' + topTone + ';">' +
+      '<div style="display:flex;gap:9px;align-items:center;"><span style="color:' + topTone + ';">' + I.alert + "</span>" +
+      '<span class="eyebrow-soft" style="color:' + topTone + ';">Points for consideration \u00B7 ' + flags.length + "</span></div>" +
+      groupsHTML +
+      '<p class="lede" style="margin-top:12px;">These are prompts for clinical consideration, not determinations. ' +
+      "The decision on fitness for sedation rests with the assessing clinician.</p></div>";
+  }
 
   var missingHTML = missing.length
     ? '<div class="alertbox spa-noprint"><span style="color:var(--amber);flex-shrink:0;">' + I.alert + "</span><div>" +
@@ -1990,6 +2100,7 @@ function summaryView() {
     '<h2 class="summary">' + esc(get("name") || "Patient record") + "</h2>" +
     '<div class="byline">' + esc(get("date") || "Date not recorded") + " \u00B7 Assessed by " +
       esc(get("assessedBy") || "not recorded") + " \u00B7 " + esc(state.recordId || "") + "</div>" +
+    outcomeBand() +
     allergyBanner({ warn: true }) +
     voidHTML + headline + flagsHTML + missingHTML +
 
@@ -1998,17 +2109,17 @@ function summaryView() {
       row("Age at assessment", computeAge() != null ? computeAge() + " years" : "") +
       row("Sex", get("sex")) + row("Phone", get("phone")) +
       row("Address", get("address")) +
-    "</div>" +
+    "</div></section>" +
 
-    '<h3 class="block">Physical status</h3><div class="panel">' +
+    '<section class="sec"><h3 class="block">Physical status</h3><div class="panel">' +
       row("ASA classification", get("asa") ? "ASA " + get("asa") : "") +
       row("BMI", b ? b.bmi.toFixed(1) + " kg/m² · " + bmiCategory(b.bmi).label : "") +
       row("Blood pressure", (get("bpSys") && get("bpDia")) ? get("bpSys") + "/" + get("bpDia") + " mmHg" : "") +
       row("Pulse", get("pulse") ? get("pulse") + " bpm" : "") +
       row("Oxygen saturation", get("spo2") ? get("spo2") + "%" : "") +
-    "</div>" +
+    "</div></section>" +
 
-    '<h3 class="block">Medical history</h3><div class="panel">' +
+    '<section class="sec"><h3 class="block">Medical history</h3><div class="panel">' +
       row("Conditions", (get("history") || []).map(function (id) {
         var it = historyItem(id); return it ? it.label : id;
       })) +
@@ -2023,9 +2134,9 @@ function summaryView() {
       row("Breastfeeding", get("breastfeeding")) +
       row("Capacity to consent", get("capacity")) +
       row("Best-interests decision", get("bestInterests")) +
-    "</div>" +
+    "</div></section>" +
 
-    '<h3 class="block">Airway</h3><div class="panel">' +
+    '<section class="sec"><h3 class="block">Airway</h3><div class="panel">' +
       row("Mallampati class", get("mallampati")) + row("Mouth opening", get("mouthOpening")) +
       row("Neck mobility", get("neck")) +
       row("Facial / jaw abnormality", get("facialAbn")) +
@@ -2033,9 +2144,9 @@ function summaryView() {
       row("Dentition", get("dentition")) +
       row("Sleep apnoea / snoring", get("osa")) +
       row("Airway notes", get("airwayNotes")) +
-    "</div>" +
+    "</div></section>" +
 
-    '<h3 class="block">Medications &amp; allergies</h3><div class="panel">' + medHTML +
+    '<section class="sec"><h3 class="block">Medications &amp; allergies</h3><div class="panel">' + medHTML +
       row("Allergy status", get("allergyStatus")) +
       row("Allergy details", get("allergies")) +
       row("CNS depressant", get("cnsDepressant") === "Yes"
@@ -2046,29 +2157,29 @@ function summaryView() {
       row("Gag reflex severity", get("gag")) + row("Triggered by", get("gagTrigger")) +
       row("Recreational drugs", get("drugs")) + row("Frequency", get("drugFreq")) + row("Last used", get("drugLast")) +
       row("Alcohol (units/week)", get("alcohol")) + row("Smoking", get("smoking")) +
-    "</div>" +
+    "</div></section>" +
 
-    '<h3 class="block">Anxiety &amp; sedation need</h3><div class="panel">' +
+    '<section class="sec"><h3 class="block">Anxiety &amp; sedation need</h3><div class="panel">' +
       row("MDAS total", mt.complete ? mt.sum + " / 25" + (mt.sum >= 19 ? " · severe dental phobia" : "") : "") +
       row("IOSN Part 1 · Anxiety", iosnParts().p1) +
       row("IOSN Part 2 · Medical factors", iosnParts().p2) +
       row("IOSN Part 3 · Treatment complexity", iosnParts().p3) +
       row("IOSN total", it != null ? it + " / 12 · " + band.label + " need" : "") +
-    "</div>" +
+    "</div></section>" +
 
-    '<h3 class="block">Justification</h3><div class="panel">' +
+    '<section class="sec"><h3 class="block">Justification</h3><div class="panel">' +
       row("Primary indication", get("indications")) + row("Previous sedation", get("prevSedation")) +
       row("Outcome", get("prevOutcome")) +
       row("Alternatives considered, and why sedation", get("whySedation")) +
-    "</div>" +
+    "</div></section>" +
 
-    '<h3 class="block">Plan</h3><div class="panel">' +
+    '<section class="sec"><h3 class="block">Plan</h3><div class="panel">' +
       row("Clinical summary", get("clinicalSummary")) + row("Sedation technique", get("technique")) +
       row("Fit for sedation", get("fit")) + row("Reason", get("unfitReason")) +
       row("Clinician", get("clinician")) + row("Date", get("signDate")) +
-    "</div>" +
+    "</div></section>" +
 
-    '<h3 class="block">Escort, fasting &amp; discharge</h3><div class="panel">' +
+    '<section class="sec"><h3 class="block">Escort, fasting &amp; discharge</h3><div class="panel">' +
       row("Escort", get("escortName")) +
       row("Escort contact", get("escortPhone")) +
       row("Confirmed", get("arrangements")) +
@@ -2076,7 +2187,7 @@ function summaryView() {
         return (get("arrangements") || []).indexOf(a) < 0;
       })) +
       row("Fasting instruction", get("fastingInstruction")) +
-    "</div>" +
+    "</div></section>" +
 
     '<h3 class="block">Declarations</h3>' +
     '<div class="panel" style="padding:18px;">' +
