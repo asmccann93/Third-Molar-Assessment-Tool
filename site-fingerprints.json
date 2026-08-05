@@ -1,0 +1,14 @@
+{
+  ".": {
+    "hash": "c4c5de99a7cd73bf",
+    "cache": "tma-v1-4-22"
+  },
+  "sedation": {
+    "hash": "26fe8c3a3d15e2df",
+    "cache": "sedation-v3"
+  },
+  "local-anaesthetic": {
+    "hash": "9fd1a884cc7aed79",
+    "cache": "la-v0-14-1"
+  }
+}
