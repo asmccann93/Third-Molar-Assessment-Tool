@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="description" content="Guided ASA physical status assessment for adult dental conscious sedation, suggesting a grade from recorded findings and mapping it to the appropriate sedation setting." />
+<link rel="canonical" href="https://oralsurgeryassess.com/asa-assessment/" />
+<meta name="author" content="Aiden McCann" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Oral Surgery Assess" />
+<meta property="og:title" content="ASA Assessment" />
+<meta property="og:description" content="Guided ASA physical status assessment for adult dental conscious sedation." />
+<meta property="og:url" content="https://oralsurgeryassess.com/asa-assessment/" />
+<meta property="og:image" content="https://oralsurgeryassess.com/icon-512.png" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="ASA Assessment" />
+<meta name="twitter:description" content="Guided ASA physical status assessment for adult dental conscious sedation." />
+<meta name="theme-color" content="#FFFFFF" />
+<meta name="color-scheme" content="light only" />
+<title>ASA Assessment</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="ASA" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --navy:#0F2F63; --ink:#0F2F63; --accent:#1E4D9B; --soft:#3F5A8A; --muted:#4A6FA5;
+    --line:#D6DCE8; --tint:#E8EEF9; --tint-soft:#F2F7FE; --chip-bg:#E7EEF9; --chip-line:#C9D9F0;
+    --bg:#FFFFFF; --surface:#FFFFFF; --clay:#A11D2E; --amber:#C43A32; --alert-bg:#FDF2F2;
+    --disabled:#9FB0CC;
+    --sans:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    --serif:"Source Serif 4","Iowan Old Style",Georgia,ui-serif,serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);}
+  body{font-family:var(--sans);font-size:16px;line-height:1.55;-webkit-text-size-adjust:100%;}
+
+  /* switcher */
+  .ostb{display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:8px 16px;background:#F7F9FC;border-bottom:1px solid #E2E8F2;}
+  .ostb-label{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:10px;}
+  .ostb a{font-size:13px;font-weight:600;color:var(--soft);text-decoration:none;padding:6px 12px;border-radius:7px;border:1px solid transparent;line-height:1.2;}
+  .ostb a:hover{color:var(--navy);background:#EDF3FC;}
+  .ostb a[aria-current="page"]{color:var(--navy);background:var(--tint);border-color:var(--chip-line);}
+  .ostb a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  @media print{.ostb{display:none !important;}}
+  @media (max-width:480px){.ostb-label{width:100%;margin-bottom:2px;}}
+
+  .shell{max-width:720px;margin:0 auto;padding:26px 18px 64px;}
+  header.app{margin-bottom:26px;}
+  .eyebrow-top{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+  h1.app{font-family:var(--serif);font-size:26px;margin:6px 0 0;color:var(--ink);}
+  .byline{font-size:13px;color:var(--soft);margin-top:4px;}
+
+  h2.q{font-family:var(--serif);font-size:22px;margin:0 0 6px;color:var(--ink);}
+  .helper{font-size:14px;color:var(--soft);margin:0 0 16px;line-height:1.6;}
+  h3.block{font-family:var(--serif);font-size:18px;margin:28px 0 4px;color:var(--ink);}
+  h3.block:first-of-type{margin-top:8px;}
+
+  .field{margin:16px 0 0;}
+  .label{font-size:14.5px;font-weight:600;color:var(--ink);margin-bottom:7px;display:block;}
+  .opts{display:flex;flex-direction:column;gap:8px;}
+  .opt{display:flex;align-items:center;gap:10px;text-align:left;font-family:var(--sans);font-size:14.5px;
+    padding:11px 14px;border-radius:8px;cursor:pointer;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);width:100%;}
+  .opt:hover{background:var(--tint-soft);}
+  .opt[aria-pressed="true"]{border-color:var(--accent);background:var(--tint);}
+  .opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .dot{width:15px;height:15px;border-radius:50%;border:2px solid var(--disabled);flex-shrink:0;}
+  .opt[aria-pressed="true"] .dot{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px #fff;}
+
+  .num{display:flex;gap:10px;flex-wrap:wrap;}
+  .num input{font-family:var(--sans);font-size:16px;padding:11px 12px;border:1.5px solid var(--line);border-radius:8px;width:130px;color:var(--ink);background:var(--surface);}
+  .num input:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  .bmiout{font-family:var(--mono);font-size:14px;color:var(--soft);margin-top:8px;}
+
+  .nav{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px;}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-family:var(--sans);font-size:15px;font-weight:600;
+    padding:12px 20px;border-radius:8px;cursor:pointer;border:1.5px solid var(--line);background:var(--surface);color:var(--soft);}
+  .btn:hover{background:var(--tint-soft);}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .btn.primary:hover{background:#17407F;}
+  .btn[disabled]{opacity:.5;cursor:default;}
+
+  .rail{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:22px;}
+  .rail span{font-family:var(--mono);font-size:11px;padding:4px 9px;border-radius:20px;background:#F2F5FA;color:var(--muted);border:1px solid transparent;}
+  .rail span.on{background:var(--tint);color:var(--navy);border-color:var(--chip-line);}
+  .rail span.done{background:#DCE6F5;color:var(--soft);}
+
+  .card{border:1.5px solid var(--chip-line);background:var(--tint-soft);border-radius:10px;padding:18px;margin:18px 0;}
+  .card.alert{border-color:#E9C2C2;background:var(--alert-bg);}
+  .grade{font-family:var(--serif);font-size:34px;color:var(--navy);margin:0;}
+  .gradesub{font-size:14px;color:var(--soft);margin-top:2px;}
+  .because{margin:14px 0 0;padding:0;list-style:none;}
+  .because li{font-size:14.5px;color:var(--ink);padding:5px 0 5px 16px;position:relative;line-height:1.55;}
+  .because li:before{content:"";position:absolute;left:0;top:13px;width:6px;height:6px;border-radius:50%;background:var(--accent);}
+  .defn{font-size:14.5px;line-height:1.6;color:var(--ink);margin:10px 0 0;}
+  .setting{font-size:15px;line-height:1.6;color:var(--ink);margin:0;}
+  .flaglist{margin:10px 0 0;padding-left:18px;}
+  .flaglist li{font-size:14.5px;line-height:1.6;margin-bottom:5px;}
+  .attrib{font-size:12.5px;color:var(--soft);line-height:1.6;margin-top:26px;padding-top:16px;border-top:1px solid var(--line);}
+  .warnrow{font-size:14px;color:var(--clay);font-weight:600;margin-top:10px;}
+  .note{font-size:13.5px;color:var(--soft);line-height:1.6;margin-top:10px;}
+  h2.res{font-family:var(--serif);font-size:26px;margin:6px 0 2px;color:var(--ink);}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);}
+  #root h2[tabindex="-1"]:focus{outline:none;}
+</style>
+</head>
+<body>
+<nav class="ostb" aria-label="Assessment tools">
+  <span class="ostb-label">Oral Surgery Tools</span>
+  <a href="/">Third Molar</a>
+  <a href="/sedation/">Sedation</a>
+  <a href="/local-anaesthetic/">Local Anaesthetic</a>
+  <a href="/asa-assessment/" aria-current="page">ASA Assessment</a>
+</nav>
+<div id="root"></div>
+<script>
+/* ============================================================
+   ASA Assessment — oralsurgeryassess.com/asa-assessment/
+   Developed by Aiden McCann.
+
+   A guided ASA physical status assessment for adult (16+) dental
+   conscious sedation. The tool SUGGESTS a grade from the findings
+   recorded and shows its reasoning; the clinician confirms or
+   overrides, and the confirmed grade is what drives the output.
+
+   Deliberately holds no patient identifiers, writes nothing to
+   storage, and produces no export. It is a chairside check.
+   ============================================================ */
+var VERSION = "0.1.0";
+
+/* ---------- ASA classes.
+   Definitions are those of the American Society of Anesthesiologists,
+   last amended 13 December 2020, reproduced for clinical reference. ---------- */
+var ASA_CLASSES = {
+  1: { label: "ASA I",   defn: "A normal healthy patient." },
+  2: { label: "ASA II",  defn: "A patient with mild systemic disease, without substantive functional limitations." },
+  3: { label: "ASA III", defn: "A patient with severe systemic disease, with substantive functional limitations; one or more moderate to severe diseases." },
+  4: { label: "ASA IV",  defn: "A patient with severe systemic disease that is a constant threat to life." }
+};
+
+/* ---------- Grade to sedation setting (IACSD 2020; SDCEP 3rd edition) ---------- */
+var SETTING = {
+  1: { tone: "ok", text: "Standard technique conscious sedation by an operator-sedationist in primary care is appropriate for adults over 16, provided the operator and the second appropriate person hold recognised training and adequate experience." },
+  2: { tone: "ok", text: "Standard technique conscious sedation by an operator-sedationist in primary care is appropriate for adults over 16, provided the operator and the second appropriate person hold recognised training and adequate experience." },
+  3: { tone: "warn", text: "Outside the standard operator-sedationist model. A dedicated sedationist is required, and the patient should be assessed for treatment in a specialist or secondary care setting. Consider capnography." },
+  4: { tone: "alert", text: "Not appropriate for conscious sedation in primary care. Requires a hospital setting with anaesthetic input." }
+};
+
+/* ---------- Question set.
+   `w` is the ASA class a given answer argues for. Absent `w` means the
+   answer carries no weight. `flag` marks sedation-specific findings,
+   which are reported separately and never alter the grade. ---------- */
+var SECTIONS = [
+  { id: "fn", title: "Functional capacity", chip: "Function",
+    helper: "The boundary between ASA II and III is substantive functional limitation rather than the diagnosis itself, so this is asked directly.",
+    qs: [
+      { id: "stairs", label: "Can the patient climb a flight of stairs, or walk on the flat, without stopping for breath or chest pain?",
+        opts: [
+          { v: "easy", t: "Yes, without difficulty" },
+          { v: "some", t: "Yes, but with some limitation", w: 2, why: "some functional limitation" },
+          { v: "no",   t: "No — limited by breathlessness or chest pain", w: 3, why: "substantive functional limitation" },
+          { v: "house",t: "Housebound, or needs help with self-care", w: 4, why: "housebound or dependent for self-care" }
+        ] }
+    ] },
+
+  { id: "cvs", title: "Cardiovascular", chip: "CVS", qs: [
+      { id: "htn", label: "Hypertension", opts: [
+          { v: "none", t: "None" },
+          { v: "ctrl", t: "Diagnosed, well controlled", w: 2, why: "well-controlled hypertension" },
+          { v: "poor", t: "Poorly controlled or untreated", w: 3, why: "poorly controlled hypertension" } ] },
+      { id: "angina", label: "Angina", opts: [
+          { v: "none", t: "None" },
+          { v: "stable", t: "Stable and predictable", w: 3, why: "stable angina" },
+          { v: "unstable", t: "Unstable, or occurring at rest", w: 4, why: "unstable angina or ongoing ischaemia" } ] },
+      { id: "mi", label: "Myocardial infarction", opts: [
+          { v: "none", t: "None" },
+          { v: "old",  t: "More than 3 months ago", w: 3, why: "myocardial infarction more than 3 months ago" },
+          { v: "recent", t: "Within the last 3 months", w: 4, why: "myocardial infarction within 3 months" } ] },
+      { id: "cva", label: "Stroke or TIA", opts: [
+          { v: "none", t: "None" },
+          { v: "old",  t: "More than 3 months ago", w: 3, why: "stroke or TIA more than 3 months ago" },
+          { v: "recent", t: "Within the last 3 months", w: 4, why: "stroke or TIA within 3 months" } ] },
+      { id: "stent", label: "Coronary stents or bypass surgery", opts: [
+          { v: "none", t: "None" },
+          { v: "old",  t: "More than 3 months ago", w: 3, why: "coronary stents or bypass more than 3 months ago" },
+          { v: "recent", t: "Within the last 3 months", w: 4, why: "coronary stents or bypass within 3 months" } ] },
+      { id: "hf", label: "Heart failure", opts: [
+          { v: "none", t: "None" },
+          { v: "mild", t: "Mild, no limitation of activity", w: 2, why: "mild heart failure" },
+          { v: "mod",  t: "Moderate to severe", w: 3, why: "heart failure with functional limitation" },
+          { v: "sev",  t: "Severe — breathless at rest", w: 4, why: "severe heart failure" } ] },
+      { id: "valve", label: "Valve disease", opts: [
+          { v: "none", t: "None" },
+          { v: "mild", t: "Mild", w: 2, why: "mild valve disease" },
+          { v: "sev",  t: "Severe or symptomatic", w: 4, why: "severe or symptomatic valve disease" } ] },
+      { id: "pace", label: "Pacemaker or implantable defibrillator", opts: [
+          { v: "no",  t: "No" },
+          { v: "yes", t: "Yes", w: 3, why: "implanted pacemaker or defibrillator", soften: true } ] },
+      { id: "af", label: "Arrhythmia", opts: [
+          { v: "none", t: "None" },
+          { v: "ctrl", t: "Controlled atrial fibrillation", w: 2, why: "controlled atrial fibrillation" },
+          { v: "poor", t: "Uncontrolled", w: 3, why: "uncontrolled arrhythmia" } ] }
+    ] },
+
+  { id: "resp", title: "Respiratory", chip: "Resp", qs: [
+      { id: "asthma", label: "Asthma", opts: [
+          { v: "none", t: "None" },
+          { v: "mild", t: "Mild, well controlled", w: 2, why: "mild well-controlled asthma" },
+          { v: "poor", t: "Poorly controlled, or admitted to hospital in the last year", w: 3, why: "poorly controlled asthma" } ] },
+      { id: "copd", label: "COPD", opts: [
+          { v: "none", t: "None" },
+          { v: "mild", t: "Mild", w: 2, why: "mild COPD" },
+          { v: "mod",  t: "Moderate to severe, or on home oxygen", w: 3, why: "moderate to severe COPD" } ] },
+      { id: "smoke", label: "Current smoker", opts: [
+          { v: "no",  t: "No" },
+          { v: "yes", t: "Yes", w: 2, why: "current smoker" } ] },
+      { id: "osa", label: "Obstructive sleep apnoea", opts: [
+          { v: "no",   t: "No" },
+          { v: "susp", t: "Suspected, not yet investigated", flag: "Suspected obstructive sleep apnoea — consider investigation before sedation, and the increased risk of airway obstruction and oxygen desaturation." },
+          { v: "nocpap", t: "Diagnosed, not using CPAP", flag: "Diagnosed obstructive sleep apnoea, not using CPAP — heightened risk of airway obstruction and desaturation. Consider whether ASA III is more appropriate, and whether a specialist setting is required." },
+          { v: "cpap", t: "Diagnosed, using CPAP", flag: "Diagnosed obstructive sleep apnoea, using CPAP — heightened risk of airway obstruction and desaturation. Consider whether ASA III is more appropriate." } ] }
+    ] },
+
+  { id: "met", title: "Metabolic and endocrine", chip: "Metabolic", qs: [
+      { id: "dm", label: "Diabetes", opts: [
+          { v: "none", t: "None" },
+          { v: "ctrl", t: "Well controlled, no complications", w: 2, why: "well-controlled diabetes" },
+          { v: "poor", t: "Poorly controlled, or with complications", w: 3, why: "poorly controlled diabetes or diabetes with complications" } ] },
+      { id: "bmi", label: "Height and weight", type: "bmi" },
+      { id: "preg", label: "Pregnancy", opts: [
+          { v: "na",  t: "Not applicable" },
+          { v: "no",  t: "Not pregnant" },
+          { v: "yes", t: "Pregnant", w: 2, why: "pregnancy" } ] }
+    ] },
+
+  { id: "ren", title: "Renal and hepatic", chip: "Renal", qs: [
+      { id: "ckd", label: "Kidney disease", opts: [
+          { v: "none", t: "None" },
+          { v: "mod",  t: "Mild to moderate chronic kidney disease", w: 2, why: "mild to moderate chronic kidney disease" },
+          { v: "dial", t: "End-stage, on regular dialysis", w: 3, why: "end-stage renal disease on regular dialysis" },
+          { v: "nodial", t: "End-stage, not on regular dialysis", w: 4, why: "end-stage renal disease not on regular dialysis" } ] },
+      { id: "liver", label: "Liver disease", opts: [
+          { v: "none", t: "None" },
+          { v: "mild", t: "Mild, for example fatty liver", w: 2, why: "mild liver disease" },
+          { v: "sev",  t: "Active hepatitis or cirrhosis", w: 3, why: "active hepatitis or cirrhosis" } ] }
+    ] },
+
+  { id: "other", title: "Neurological and other", chip: "Other", qs: [
+      { id: "epi", label: "Epilepsy", opts: [
+          { v: "none", t: "None" },
+          { v: "ctrl", t: "Well controlled, no recent seizures", w: 2, why: "well-controlled epilepsy" },
+          { v: "poor", t: "Seizure within the last 12 months", w: 3, why: "seizure within the last 12 months" } ] },
+      { id: "alc", label: "Alcohol", opts: [
+          { v: "within", t: "Within UK guidelines" },
+          { v: "above",  t: "Above UK guidelines", w: 2, why: "alcohol intake above guidelines" },
+          { v: "dep",    t: "Dependence", w: 3, why: "alcohol dependence" } ] }
+    ] },
+
+  { id: "sed", title: "Sedation-specific factors", chip: "Sedation",
+    helper: "These do not alter the ASA grade. They are reported separately as factors affecting suitability, technique or setting.",
+    qs: [
+      { id: "mall", label: "Mallampati score", opts: [
+          { v: "12", t: "Class I or II" },
+          { v: "34", t: "Class III or IV", flag: "Mallampati class III or IV — anticipate a more difficult airway." },
+          { v: "unk", t: "Not assessed", unknown: true } ] },
+      { id: "mouth", label: "Mouth opening and neck movement", opts: [
+          { v: "ok", t: "Both unrestricted" },
+          { v: "lim", t: "Either restricted", flag: "Restricted mouth opening or neck movement — anticipate difficulty with airway management and access." },
+          { v: "unk", t: "Not assessed", unknown: true } ] },
+      { id: "seal", label: "Beard or edentulous (mask seal)", opts: [
+          { v: "no",  t: "Neither" },
+          { v: "yes", t: "Beard, edentulous, or both", flag: "Beard or edentulous — a mask seal may be harder to achieve if ventilation is needed." } ] },
+      { id: "prev", label: "Previous sedation or general anaesthetic", opts: [
+          { v: "none", t: "None, or uneventful" },
+          { v: "diff", t: "Difficult", flag: "Previous sedation or anaesthetic reported as difficult — obtain the earlier records before proceeding." },
+          { v: "adv",  t: "Adverse reaction", flag: "Previous adverse reaction to sedation or anaesthesia — obtain the earlier records and consider specialist assessment before proceeding." } ] },
+      { id: "anticoag", label: "Anticoagulant or antiplatelet therapy", opts: [
+          { v: "no",  t: "No" },
+          { v: "yes", t: "Yes", flag: "On anticoagulant or antiplatelet therapy — assess bleeding risk for the planned procedure (see SDCEP guidance)." } ] },
+      { id: "drugs", label: "Regular opioids, benzodiazepines, or recreational drug use", opts: [
+          { v: "no",  t: "No" },
+          { v: "yes", t: "Yes", flag: "Regular opioid, benzodiazepine or recreational drug use — anticipate altered sedative requirement and interaction." } ] },
+      { id: "allergy", label: "Known benzodiazepine allergy or paradoxical reaction", opts: [
+          { v: "no",  t: "No" },
+          { v: "yes", t: "Yes", flag: "Known benzodiazepine allergy or paradoxical reaction — midazolam sedation may be contraindicated. Seek specialist advice." } ] },
+      { id: "escort", label: "Escort available, and able to stay with the patient for the rest of the day", opts: [
+          { v: "yes", t: "Yes" },
+          { v: "no",  t: "No", flag: "No suitable escort — conscious sedation should not proceed without an appropriate adult escort able to remain with the patient." },
+          { v: "unk", t: "Not yet known", unknown: true } ] }
+    ] }
+];
+
+/* ---------- state ---------- */
+var answers = {};   // qid -> value
+var bmi = { h: "", w: "" };
+var step = 0;       // 0 .. SECTIONS.length-1, then result
+var showResult = false;
+var confirmedGrade = null;   // clinician's final choice
+var suggested = null;
+
+function esc(s){ return String(s).replace(/[&<>"']/g, function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+function bmiValue(){
+  var h = parseFloat(bmi.h), w = parseFloat(bmi.w);
+  if (!h || !w || h <= 0 || w <= 0) return null;
+  var m = h > 3 ? h / 100 : h;           // accept cm or m
+  var v = w / (m * m);
+  if (!isFinite(v) || v < 8 || v > 100) return null;
+  return v;
+}
+
+/* ---------- suggestion ---------- */
+function computeSuggestion(){
+  var best = 1, why = [], flags = [], unknowns = [], soften = false;
+
+  SECTIONS.forEach(function(sec){
+    sec.qs.forEach(function(q){
+      if (q.type === "bmi") return;
+      var v = answers[q.id];
+      if (v === undefined) return;
+      var opt = null;
+      q.opts.forEach(function(o){ if (o.v === v) opt = o; });
+      if (!opt) return;
+      if (opt.unknown) { unknowns.push(q.label); return; }
+      if (opt.flag) flags.push(opt.flag);
+      if (opt.w) {
+        if (opt.w > best) best = opt.w;
+        why.push({ w: opt.w, text: opt.why, soften: !!opt.soften });
+        if (opt.soften) soften = true;
+      }
+    });
+  });
+
+  var b = bmiValue();
+  if (b !== null) {
+    if (b >= 40) { if (best < 3) best = 3; why.push({ w: 3, text: "BMI " + b.toFixed(1) + " (40 or over)" }); }
+    else if (b >= 30) { if (best < 2) best = 2; why.push({ w: 2, text: "BMI " + b.toFixed(1) + " (30 to 39.9)" }); }
+  }
+
+  // only the findings that argue for the suggested class explain it
+  var driving = why.filter(function(x){ return x.w === best; });
+  var softenApplies = best === 3 && driving.length === 1 && driving[0].soften;
+
+  return { grade: best, driving: driving, flags: flags, unknowns: unknowns, softenApplies: softenApplies };
+}
+
+/* ---------- rendering ---------- */
+function h(html){ document.getElementById("root").innerHTML = html; }
+
+function headerHTML(){
+  return '<header class="app">' +
+    '<div class="eyebrow-top">Oral Surgery · Chairside support tool</div>' +
+    '<h1 class="app">ASA Assessment</h1>' +
+    '<div class="byline">Developed by Aiden McCann · v' + VERSION + '</div>' +
+    '</header>';
+}
+
+function railHTML(){
+  var out = '<div class="rail">';
+  SECTIONS.forEach(function(s, i){
+    var cls = i === step && !showResult ? "on" : (i < step || showResult ? "done" : "");
+    out += '<span class="' + cls + '">' + esc(s.chip) + '</span>';
+  });
+  out += '<span class="' + (showResult ? "on" : "") + '">Result</span>';
+  return out + '</div>';
+}
+
+function sectionHTML(){
+  var sec = SECTIONS[step];
+  var out = headerHTML() + railHTML();
+  out += '<h2 class="q" tabindex="-1">' + esc(sec.title) + '</h2>';
+  if (sec.helper) out += '<p class="helper">' + esc(sec.helper) + '</p>';
+
+  sec.qs.forEach(function(q){
+    out += '<div class="field">';
+    out += '<span class="label">' + esc(q.label) + '</span>';
+    if (q.type === "bmi") {
+      out += '<div class="num">' +
+        '<input id="bmi-h" type="number" inputmode="decimal" placeholder="Height (cm)" value="' + esc(bmi.h) + '" aria-label="Height in centimetres" />' +
+        '<input id="bmi-w" type="number" inputmode="decimal" placeholder="Weight (kg)" value="' + esc(bmi.w) + '" aria-label="Weight in kilograms" />' +
+        '</div>';
+      var b = bmiValue();
+      out += '<div class="bmiout">' + (b === null ? "BMI —" : "BMI " + b.toFixed(1)) + '</div>';
+    } else {
+      out += '<div class="opts">';
+      q.opts.forEach(function(o){
+        var on = answers[q.id] === o.v;
+        out += '<button type="button" class="opt" aria-pressed="' + (on ? "true" : "false") +
+               '" data-q="' + esc(q.id) + '" data-v="' + esc(o.v) + '">' +
+               '<span class="dot"></span>' + esc(o.t) + '</button>';
+      });
+      out += '</div>';
+    }
+    out += '</div>';
+  });
+
+  out += '<div class="nav">';
+  if (step > 0) out += '<button type="button" class="btn" data-act="back">Back</button>';
+  out += '<button type="button" class="btn primary" data-act="next">' +
+         (step === SECTIONS.length - 1 ? "See suggested grade" : "Continue") + '</button>';
+  out += '</div>';
+  return out;
+}
+
+function resultHTML(){
+  var s = suggested;
+  var g = confirmedGrade === null ? s.grade : confirmedGrade;
+  var overridden = confirmedGrade !== null && confirmedGrade !== s.grade;
+  var set = SETTING[g];
+
+  var out = headerHTML() + railHTML();
+  out += '<span class="eyebrow">Result</span>';
+  out += '<h2 class="res" tabindex="-1">Physical status and sedation setting</h2>';
+
+  /* suggestion */
+  out += '<div class="card">';
+  out += '<p class="grade">Suggested: ' + esc(ASA_CLASSES[s.grade].label) + '</p>';
+  out += '<div class="gradesub">' + esc(ASA_CLASSES[s.grade].defn) + '</div>';
+  if (s.driving.length) {
+    out += '<ul class="because">';
+    s.driving.forEach(function(d){ out += '<li>' + esc(d.text) + '</li>'; });
+    out += '</ul>';
+  } else {
+    out += '<p class="defn">No finding was recorded that argues for a higher class.</p>';
+  }
+  if (s.softenApplies) {
+    out += '<p class="note">The ASA examples place an implanted pacemaker in class III. A well-functioning device in an otherwise fit patient may reasonably be graded II. That is a clinical judgement for the operator.</p>';
+  }
+  out += '</div>';
+
+  /* confirm or override */
+  out += '<h3 class="block">Confirm the grade</h3>';
+  out += '<p class="helper">ASA physical status is a clinical judgement. Confirm the suggestion or select a different class; the grade you choose is the one used below.</p>';
+  out += '<div class="opts">';
+  [1,2,3,4].forEach(function(n){
+    var on = g === n;
+    out += '<button type="button" class="opt" aria-pressed="' + (on ? "true" : "false") + '" data-grade="' + n + '">' +
+           '<span class="dot"></span>' + esc(ASA_CLASSES[n].label) + ' — ' + esc(ASA_CLASSES[n].defn) + '</button>';
+  });
+  out += '</div>';
+  if (overridden) {
+    out += '<p class="warnrow">Recorded as ' + esc(ASA_CLASSES[g].label) +
+           ', overriding the suggested ' + esc(ASA_CLASSES[s.grade].label) + '.</p>';
+  }
+
+  /* setting */
+  out += '<h3 class="block">Sedation setting</h3>';
+  out += '<div class="card' + (set.tone === "ok" ? "" : " alert") + '">';
+  out += '<p class="setting"><strong>' + esc(ASA_CLASSES[g].label) + '</strong> — ' + esc(set.text) + '</p>';
+  out += '</div>';
+
+  /* flags */
+  out += '<h3 class="block">Sedation-specific factors</h3>';
+  if (s.flags.length) {
+    out += '<ul class="flaglist">';
+    s.flags.forEach(function(f){ out += '<li>' + esc(f) + '</li>'; });
+    out += '</ul>';
+  } else {
+    out += '<p class="helper">None recorded.</p>';
+  }
+
+  /* unknowns */
+  if (s.unknowns.length) {
+    out += '<h3 class="block">Not assessed</h3>';
+    out += '<ul class="flaglist">';
+    s.unknowns.forEach(function(u){ out += '<li>' + esc(u) + '</li>'; });
+    out += '</ul>';
+    out += '<p class="helper">Complete these before relying on the assessment.</p>';
+  }
+
+  out += '<div class="nav">';
+  out += '<button type="button" class="btn" data-act="back">Back to questions</button>';
+  out += '<button type="button" class="btn" data-act="restart">Start again</button>';
+  out += '</div>';
+
+  out += '<p class="attrib">The ASA Physical Status Classification System, including the class definitions and examples used here, is the work of the American Society of Anesthesiologists, last amended 13 December 2020, and is reproduced for clinical reference. ASA physical status is a clinical judgement made by the treating clinician; it is not derived from a score or formula.<br /><br />' +
+    'Sedation setting guidance follows the Intercollegiate Advisory Committee for Sedation in Dentistry, <em>Standards for Conscious Sedation in the Provision of Dental Care</em> (V1.1, 2020), and SDCEP, <em>Conscious Sedation in Dentistry</em>, 3rd edition (2017). This tool supports clinical assessment and does not replace it. It records no patient identifiers and stores nothing.</p>';
+  return out;
+}
+
+function render(){
+  h(showResult ? resultHTML() : sectionHTML());
+  var head = document.querySelector('#root h2[tabindex="-1"]');
+  if (head) head.focus({ preventScroll: true });
+  window.scrollTo(0, 0);
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click", function(e){
+  var t = e.target.closest ? e.target.closest("button") : null;
+  if (!t) return;
+
+  if (t.dataset.q) {
+    answers[t.dataset.q] = t.dataset.v;
+    if (showResult) { suggested = computeSuggestion(); }
+    render();
+    return;
+  }
+  if (t.dataset.grade) {
+    confirmedGrade = parseInt(t.dataset.grade, 10);
+    render();
+    return;
+  }
+  var act = t.dataset.act;
+  if (act === "next") {
+    if (step === SECTIONS.length - 1) {
+      suggested = computeSuggestion();
+      confirmedGrade = null;
+      showResult = true;
+    } else { step++; }
+    render();
+  } else if (act === "back") {
+    if (showResult) { showResult = false; step = SECTIONS.length - 1; }
+    else if (step > 0) { step--; }
+    render();
+  } else if (act === "restart") {
+    answers = {}; bmi = { h: "", w: "" }; step = 0;
+    showResult = false; confirmedGrade = null; suggested = null;
+    render();
+  }
+});
+
+document.addEventListener("input", function(e){
+  if (e.target.id === "bmi-h" || e.target.id === "bmi-w") {
+    if (e.target.id === "bmi-h") bmi.h = e.target.value; else bmi.w = e.target.value;
+    var out = document.querySelector(".bmiout");
+    var b = bmiValue();
+    if (out) out.textContent = b === null ? "BMI —" : "BMI " + b.toFixed(1);
+  }
+});
+
+render();
+
+if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
+  window.addEventListener("load", function(){
+    navigator.serviceWorker.register("sw.js").catch(function(){});
+  });
+}
+</script>
+</body>
+</html>
