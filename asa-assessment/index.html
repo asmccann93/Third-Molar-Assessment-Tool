@@ -50,63 +50,89 @@
   @media print{.ostb{display:none !important;}}
   @media (max-width:480px){.ostb-label{width:100%;margin-bottom:2px;}}
 
-  .shell{max-width:720px;margin:0 auto;padding:26px 18px 64px;}
-  header.app{margin-bottom:26px;}
+  .shell{max-width:700px;margin:0 auto;padding:30px 20px 72px;}
+  header.app{margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--line);}
   .eyebrow-top{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
-  h1.app{font-family:var(--serif);font-size:26px;margin:6px 0 0;color:var(--ink);}
-  .byline{font-size:13px;color:var(--soft);margin-top:4px;}
+  h1.app{font-family:var(--serif);font-size:28px;margin:6px 0 0;color:var(--ink);line-height:1.2;}
+  .byline{font-size:13px;color:var(--soft);margin-top:5px;}
 
-  h2.q{font-family:var(--serif);font-size:22px;margin:0 0 6px;color:var(--ink);}
-  .helper{font-size:14px;color:var(--soft);margin:0 0 16px;line-height:1.6;}
-  h3.block{font-family:var(--serif);font-size:18px;margin:28px 0 4px;color:var(--ink);}
-  h3.block:first-of-type{margin-top:8px;}
+  /* cover */
+  .lede{font-size:16px;line-height:1.7;color:var(--soft);margin:0 0 20px;}
+  .lede strong{color:var(--ink);font-weight:600;}
+  .infobox{background:var(--tint-soft);border:1px solid var(--chip-line);border-radius:10px;padding:16px 18px;margin:0 0 22px;}
+  .infobox p{margin:0;font-size:14px;line-height:1.65;color:var(--soft);}
+  .disclaim{font-size:12.5px;line-height:1.65;color:var(--soft);margin-top:28px;padding-top:18px;border-top:1px solid var(--line);}
 
-  .field{margin:16px 0 0;}
-  .label{font-size:14.5px;font-weight:600;color:var(--ink);margin-bottom:7px;display:block;}
+  h2.q{font-family:var(--serif);font-size:23px;margin:0 0 6px;color:var(--ink);line-height:1.25;}
+  .helper{font-size:14px;color:var(--soft);margin:0 0 20px;line-height:1.65;}
+  h3.block{font-family:var(--serif);font-size:19px;margin:32px 0 6px;color:var(--ink);}
+
+  .field{margin:24px 0 0;padding-top:20px;border-top:1px solid #EEF2F8;}
+  .field:first-of-type{border-top:none;padding-top:0;margin-top:20px;}
+  .label{font-size:15px;font-weight:600;color:var(--ink);margin-bottom:10px;display:block;line-height:1.45;}
   .opts{display:flex;flex-direction:column;gap:8px;}
-  .opt{display:flex;align-items:center;gap:10px;text-align:left;font-family:var(--sans);font-size:14.5px;
-    padding:11px 14px;border-radius:8px;cursor:pointer;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);width:100%;}
-  .opt:hover{background:var(--tint-soft);}
-  .opt[aria-pressed="true"]{border-color:var(--accent);background:var(--tint);}
+  .opt{display:flex;align-items:center;gap:11px;text-align:left;font-family:var(--sans);font-size:15px;
+    padding:13px 15px;border-radius:9px;cursor:pointer;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);width:100%;line-height:1.4;}
+  .opt:hover{background:var(--tint-soft);border-color:var(--chip-line);}
+  .opt[aria-pressed="true"]{border-color:var(--accent);background:var(--tint);font-weight:600;}
   .opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
-  .dot{width:15px;height:15px;border-radius:50%;border:2px solid var(--disabled);flex-shrink:0;}
+  .dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--disabled);flex-shrink:0;}
   .opt[aria-pressed="true"] .dot{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px #fff;}
 
   .num{display:flex;gap:10px;flex-wrap:wrap;}
-  .num input{font-family:var(--sans);font-size:16px;padding:11px 12px;border:1.5px solid var(--line);border-radius:8px;width:130px;color:var(--ink);background:var(--surface);}
+  .num input{font-family:var(--sans);font-size:16px;padding:12px 13px;border:1.5px solid var(--line);border-radius:9px;width:150px;color:var(--ink);background:var(--surface);}
   .num input:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
-  .bmiout{font-family:var(--mono);font-size:14px;color:var(--soft);margin-top:8px;}
+  .bmiout{font-family:var(--mono);font-size:15px;color:var(--ink);margin-top:10px;font-weight:500;}
 
-  .nav{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px;}
+  .nav{display:flex;gap:10px;flex-wrap:wrap;margin-top:34px;padding-top:22px;border-top:1px solid var(--line);}
   .btn{display:inline-flex;align-items:center;gap:8px;font-family:var(--sans);font-size:15px;font-weight:600;
-    padding:12px 20px;border-radius:8px;cursor:pointer;border:1.5px solid var(--line);background:var(--surface);color:var(--soft);}
+    padding:13px 22px;border-radius:9px;cursor:pointer;border:1.5px solid var(--line);background:var(--surface);color:var(--soft);}
   .btn:hover{background:var(--tint-soft);}
   .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
   .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
   .btn.primary:hover{background:#17407F;}
-  .btn[disabled]{opacity:.5;cursor:default;}
 
-  .rail{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:22px;}
-  .rail span{font-family:var(--mono);font-size:11px;padding:4px 9px;border-radius:20px;background:#F2F5FA;color:var(--muted);border:1px solid transparent;}
-  .rail span.on{background:var(--tint);color:var(--navy);border-color:var(--chip-line);}
-  .rail span.done{background:#DCE6F5;color:var(--soft);}
+  .progress{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
+  .rail{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:26px;}
+  .rail span{font-family:var(--mono);font-size:10.5px;padding:5px 10px;border-radius:20px;background:#F2F5FA;color:var(--muted);border:1px solid transparent;}
+  .rail span.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .rail span.done{background:var(--tint);color:var(--soft);border-color:var(--chip-line);}
 
-  .card{border:1.5px solid var(--chip-line);background:var(--tint-soft);border-radius:10px;padding:18px;margin:18px 0;}
+  .card{border:1.5px solid var(--chip-line);background:var(--tint-soft);border-radius:11px;padding:20px;margin:20px 0;}
   .card.alert{border-color:#E9C2C2;background:var(--alert-bg);}
-  .grade{font-family:var(--serif);font-size:34px;color:var(--navy);margin:0;}
-  .gradesub{font-size:14px;color:var(--soft);margin-top:2px;}
-  .because{margin:14px 0 0;padding:0;list-style:none;}
-  .because li{font-size:14.5px;color:var(--ink);padding:5px 0 5px 16px;position:relative;line-height:1.55;}
-  .because li:before{content:"";position:absolute;left:0;top:13px;width:6px;height:6px;border-radius:50%;background:var(--accent);}
-  .defn{font-size:14.5px;line-height:1.6;color:var(--ink);margin:10px 0 0;}
-  .setting{font-size:15px;line-height:1.6;color:var(--ink);margin:0;}
-  .flaglist{margin:10px 0 0;padding-left:18px;}
-  .flaglist li{font-size:14.5px;line-height:1.6;margin-bottom:5px;}
-  .attrib{font-size:12.5px;color:var(--soft);line-height:1.6;margin-top:26px;padding-top:16px;border-top:1px solid var(--line);}
-  .warnrow{font-size:14px;color:var(--clay);font-weight:600;margin-top:10px;}
-  .note{font-size:13.5px;color:var(--soft);line-height:1.6;margin-top:10px;}
-  h2.res{font-family:var(--serif);font-size:26px;margin:6px 0 2px;color:var(--ink);}
+  .card.warn{border-color:#E8D5A8;background:#FDF9EF;}
+  .grade{font-family:var(--serif);font-size:36px;color:var(--navy);margin:0;line-height:1.1;}
+  .gradesub{font-size:14.5px;color:var(--soft);margin-top:6px;line-height:1.55;}
+  .because{margin:16px 0 0;padding:0;list-style:none;}
+  .because li{font-size:15px;color:var(--ink);padding:6px 0 6px 18px;position:relative;line-height:1.55;}
+  .because li:before{content:"";position:absolute;left:0;top:14px;width:6px;height:6px;border-radius:50%;background:var(--accent);}
+  .defn{font-size:14.5px;line-height:1.65;color:var(--ink);margin:12px 0 0;}
+  .setting{font-size:15.5px;line-height:1.65;color:var(--ink);margin:0;}
+  .flaglist{margin:12px 0 0;padding-left:20px;}
+  .flaglist li{font-size:14.5px;line-height:1.65;margin-bottom:8px;}
+  .attrib{font-size:12.5px;color:var(--soft);line-height:1.65;margin-top:30px;padding-top:18px;border-top:1px solid var(--line);}
+  .warnrow{font-size:14.5px;color:var(--clay);font-weight:600;margin-top:12px;}
+  .note{font-size:13.5px;color:var(--soft);line-height:1.65;margin-top:12px;padding-top:12px;border-top:1px solid var(--chip-line);}
+  h2.res{font-family:var(--serif);font-size:27px;margin:6px 0 4px;color:var(--ink);line-height:1.25;}
   .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);}
+
+  @media (max-width:520px){
+    .shell{padding:22px 16px 60px;}
+    h1.app{font-size:24px;} h2.q{font-size:20px;} .grade{font-size:30px;}
+    .btn{width:100%;justify-content:center;}
+    .num input{width:100%;}
+  }
+
+  /* printing: the result is the only thing worth putting on paper */
+  @media print{
+    .noprint{display:none !important;}
+    body{font-size:11pt;}
+    .shell{max-width:none;padding:0;}
+    .card{break-inside:avoid;border:1px solid #999;background:#fff !important;}
+    .because li, .flaglist li{break-inside:avoid;}
+    h3.block{break-after:avoid;}
+  }
+
   #root h2[tabindex="-1"]:focus{outline:none;}
 </style>
 </head>
@@ -157,9 +183,14 @@ var SETTING = {
    answer carries no weight. `flag` marks sedation-specific findings,
    which are reported separately and never alter the grade. ---------- */
 var SECTIONS = [
-  { id: "fn", title: "Functional capacity", chip: "Function",
+  { id: "fn", title: "Patient and functional capacity", chip: "Function",
     helper: "The boundary between ASA II and III is substantive functional limitation rather than the diagnosis itself, so this is asked directly.",
     qs: [
+      { id: "age16", label: "Is the patient aged 16 or over?",
+        opts: [
+          { v: "yes", t: "Yes" },
+          { v: "no",  t: "No \u2014 under 16", halt: true }
+        ] },
       { id: "stairs", label: "Can the patient climb a flight of stairs, or walk on the flat, without stopping for breath or chest pain?",
         opts: [
           { v: "easy", t: "Yes, without difficulty" },
@@ -300,9 +331,37 @@ var SECTIONS = [
 var answers = {};   // qid -> value
 var bmi = { h: "", w: "" };
 var step = 0;       // 0 .. SECTIONS.length-1, then result
+var started = false;        // cover page until the clinician begins
+var halted = false;         // patient under 16
 var showResult = false;
-var confirmedGrade = null;   // clinician's final choice
+var confirmedGrade = null;  // clinician's final choice
 var suggested = null;
+var firstRender = true;
+
+var TOTAL_QUESTIONS = SECTIONS.reduce(function(n, s){ return n + s.qs.length; }, 0);
+
+/* Which questions have no answer yet, by section. BMI counts as answered only
+   when both height and weight give a usable value. */
+function gaps(){
+  var out = [];
+  SECTIONS.forEach(function(sec){
+    var missing = [];
+    sec.qs.forEach(function(q){
+      if (q.type === "bmi") { if (bmiValue() === null) missing.push(q.label); return; }
+      if (answers[q.id] === undefined) missing.push(q.label);
+    });
+    if (missing.length) out.push({ section: sec.title, missing: missing });
+  });
+  return out;
+}
+function answeredCount(){
+  var n = 0;
+  SECTIONS.forEach(function(sec){ sec.qs.forEach(function(q){
+    if (q.type === "bmi") { if (bmiValue() !== null) n++; return; }
+    if (answers[q.id] !== undefined) n++;
+  }); });
+  return n;
+}
 
 function esc(s){ return String(s).replace(/[&<>"']/g, function(c){
   return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
@@ -354,6 +413,45 @@ function computeSuggestion(){
 /* ---------- rendering ---------- */
 function h(html){ document.getElementById("root").innerHTML = html; }
 
+function coverHTML(){
+  return '<header class="app">' +
+    '<div class="eyebrow-top">ASA Assessment \u00b7 Adult conscious sedation</div>' +
+    '<h1 class="app" tabindex="-1">ASA physical status</h1>' +
+    '<div class="byline">Developed by Aiden McCann \u00b7 v' + VERSION + '</div>' +
+    '</header>' +
+    '<p class="lede">A guided assessment of <strong>ASA physical status</strong> for adult patients being ' +
+      'considered for dental conscious sedation. It works through nine domains, suggests a grade from what ' +
+      'you record, and shows the findings behind the suggestion \u2014 which you then confirm or override.</p>' +
+    '<p class="lede">The confirmed grade is mapped to the sedation setting the patient is suited to, and any ' +
+      'factors that affect suitability without changing the grade are listed separately.</p>' +
+    '<div class="infobox"><p><strong>Adults aged 16 and over.</strong> The operator-sedationist model in primary ' +
+      'care applies to this age group; sedation for younger patients follows separate pathways.</p></div>' +
+    '<div class="infobox"><p>Nothing is saved. This tool holds no patient identifiers, stores nothing on the ' +
+      'device, and produces no export \u2014 it is a chairside check. Use the print option if you need a copy.</p></div>' +
+    '<div class="nav" style="border-top:none;padding-top:0;">' +
+      '<button type="button" class="btn primary" data-act="begin">Begin assessment</button>' +
+    '</div>' +
+    '<p class="disclaim">ASA physical status is a clinical judgement made by the treating clinician; it is not ' +
+      'derived from a score or formula. This tool supports that judgement and does not replace it, a full ' +
+      'medical history, or the assessing clinician\u2019s responsibility for determining fitness for sedation.</p>';
+}
+
+function haltHTML(){
+  return '<header class="app">' +
+    '<div class="eyebrow-top">ASA Assessment</div>' +
+    '<h1 class="app">ASA physical status</h1>' +
+    '<div class="byline">Developed by Aiden McCann \u00b7 v' + VERSION + '</div>' +
+    '</header>' +
+    '<span class="eyebrow">Outside the scope of this tool</span>' +
+    '<h2 class="res" tabindex="-1">Patient is under 16</h2>' +
+    '<div class="card alert"><p class="setting">This tool covers adults aged 16 and over. The ASA grades and ' +
+      'sedation settings it reports are based on standards written for that age group, and applying them to a ' +
+      'child would not be safe.</p>' +
+      '<p class="setting" style="margin-top:12px;">Conscious sedation for patients under 16 follows separate ' +
+      'pathways, and referral for specialist paediatric assessment should be considered.</p></div>' +
+    '<div class="nav"><button type="button" class="btn" data-act="restart">Start again</button></div>';
+}
+
 function headerHTML(){
   return '<header class="app">' +
     '<div class="eyebrow-top">Oral Surgery · Chairside support tool</div>' +
@@ -374,7 +472,9 @@ function railHTML(){
 
 function sectionHTML(){
   var sec = SECTIONS[step];
-  var out = headerHTML() + railHTML();
+  var out = headerHTML();
+  out += '<div class="progress">Section ' + (step + 1) + ' of ' + SECTIONS.length + '</div>';
+  out += railHTML();
   out += '<h2 class="q" tabindex="-1">' + esc(sec.title) + '</h2>';
   if (sec.helper) out += '<p class="helper">' + esc(sec.helper) + '</p>';
 
@@ -401,7 +501,7 @@ function sectionHTML(){
     out += '</div>';
   });
 
-  out += '<div class="nav">';
+  out += '<div class="nav noprint">';
   if (step > 0) out += '<button type="button" class="btn" data-act="back">Back</button>';
   out += '<button type="button" class="btn primary" data-act="next">' +
          (step === SECTIONS.length - 1 ? "See suggested grade" : "Continue") + '</button>';
@@ -411,24 +511,51 @@ function sectionHTML(){
 
 function resultHTML(){
   var s = suggested;
-  var g = confirmedGrade === null ? s.grade : confirmedGrade;
-  var overridden = confirmedGrade !== null && confirmedGrade !== s.grade;
-  var set = SETTING[g];
+  var thin = s.grade === 1 && (TOTAL_QUESTIONS - answeredCount()) > 0;
+  // with too little recorded, no grade carries forward unless the clinician sets one
+  var g = confirmedGrade !== null ? confirmedGrade : (thin ? null : s.grade);
+  var overridden = confirmedGrade !== null && confirmedGrade !== s.grade && !thin;
+  var set = g === null ? null : SETTING[g];
 
   var out = headerHTML() + railHTML();
   out += '<span class="eyebrow">Result</span>';
   out += '<h2 class="res" tabindex="-1">Physical status and sedation setting</h2>';
 
+  /* completeness: an unanswered question is not a normal finding, and ASA I
+     asserts a normal healthy patient - which cannot be claimed from silence. */
+  var missing = gaps();
+  var missingCount = TOTAL_QUESTIONS - answeredCount();
+  var tooThinForOne = s.grade === 1 && missingCount > 0;
+
+  if (missingCount > 0) {
+    out += '<div class="card warn">';
+    out += '<p class="setting"><strong>' + missingCount + ' of ' + TOTAL_QUESTIONS +
+           ' question' + (missingCount === 1 ? ' was' : 's were') + ' not answered.</strong> ' +
+           'The suggestion below reflects only what was recorded, and may rise once the gaps are filled.</p>';
+    out += '<ul class="flaglist">';
+    missing.forEach(function(m){
+      out += '<li><strong>' + esc(m.section) + '</strong> \u2014 ' + esc(m.missing.join('; ')) + '</li>';
+    });
+    out += '</ul></div>';
+  }
+
   /* suggestion */
-  out += '<div class="card">';
-  out += '<p class="grade">Suggested: ' + esc(ASA_CLASSES[s.grade].label) + '</p>';
-  out += '<div class="gradesub">' + esc(ASA_CLASSES[s.grade].defn) + '</div>';
-  if (s.driving.length) {
-    out += '<ul class="because">';
-    s.driving.forEach(function(d){ out += '<li>' + esc(d.text) + '</li>'; });
-    out += '</ul>';
+  out += '<div class="card' + (tooThinForOne ? ' warn' : '') + '">';
+  if (tooThinForOne) {
+    out += '<p class="grade">No grade suggested</p>';
+    out += '<div class="gradesub">Nothing recorded argues for a class above ASA I, but ASA I means a normal ' +
+           'healthy patient \u2014 which cannot be concluded while questions remain unanswered. ' +
+           'Complete the assessment, or assign a grade yourself below.</div>';
   } else {
-    out += '<p class="defn">No finding was recorded that argues for a higher class.</p>';
+    out += '<p class="grade">Suggested: ' + esc(ASA_CLASSES[s.grade].label) + '</p>';
+    out += '<div class="gradesub">' + esc(ASA_CLASSES[s.grade].defn) + '</div>';
+    if (s.driving.length) {
+      out += '<ul class="because">';
+      s.driving.forEach(function(d){ out += '<li>' + esc(d.text) + '</li>'; });
+      out += '</ul>';
+    } else {
+      out += '<p class="defn">Every question was answered, and none argues for a class above ASA I.</p>';
+    }
   }
   if (s.softenApplies) {
     out += '<p class="note">The ASA examples place an implanted pacemaker in class III. A well-functioning device in an otherwise fit patient may reasonably be graded II. That is a clinical judgement for the operator.</p>';
@@ -436,9 +563,9 @@ function resultHTML(){
   out += '</div>';
 
   /* confirm or override */
-  out += '<h3 class="block">Confirm the grade</h3>';
-  out += '<p class="helper">ASA physical status is a clinical judgement. Confirm the suggestion or select a different class; the grade you choose is the one used below.</p>';
-  out += '<div class="opts">';
+  out += '<h3 class="block noprint">Confirm the grade</h3>';
+  out += '<p class="helper noprint">ASA physical status is a clinical judgement. Confirm the suggestion or select a different class; the grade you choose is the one used below.</p>';
+  out += '<div class="opts noprint">';
   [1,2,3,4].forEach(function(n){
     var on = g === n;
     out += '<button type="button" class="opt" aria-pressed="' + (on ? "true" : "false") + '" data-grade="' + n + '">' +
@@ -452,9 +579,13 @@ function resultHTML(){
 
   /* setting */
   out += '<h3 class="block">Sedation setting</h3>';
-  out += '<div class="card' + (set.tone === "ok" ? "" : " alert") + '">';
-  out += '<p class="setting"><strong>' + esc(ASA_CLASSES[g].label) + '</strong> — ' + esc(set.text) + '</p>';
-  out += '</div>';
+  if (g === null) {
+    out += '<div class="card warn"><p class="setting">No sedation setting is given, because no grade has been established. Complete the outstanding questions, or confirm a grade above.</p></div>';
+  } else {
+    out += '<div class="card' + (set.tone === "ok" ? "" : " alert") + '">';
+    out += '<p class="setting"><strong>' + esc(ASA_CLASSES[g].label) + '</strong> — ' + esc(set.text) + '</p>';
+    out += '</div>';
+  }
 
   /* flags */
   out += '<h3 class="block">Sedation-specific factors</h3>';
@@ -475,7 +606,7 @@ function resultHTML(){
     out += '<p class="helper">Complete these before relying on the assessment.</p>';
   }
 
-  out += '<div class="nav">';
+  out += '<div class="nav noprint">';
   out += '<button type="button" class="btn" data-act="back">Back to questions</button>';
   out += '<button type="button" class="btn" data-act="restart">Start again</button>';
   out += '</div>';
@@ -485,11 +616,36 @@ function resultHTML(){
   return out;
 }
 
+/* Which screen is on show. Answering a question re-renders the same screen, and
+   scrolling to the top then would throw the clinician back up the page mid-section. */
+function viewKey(){
+  if (halted) return "halt";
+  if (!started) return "cover";
+  if (showResult) return "result";
+  return "step-" + step;
+}
+var lastView = null;
+
 function render(){
-  h(showResult ? resultHTML() : sectionHTML());
-  var head = document.querySelector('#root h2[tabindex="-1"]');
-  if (head) head.focus({ preventScroll: true });
-  window.scrollTo(0, 0);
+  var scrollBefore = window.scrollY;
+  var inner = halted ? haltHTML() : (!started ? coverHTML() : (showResult ? resultHTML() : sectionHTML()));
+  h('<div class="shell">' + inner + '</div>');
+
+  var view = viewKey();
+  var changedScreen = view !== lastView;
+  lastView = view;
+
+  if (firstRender) { firstRender = false; return; }
+
+  if (changedScreen) {
+    // a genuine navigation: announce it and start at the top
+    var head = document.querySelector('#root h2[tabindex="-1"], #root h1[tabindex="-1"]');
+    if (head) head.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  } else {
+    // same screen, just an answer recorded: hold the reader's place
+    window.scrollTo(0, scrollBefore);
+  }
 }
 
 /* ---------- events ---------- */
@@ -499,6 +655,12 @@ document.addEventListener("click", function(e){
 
   if (t.dataset.q) {
     answers[t.dataset.q] = t.dataset.v;
+    // an under-16 patient is outside what this tool can speak to
+    var chosen = null;
+    SECTIONS.forEach(function(sec){ sec.qs.forEach(function(q){
+      if (q.id === t.dataset.q && q.opts) q.opts.forEach(function(o){ if (o.v === t.dataset.v) chosen = o; });
+    }); });
+    if (chosen && chosen.halt) { halted = true; render(); return; }
     if (showResult) { suggested = computeSuggestion(); }
     render();
     return;
@@ -520,8 +682,11 @@ document.addEventListener("click", function(e){
     if (showResult) { showResult = false; step = SECTIONS.length - 1; }
     else if (step > 0) { step--; }
     render();
+  } else if (act === "begin") {
+    started = true; render();
   } else if (act === "restart") {
     answers = {}; bmi = { h: "", w: "" }; step = 0;
+    started = false; halted = false;
     showResult = false; confirmedGrade = null; suggested = null;
     render();
   }
