@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0F2F63" />
+<title>Third Molar Extraction Assessment</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; }
+  button { font: inherit; cursor: pointer; }
+</style>
+<script>
+  // Service workers require http/https. Opening index.html straight from disk
+  // (file://) is perfectly fine for previewing, but registration is impossible
+  // there - so don't attempt it, and don't warn about it either.
+  (function () {
+    var served = location.protocol === "http:" || location.protocol === "https:";
+    if (!("serviceWorker" in navigator) || !served) return;
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function (err) {
+        // Don't assume a cause. Registration is also blocked by policy in
+        // in-app browsers (iOS WKWebView) and some private modes - neither of
+        // which the deployment can do anything about. So check whether the
+        // supporting files are genuinely reachable before blaming them.
+        var detail = (err && err.message) ? err.message : String(err);
+        fetch("manifest.webmanifest", { method: "HEAD" })
+          .then(function (r) {
+            if (!r.ok) {
+              console.warn(
+                "Offline support unavailable: manifest.webmanifest returned " + r.status +
+                ". Check that sw.js, manifest.webmanifest and the icon files sit in the " +
+                "same folder as index.html."
+              );
+            } else {
+              console.info(
+                "Offline support unavailable in this browser (" + detail + "). " +
+                "Supporting files are present, so this is a browser restriction - " +
+                "commonly an in-app browser. The assessment tool itself is unaffected."
+              );
+            }
+          })
+          .catch(function () {
+            console.info("Offline support unavailable. The assessment tool itself is unaffected.");
+          });
+      });
+    });
+  })();
+</script>
+
+<!-- Cross-tool switcher. This lives here, not in the built bundle: it was
+     previously only in the deployed index.html, so every rebuild silently
+     dropped it. Folder names are load-bearing - /sedation/ and
+     /local-anaesthetic/ must match the deployed folders. -->
+<style>
+  .ostb { display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+    font-family:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    background:#FFFFFF; border-bottom:1px solid #D6DCE8;
+    padding:8px clamp(16px,4vw,32px); }
+  .ostb-label { font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10px;
+    letter-spacing:.08em; text-transform:uppercase; color:#4A6FA5; margin-right:10px; }
+  .ostb a { font-size:13px; font-weight:600; color:#3F5A8A; text-decoration:none;
+    padding:6px 12px; border-radius:7px; border:1px solid transparent; line-height:1.2; }
+  .ostb a:hover { color:#0F2F63; background:#EDF3FC; }
+  .ostb a[aria-current="page"] { color:#0F2F63; background:#E8EEF9; border-color:#C9D9F0; }
+  .ostb a:focus-visible { outline:2px solid #1E4D9B; outline-offset:2px; }
+  @media print { .ostb { display:none !important; } }
+  @media (max-width:480px) { .ostb-label { width:100%; margin-bottom:2px; } }
+</style>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+<nav class="ostb" aria-label="Assessment tools">
+  <span class="ostb-label">Oral Surgery Tools</span>
+  <a href="/" aria-current="page">Third Molar</a>
+  <a href="/sedation/">Sedation</a>
+  <a href="/local-anaesthetic/">Local Anaesthetic</a>
+  <a href="/asa-assessment/">ASA Assessment</a>
+</nav>
+<div id="root"></div>
+<script>
