@@ -2,7 +2,7 @@
    Bump CACHE whenever index.html changes, or installed browsers keep serving
    the old copy. Only this tool's caches are removed on activate: the other
    tools share this origin and own their own. */
-const CACHE = "asa-v3";
+const CACHE = "asa-v4";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
