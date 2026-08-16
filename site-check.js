@@ -22,6 +22,9 @@ const crypto = require("crypto");
 
 const root = process.argv[2];
 const record = process.argv.includes("--record");
+/* CI compares cache bumps against git history instead, where the stored
+   baseline is stale the moment anything is committed. */
+const skipCache = process.argv.includes("--skip-cache");
 
 if (!root) {
   console.error("usage: node site-check.js <site-root> [--record]");
@@ -70,7 +73,7 @@ for (const tool of TOOLS) {
   current[tool.dir] = { hash: hash(index), cache };
 
   /* --- 1. content changed without a cache bump --- */
-  const before = previous[tool.dir];
+  const before = skipCache ? null : previous[tool.dir];
   if (before) {
     const changed = before.hash !== current[tool.dir].hash;
     const bumped = before.cache !== current[tool.dir].cache;
