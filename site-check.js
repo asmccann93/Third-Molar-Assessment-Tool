@@ -33,6 +33,7 @@ const TOOLS = [
   { name: "Third Molar", dir: ".", href: "/" },
   { name: "Sedation", dir: "sedation", href: "/sedation/" },
   { name: "Local Anaesthetic", dir: "local-anaesthetic", href: "/local-anaesthetic/" },
+  { name: "ASA Assessment", dir: "asa-assessment", href: "/asa-assessment/" },
 ];
 
 const FINGERPRINTS = path.join(root, "site-fingerprints.json");
