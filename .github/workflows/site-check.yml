@@ -1,0 +1,53 @@
+name: Site check
+
+# Two silent failures have bitten this site before, and both ship green:
+#   - a page deployed with an out-of-date switcher, so one tool vanishes
+#     from the bar on that page only
+#   - index.html changed without the service worker CACHE name moving, so
+#     installed browsers keep serving the old page indefinitely
+# This catches both before Vercel deploys.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Switcher completeness, aria-current placement and manifest icons.
+      # The stored fingerprint baseline goes stale the moment anything is
+      # committed, so the cache comparison is done from git history instead.
+      - name: Structure
+        run: node site-check.js . --skip-cache
+
+      - name: Cache names must move when a tool changes
+        run: |
+          before=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+          if [ -z "$before" ]; then echo "No previous commit - nothing to compare."; exit 0; fi
+          fail=0
+          for dir in "." "sedation" "local-anaesthetic" "asa-assessment"; do
+            if [ "$dir" = "." ]; then idx="index.html"; sw="sw.js";
+            else idx="$dir/index.html"; sw="$dir/sw.js"; fi
+            if [ ! -f "$idx" ]; then continue; fi
+            if ! git diff --quiet "$before" HEAD -- "$idx"; then
+              if git diff --quiet "$before" HEAD -- "$sw"; then
+                echo "FAIL  $idx changed but $sw did not."
+                echo "      Installed browsers will keep serving the old page."
+                echo "      Bump the CACHE constant in $sw."
+                fail=1
+              else
+                echo "ok    $idx changed, $sw changed too"
+              fi
+            fi
+          done
+          exit $fail
