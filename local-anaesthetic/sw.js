@@ -1,7 +1,7 @@
 /* Local Anaesthetic Maximum Dose — offline support.
    Bump CACHE when index.html changes, or clients will keep serving the old copy.
    build.js rewrites this line from APP_VERSION, so don't edit it by hand. */
-var CACHE = "la-v0-14-2-b";
+var CACHE = "la-v0-14-2-c";
 
 var SHELL = [
   "./",
