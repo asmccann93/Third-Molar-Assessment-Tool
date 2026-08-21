@@ -35,7 +35,7 @@ jobs:
           before=$(git rev-parse HEAD~1 2>/dev/null || echo "")
           if [ -z "$before" ]; then echo "No previous commit - nothing to compare."; exit 0; fi
           fail=0
-          for dir in "." "sedation" "local-anaesthetic" "asa-assessment"; do
+          for dir in "." "third-molar" "sedation" "local-anaesthetic" "asa-assessment"; do
             if [ "$dir" = "." ]; then idx="index.html"; sw="sw.js";
             else idx="$dir/index.html"; sw="$dir/sw.js"; fi
             if [ ! -f "$idx" ]; then continue; fi
