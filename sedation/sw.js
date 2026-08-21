@@ -1,6 +1,6 @@
 /* Sedation Pre-Assessment — offline support.
    Bump CACHE when index.html changes, or clients will keep serving the old copy. */
-var CACHE = "sedation-v6";
+var CACHE = "sedation-v7";
 
 var SHELL = [
   "./",

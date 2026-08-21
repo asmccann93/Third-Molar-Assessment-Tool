@@ -20,9 +20,6 @@
 <title>Sedation Pre-Assessment</title>
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta name="apple-mobile-web-app-title" content="Sedation" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -339,6 +336,54 @@
 </script>
 <script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
 <script defer src="/_vercel/insights/script.js"></script>
+<style>
+  /* ------------------------------------------------------------------
+     Print fixes, added 21 Aug 2026. Kept as a separate block so it is
+     easy to port back into the tool's source rather than hunt through
+     the rules above.
+
+     1. The running header is position:fixed, so the browser paints it on
+        EVERY printed page. The old compensation was padding-top on .shell,
+        which only clears it once, at the start of the flow — so from page
+        two onwards the header was printed over the first line or two of
+        whatever landed there. The space has to be reserved by @page, which
+        applies to every page, with the header sitting up inside it.
+
+     2. .panel used column-count:2 with break-inside:auto, so a tall panel
+        formed a multi-column container spanning a page break. That is the
+        least reliable thing you can ask a print engine to fragment, and
+        clipped or dropped rows are the usual result. The same two-up
+        density is achieved below with inline-block rows, which fragment
+        through normal flow and survive the break.
+     ------------------------------------------------------------------ */
+  @media print {
+    @page { size: A4; margin: 16mm 11mm 12mm; }
+    .print-head { top: -10mm !important; }
+    .shell { padding-top: 0 !important; min-height: 0 !important; }
+
+    .panel {
+      column-count: auto !important;
+      column-gap: normal !important;
+      /* kills the whitespace between inline-blocks; .skey and .sval both
+         set their own pt sizes above, so nothing inherits this zero */
+      font-size: 0 !important;
+    }
+    .srow {
+      display: inline-block !important;
+      width: 50% !important;
+      box-sizing: border-box !important;
+      vertical-align: top;
+      padding: 1.5px 12px 1.5px 0 !important;
+      break-inside: avoid; page-break-inside: avoid;
+    }
+
+    /* Small density gains, none of which drop content. */
+    h3.block { margin: 7px 0 2px !important; }
+    .resultcard { margin-top: 5px !important; }
+    .sigshow, .sigpad { height: 52px !important; }
+    .flag, .declaration { orphans: 2; widows: 2; }
+  }
+</style>
 </head>
 <body>
 <!-- Tool switcher. Sits outside the app's own markup, so it is unaffected by
