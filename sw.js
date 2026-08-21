@@ -1,4 +1,4 @@
-const CACHE = "tma-v1-4-25";
+const CACHE = "tma-hub-v1";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
@@ -10,11 +10,15 @@ self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches
       .keys()
-      // Only tidy up THIS tool's old versions. Other tools share this origin and
-      // own their own caches - deleting theirs breaks their offline support until
+      // Only tidy up THIS page's old versions. Every tool shares this origin and
+      // owns its own cache - deleting theirs breaks their offline support until
       // the user next opens them with a signal, which is exactly the situation
-      // the offline support exists for. Without the prefix test this removes
-      // sedation-* and la-* on every deploy.
+      // the offline support exists for. The trailing hyphen matters: "tma-" must
+      // not match the third molar tool's "tm-" caches, and vice versa.
+      //
+      // This does clear "tma-v1-4-*", the caches of the third molar tool that
+      // used to live here. That is intended: those installs are not being
+      // migrated, and the tool now serves itself from /third-molar/ on "tm-".
       .then((keys) =>
         Promise.all(
           keys.filter((k) => k.indexOf("tma-") === 0 && k !== CACHE).map((k) => caches.delete(k))
@@ -42,7 +46,18 @@ self.addEventListener("fetch", (e) => {
           }
           return resp;
         })
-        .catch(() => caches.match(e.request).then((r) => r || caches.match("./index.html")))
+        .catch(() =>
+          caches.match(e.request).then((r) => {
+            if (r) return r;
+            // This worker's scope is the whole origin, so an offline navigation
+            // to a tool page can land here before that tool's own worker has
+            // ever run. Serving the hub in its place would look like the tool
+            // had been replaced, so fail honestly instead.
+            return new URL(e.request.url).pathname === "/"
+              ? caches.match("./index.html")
+              : Response.error();
+          })
+        )
     );
     return;
   }

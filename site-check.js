@@ -5,8 +5,8 @@
  *   node site-check.js <site-root>            verify
  *   node site-check.js <site-root> --record   accept the current state as the baseline
  *
- * Three tools share this origin, each a self-contained index.html with its own
- * service worker. Two failure modes have already bitten this site, and both are
+ * The hub at / and four tools share this origin, each a self-contained index.html
+ * with its own service worker. Two failure modes have already bitten this site, and both are
  * silent - the app looks fine, the damage shows up later on someone's device:
  *
  *   1. index.html changes but the service worker CACHE name does not, so
@@ -14,7 +14,7 @@
  *   2. A page is deployed carrying an out-of-date switcher, so one tool
  *      disappears from the bar on that page only.
  *
- * This checks for both across all three tools.
+ * This checks for both across the hub and all four tools.
  */
 const fs = require("fs");
 const path = require("path");
@@ -31,9 +31,10 @@ if (!root) {
   process.exit(2);
 }
 
-/* Each tool: where it lives, and the link that should be marked as current. */
+/* Each page: where it lives, and the link that should be marked as current. */
 const TOOLS = [
-  { name: "Third Molar", dir: ".", href: "/" },
+  { name: "Overview", dir: ".", href: "/" },
+  { name: "Third Molar", dir: "third-molar", href: "/third-molar/" },
   { name: "Sedation", dir: "sedation", href: "/sedation/" },
   { name: "Local Anaesthetic", dir: "local-anaesthetic", href: "/local-anaesthetic/" },
   { name: "ASA Assessment", dir: "asa-assessment", href: "/asa-assessment/" },
@@ -131,5 +132,5 @@ if (problems.length) {
   process.exit(1);
 }
 
-console.log("\n  Site check passed: three tools, switchers complete, caches in step.\n");
+console.log("\n  Site check passed: hub and four tools, switchers complete, caches in step.\n");
 process.exit(0);
