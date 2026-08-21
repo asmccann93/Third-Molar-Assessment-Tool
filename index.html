@@ -81,14 +81,7 @@
   a.tool:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
   .tool-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;}
   .tool-name{font-family:var(--serif);font-size:20px;font-weight:600;color:var(--ink);line-height:1.25;}
-  /* The scope chip carries real information — who each tool is licensed by its
-     own content to be used on — so it sits with the name, not in the body copy. */
-  .tool-scope{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
-    color:var(--navy);background:var(--chip-bg);border:1px solid var(--chip-line);border-radius:4px;padding:3px 7px;white-space:nowrap;}
   .tool-desc{display:block;font-size:14.5px;line-height:1.65;color:var(--soft);margin:8px 0 0;}
-  @media (max-width:420px){
-    .tool-top{flex-direction:column;align-items:flex-start;gap:6px;}
-  }
 
   .infobox{background:var(--tint-soft);border:1px solid var(--chip-line);border-radius:10px;padding:16px 18px;margin:0;}
   .infobox p{margin:0;font-size:14px;line-height:1.65;color:var(--soft);}
@@ -161,7 +154,6 @@
       <a class="tool" href="/third-molar/">
         <span class="tool-top">
           <span class="tool-name">Third Molar Assessment</span>
-          <span class="tool-scope">Upper and lower third molars, adults</span>
         </span>
         <span class="tool-desc">Structured assessment for extraction, giving a surgical difficulty
           score, clinical findings, and the recommended level of clinician.</span>
@@ -171,7 +163,6 @@
       <a class="tool" href="/sedation/">
         <span class="tool-top">
           <span class="tool-name">Sedation Pre-Assessment</span>
-          <span class="tool-scope">Adults 18 and over</span>
         </span>
         <span class="tool-desc">Full pre-sedation record: patient details, physical status, medical
           history, airway, medications, MDAS and IOSN scores, and discharge arrangements.</span>
@@ -181,7 +172,6 @@
       <a class="tool" href="/local-anaesthetic/">
         <span class="tool-top">
           <span class="tool-name">Local Anaesthetic Maximum Dose</span>
-          <span class="tool-scope">Adults and children</span>
         </span>
         <span class="tool-desc">Calculates safe maximum doses by agent and body weight, with
           cartridge counts.</span>
@@ -191,7 +181,6 @@
       <a class="tool" href="/asa-assessment/">
         <span class="tool-top">
           <span class="tool-name">ASA Assessment</span>
-          <span class="tool-scope">Adults 16 and over</span>
         </span>
         <span class="tool-desc">Guided ASA physical status grading for conscious sedation, mapping
           the confirmed grade to the appropriate sedation setting.</span>

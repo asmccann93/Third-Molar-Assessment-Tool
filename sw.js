@@ -1,4 +1,4 @@
-const CACHE = "tma-hub-v2";
+const CACHE = "tma-hub-v3";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
