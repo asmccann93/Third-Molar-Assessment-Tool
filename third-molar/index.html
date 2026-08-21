@@ -85,6 +85,46 @@
 <script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
 <script defer src="/_vercel/insights/script.js"></script>
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<style>
+  /* Offline notice. Self-contained and independent of the tool's own code, so it
+     works the same on every page and survives a rebuild. */
+  .osoff{position:fixed;left:0;right:0;bottom:0;z-index:9999;display:none;
+    font-family:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    font-size:13.5px;line-height:1.45;text-align:center;
+    color:#FFFFFF;background:#0F2F63;padding:10px 16px;}
+  @media print{.osoff{display:none !important;}}
+</style>
+<script>
+  // The service worker keeps these tools usable without a connection, but nothing
+  // on screen said so - a clinician could not tell a live page from a cached one.
+  // navigator.onLine reports whether the device has a network interface, not
+  // whether the server is reachable, so this is deliberately worded as "offline"
+  // rather than claiming the content is stale.
+  (function () {
+    var el = null;
+    function ensure() {
+      if (el || !document.body) return el;
+      el = document.createElement("div");
+      el.className = "osoff";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      el.textContent = "Offline \u2014 you are seeing the saved copy of this page. It stays fully usable.";
+      document.body.appendChild(el);
+      return el;
+    }
+    function update() {
+      var n = ensure();
+      if (n) n.style.display = navigator.onLine ? "none" : "block";
+    }
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", update);
+    } else {
+      update();
+    }
+  })();
+</script>
 </head>
 <body>
 <nav class="ostb" aria-label="Assessment tools">

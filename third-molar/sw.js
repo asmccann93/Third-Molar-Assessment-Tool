@@ -1,4 +1,4 @@
-const CACHE = "tm-v1-4-25-c";
+const CACHE = "tm-v1-4-25-d";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
