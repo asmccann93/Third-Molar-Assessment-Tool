@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="theme-color" content="#FFFFFF" />
+<meta name="theme-color" content="#0F2F63" />
 <title>Third Molar Extraction Assessment</title>
 <meta name="description" content="Structured chairside assessment for third molar extraction, giving a surgical difficulty score, clinical findings and the recommended level of clinician." />
 <link rel="canonical" href="https://oralsurgeryassess.com/third-molar/" />
@@ -13,14 +13,36 @@
 <meta property="og:title" content="Third Molar Assessment" />
 <meta property="og:description" content="Structured chairside assessment for third molar extraction, adults." />
 <meta property="og:url" content="https://oralsurgeryassess.com/third-molar/" />
-<meta property="og:image" content="https://oralsurgeryassess.com/icon-512.png" />
-<meta name="twitter:card" content="summary" />
+<meta property="og:image" content="https://oralsurgeryassess.com/share-card.png" />
+<meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Third Molar Assessment" />
 <meta name="twitter:description" content="Structured chairside assessment for third molar extraction, adults." />
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* Self-hosted fonts, added 21 Aug 2026. Previously these came from Google's
+     servers, so on a first visit without a connection the headings fell back to
+     Georgia and the body to the system sans - the site looked different in exactly
+     the situation the offline support exists for. Same files, same licence (OFL),
+     now served from this origin and cached by each tool's service worker. */
+  @font-face{font-family:"Source Serif 4";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/source-serif-4-500.woff2") format("woff2");}
+  @font-face{font-family:"Source Serif 4";font-style:normal;font-weight:600;font-display:swap;
+    src:url("/fonts/source-serif-4-600.woff2") format("woff2");}
+  @font-face{font-family:"Source Serif 4";font-style:normal;font-weight:700;font-display:swap;
+    src:url("/fonts/source-serif-4-700.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-400.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-500.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:600;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-600.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:700;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-700.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/fonts/ibm-plex-mono-400.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/ibm-plex-mono-500.woff2") format("woff2");}
+</style>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   body { margin: 0; }
@@ -68,7 +90,7 @@
      dropped it. Folder names are load-bearing - /sedation/ and
      /local-anaesthetic/ must match the deployed folders. -->
 <style>
-  .ostb { display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+  .ostb { position:sticky;top:0;z-index:50; display:flex; align-items:center; gap:4px; flex-wrap:wrap;
     font-family:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
     background:#FFFFFF; border-bottom:1px solid #D6DCE8;
     padding:8px clamp(16px,4vw,32px); }
@@ -80,7 +102,12 @@
   .ostb a[aria-current="page"] { color:#0F2F63; background:#E8EEF9; border-color:#C9D9F0; }
   .ostb a:focus-visible { outline:2px solid #1E4D9B; outline-offset:2px; }
   @media print { .ostb { display:none !important; } }
-  @media (max-width:480px) { .ostb-label { width:100%; margin-bottom:2px; } }
+  @media (max-width:480px) {
+    .ostb { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+    .ostb::-webkit-scrollbar { display:none; }
+    .ostb-label { display:none; }
+    .ostb a { white-space:nowrap; }
+  }
 </style>
 <script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
 <script defer src="/_vercel/insights/script.js"></script>
@@ -125,6 +152,74 @@
     }
   })();
 </script>
+<style>
+  /* Interaction polish. Self-contained like the offline notice above, so it
+     applies identically on all five pages without touching any tool's own code.
+
+     This block sits after each page's own stylesheet, so where it repeats a
+     property the page already sets, it wins. The transition below therefore
+     names background-color and border-color as well as transform, so it adds
+     the press feedback without discarding hover behaviour the pages already had. */
+
+  a, button, [role="button"], input, select, textarea, label, summary {
+    -webkit-tap-highlight-color: rgba(15, 47, 99, 0.08);
+  }
+
+  button, [role="button"], a.tool, .ostb a {
+    transition: transform 80ms ease, background-color 120ms ease, border-color 120ms ease;
+  }
+  /* Nothing on the site acknowledged a touch until the next screen appeared.
+     One pixel of travel is enough to feel like the tap registered. */
+  button:not(:disabled):active,
+  [role="button"]:active,
+  a.tool:active,
+  .ostb a:active {
+    transform: translateY(1px);
+  }
+
+  /* Switcher links were about 29px tall. Touch devices get a full 44px target;
+     pointer devices keep the compact bar. */
+  .ostb a { display: inline-flex; align-items: center; }
+  @media (pointer: coarse) {
+    .ostb a { min-height: 44px; padding-left: 14px; padding-right: 14px; }
+  }
+
+  /* Figures should not change width as they change value. */
+  input[type="number"], input[inputmode="decimal"], input[inputmode="numeric"],
+  table, td, th, output {
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1, h2, h3 { text-wrap: balance; }
+  p { text-wrap: pretty; }
+
+  /* The switcher is sticky now, so an in-page jump would land under it.
+     The third molar tool alone has 26 anchor links. */
+  html { scroll-padding-top: 56px; }
+  @media (pointer: coarse) { html { scroll-padding-top: 72px; } }
+
+  ::selection { background: #E8EEF9; color: #0F2F63; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+</style>
+<style>
+  /* Shown until React mounts and replaces #root. The bundle is 1.7 MB, so on a
+     phone or surgery wi-fi this is several seconds of otherwise blank white. */
+  .tmboot{max-width:700px;margin:0 auto;padding:48px 20px;}
+  .tmboot-eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;
+    letter-spacing:.08em;text-transform:uppercase;color:#4A6FA5;}
+  .tmboot-title{font-family:"Source Serif 4","Iowan Old Style",Georgia,ui-serif,serif;
+    font-size:28px;font-weight:700;color:#0F2F63;margin:6px 0 0;line-height:1.2;}
+  .tmboot-note{font-family:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    font-size:14px;color:#3F5A8A;margin-top:14px;}
+</style>
 </head>
 <body>
 <nav class="ostb" aria-label="Assessment tools">
@@ -135,7 +230,11 @@
   <a href="/local-anaesthetic/">Local Anaesthetic</a>
   <a href="/asa-assessment/">ASA Assessment</a>
 </nav>
-<div id="root"></div>
+<div id="root"><div class="tmboot" role="status" aria-live="polite">
+  <div class="tmboot-eyebrow">Oral Surgery &middot; Chairside Support Tool</div>
+  <div class="tmboot-title">Third Molar Assessment Tool</div>
+  <div class="tmboot-note">Loading&hellip;</div>
+</div></div>
 <script>
 (()=>{var L2=Object.create;var gA=Object.defineProperty;var Q2=Object.getOwnPropertyDescriptor;var H2=Object.getOwnPropertyNames;var V2=Object.getPrototypeOf,U2=Object.prototype.hasOwnProperty;var Jt=(t,e)=>()=>(e||t((e={exports:{}}).exports,e),e.exports);var q2=(t,e,r,n)=>{if(e&&typeof e=="object"||typeof e=="function")for(let i of H2(e))!U2.call(t,i)&&i!==r&&gA(t,i,{get:()=>e[i],enumerable:!(n=Q2(e,i))||n.enumerable});return t};var uo=(t,e,r)=>(r=t!=null?L2(V2(t)):{},q2(e||!t||!t.__esModule?gA(r,"default",{value:t,enumerable:!0}):r,t));var PA=Jt(ft=>{"use strict";var Qd=Symbol.for("react.transitional.element"),Y2=Symbol.for("react.portal"),J2=Symbol.for("react.fragment"),K2=Symbol.for("react.strict_mode"),W2=Symbol.for("react.profiler"),G2=Symbol.for("react.consumer"),_2=Symbol.for("react.context"),$2=Symbol.for("react.forward_ref"),tz=Symbol.for("react.suspense"),ez=Symbol.for("react.memo"),SA=Symbol.for("react.lazy"),rz=Symbol.for("react.activity"),yA=Symbol.iterator;function nz(t){return t===null||typeof t!="object"?null:(t=yA&&t[yA]||t["@@iterator"],typeof t=="function"?t:null)}var CA={isMounted:function(){return!1},enqueueForceUpdate:function(){},enqueueReplaceState:function(){},enqueueSetState:function(){}},DA=Object.assign,OA={};function co(t,e,r){this.props=t,this.context=e,this.refs=OA,this.updater=r||CA}co.prototype.isReactComponent={};co.prototype.setState=function(t,e){if(typeof t!="object"&&typeof t!="function"&&t!=null)throw Error("takes an object of state variables to update or a function which returns an object of state variables.");this.updater.enqueueSetState(this,t,e,"setState")};co.prototype.forceUpdate=function(t){this.updater.enqueueForceUpdate(this,t,"forceUpdate")};function wA(){}wA.prototype=co.prototype;function Hd(t,e,r){this.props=t,this.context=e,this.refs=OA,this.updater=r||CA}var Vd=Hd.prototype=new wA;Vd.constructor=Hd;DA(Vd,co.prototype);Vd.isPureReactComponent=!0;var bA=Array.isArray;function Ld(){}var Ht={H:null,A:null,T:null,S:null},EA=Object.prototype.hasOwnProperty;function Ud(t,e,r){var n=r.ref;return{$$typeof:Qd,type:t,key:e,ref:n!==void 0?n:null,props:r}}function iz(t,e){return Ud(t.type,e,t.props)}function qd(t){return typeof t=="object"&&t!==null&&t.$$typeof===Qd}function az(t){var e={"=":"=0",":":"=2"};return"$"+t.replace(/[=:]/g,function(r){return e[r]})}var zA=/\/+/g;function Rd(t,e){return typeof t=="object"&&t!==null&&t.key!=null?az(""+t.key):e.toString(36)}function oz(t){switch(t.status){case"fulfilled":return t.value;case"rejected":throw t.reason;default:switch(typeof t.status=="string"?t.then(Ld,Ld):(t.status="pending",t.then(function(e){t.status==="pending"&&(t.status="fulfilled",t.value=e)},function(e){t.status==="pending"&&(t.status="rejected",t.reason=e)})),t.status){case"fulfilled":return t.value;case"rejected":throw t.reason}}throw t}function fo(t,e,r,n,i){var a=typeof t;(a==="undefined"||a==="boolean")&&(t=null);var o=!1;if(t===null)o=!0;else switch(a){case"bigint":case"string":case"number":o=!0;break;case"object":switch(t.$$typeof){case Qd:case Y2:o=!0;break;case SA:return o=t._init,fo(o(t._payload),e,r,n,i)}}if(o)return i=i(t),o=n===""?"."+Rd(t,0):n,bA(i)?(r="",o!=null&&(r=o.replace(zA,"$&/")+"/"),fo(i,e,r,"",function(u){return u})):i!=null&&(qd(i)&&(i=iz(i,r+(i.key==null||t&&t.key===i.key?"":(""+i.key).replace(zA,"$&/")+"/")+o)),e.push(i)),1;o=0;var l=n===""?".":n+":";if(bA(t))for(var f=0;f<t.length;f++)n=t[f],a=l+Rd(n,f),o+=fo(n,e,r,a,i);else if(f=nz(t),typeof f=="function")for(t=f.call(t),f=0;!(n=t.next()).done;)n=n.value,a=l+Rd(n,f++),o+=fo(n,e,r,a,i);else if(a==="object"){if(typeof t.then=="function")return fo(oz(t),e,r,n,i);throw e=String(t),Error("Objects are not valid as a React child (found: "+(e==="[object Object]"?"object with keys {"+Object.keys(t).join(", ")+"}":e)+"). If you meant to render a collection of children, use an array instead.")}return o}function ac(t,e,r){if(t==null)return t;var n=[],i=0;return fo(t,n,"","",function(a){return e.call(r,a,i++)}),n}function lz(t){if(t._status===-1){var e=t._result;e=e(),e.then(function(r){(t._status===0||t._status===-1)&&(t._status=1,t._result=r)},function(r){(t._status===0||t._status===-1)&&(t._status=2,t._result=r)}),t._status===-1&&(t._status=0,t._result=e)}if(t._status===1)return t._result.default;throw t._result}var xA=typeof reportError=="function"?reportError:function(t){if(typeof window=="object"&&typeof window.ErrorEvent=="function"){var e=new window.ErrorEvent("error",{bubbles:!0,cancelable:!0,message:typeof t=="object"&&t!==null&&typeof t.message=="string"?String(t.message):String(t),error:t});if(!window.dispatchEvent(e))return}else if(typeof process=="object"&&typeof process.emit=="function"){process.emit("uncaughtException",t);return}console.error(t)},uz={map:ac,forEach:function(t,e,r){ac(t,function(){e.apply(this,arguments)},r)},count:function(t){var e=0;return ac(t,function(){e++}),e},toArray:function(t){return ac(t,function(e){return e})||[]},only:function(t){if(!qd(t))throw Error("React.Children.only expected to receive a single React element child.");return t}};ft.Activity=rz;ft.Children=uz;ft.Component=co;ft.Fragment=J2;ft.Profiler=W2;ft.PureComponent=Hd;ft.StrictMode=K2;ft.Suspense=tz;ft.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE=Ht;ft.__COMPILER_RUNTIME={__proto__:null,c:function(t){return Ht.H.useMemoCache(t)}};ft.cache=function(t){return function(){return t.apply(null,arguments)}};ft.cacheSignal=function(){return null};ft.cloneElement=function(t,e,r){if(t==null)throw Error("The argument must be a React element, but you passed "+t+".");var n=DA({},t.props),i=t.key;if(e!=null)for(a in e.key!==void 0&&(i=""+e.key),e)!EA.call(e,a)||a==="key"||a==="__self"||a==="__source"||a==="ref"&&e.ref===void 0||(n[a]=e[a]);var a=arguments.length-2;if(a===1)n.children=r;else if(1<a){for(var o=Array(a),l=0;l<a;l++)o[l]=arguments[l+2];n.children=o}return Ud(t.type,i,n)};ft.createContext=function(t){return t={$$typeof:_2,_currentValue:t,_currentValue2:t,_threadCount:0,Provider:null,Consumer:null},t.Provider=t,t.Consumer={$$typeof:G2,_context:t},t};ft.createElement=function(t,e,r){var n,i={},a=null;if(e!=null)for(n in e.key!==void 0&&(a=""+e.key),e)EA.call(e,n)&&n!=="key"&&n!=="__self"&&n!=="__source"&&(i[n]=e[n]);var o=arguments.length-2;if(o===1)i.children=r;else if(1<o){for(var l=Array(o),f=0;f<o;f++)l[f]=arguments[f+2];i.children=l}if(t&&t.defaultProps)for(n in o=t.defaultProps,o)i[n]===void 0&&(i[n]=o[n]);return Ud(t,a,i)};ft.createRef=function(){return{current:null}};ft.forwardRef=function(t){return{$$typeof:$2,render:t}};ft.isValidElement=qd;ft.lazy=function(t){return{$$typeof:SA,_payload:{_status:-1,_result:t},_init:lz}};ft.memo=function(t,e){return{$$typeof:ez,type:t,compare:e===void 0?null:e}};ft.startTransition=function(t){var e=Ht.T,r={};Ht.T=r;try{var n=t(),i=Ht.S;i!==null&&i(r,n),typeof n=="object"&&n!==null&&typeof n.then=="function"&&n.then(Ld,xA)}catch(a){xA(a)}finally{e!==null&&r.types!==null&&(e.types=r.types),Ht.T=e}};ft.unstable_useCacheRefresh=function(){return Ht.H.useCacheRefresh()};ft.use=function(t){return Ht.H.use(t)};ft.useActionState=function(t,e,r){return Ht.H.useActionState(t,e,r)};ft.useCallback=function(t,e){return Ht.H.useCallback(t,e)};ft.useContext=function(t){return Ht.H.useContext(t)};ft.useDebugValue=function(){};ft.useDeferredValue=function(t,e){return Ht.H.useDeferredValue(t,e)};ft.useEffect=function(t,e){return Ht.H.useEffect(t,e)};ft.useEffectEvent=function(t){return Ht.H.useEffectEvent(t)};ft.useId=function(){return Ht.H.useId()};ft.useImperativeHandle=function(t,e,r){return Ht.H.useImperativeHandle(t,e,r)};ft.useInsertionEffect=function(t,e){return Ht.H.useInsertionEffect(t,e)};ft.useLayoutEffect=function(t,e){return Ht.H.useLayoutEffect(t,e)};ft.useMemo=function(t,e){return Ht.H.useMemo(t,e)};ft.useOptimistic=function(t,e){return Ht.H.useOptimistic(t,e)};ft.useReducer=function(t,e,r){return Ht.H.useReducer(t,e,r)};ft.useRef=function(t){return Ht.H.useRef(t)};ft.useState=function(t){return Ht.H.useState(t)};ft.useSyncExternalStore=function(t,e,r){return Ht.H.useSyncExternalStore(t,e,r)};ft.useTransition=function(){return Ht.H.useTransition()};ft.version="19.2.5"});var oc=Jt((E8,TA)=>{"use strict";TA.exports=PA()});var RA=Jt(Kt=>{"use strict";function Wd(t,e){var r=t.length;t.push(e);t:for(;0<r;){var n=r-1>>>1,i=t[n];if(0<lc(i,e))t[n]=e,t[r]=i,r=n;else break t}}function cn(t){return t.length===0?null:t[0]}function fc(t){if(t.length===0)return null;var e=t[0],r=t.pop();if(r!==e){t[0]=r;t:for(var n=0,i=t.length,a=i>>>1;n<a;){var o=2*(n+1)-1,l=t[o],f=o+1,u=t[f];if(0>lc(l,r))f<i&&0>lc(u,l)?(t[n]=u,t[f]=r,n=f):(t[n]=l,t[o]=r,n=o);else if(f<i&&0>lc(u,r))t[n]=u,t[f]=r,n=f;else break t}}return e}function lc(t,e){var r=t.sortIndex-e.sortIndex;return r!==0?r:t.id-e.id}Kt.unstable_now=void 0;typeof performance=="object"&&typeof performance.now=="function"?(MA=performance,Kt.unstable_now=function(){return MA.now()}):(Yd=Date,BA=Yd.now(),Kt.unstable_now=function(){return Yd.now()-BA});var MA,Yd,BA,Pn=[],ui=[],fz=1,Tr=null,ke=3,Gd=!1,Rl=!1,Ll=!1,_d=!1,FA=typeof setTimeout=="function"?setTimeout:null,NA=typeof clearTimeout=="function"?clearTimeout:null,XA=typeof setImmediate<"u"?setImmediate:null;function uc(t){for(var e=cn(ui);e!==null;){if(e.callback===null)fc(ui);else if(e.startTime<=t)fc(ui),e.sortIndex=e.expirationTime,Wd(Pn,e);else break;e=cn(ui)}}function $d(t){if(Ll=!1,uc(t),!Rl)if(cn(Pn)!==null)Rl=!0,vo||(vo=!0,so());else{var e=cn(ui);e!==null&&tv($d,e.startTime-t)}}var vo=!1,Ql=-1,kA=5,jA=-1;function ZA(){return _d?!0:!(Kt.unstable_now()-jA<kA)}function Jd(){if(_d=!1,vo){var t=Kt.unstable_now();jA=t;var e=!0;try{t:{Rl=!1,Ll&&(Ll=!1,NA(Ql),Ql=-1),Gd=!0;var r=ke;try{e:{for(uc(t),Tr=cn(Pn);Tr!==null&&!(Tr.expirationTime>t&&ZA());){var n=Tr.callback;if(typeof n=="function"){Tr.callback=null,ke=Tr.priorityLevel;var i=n(Tr.expirationTime<=t);if(t=Kt.unstable_now(),typeof i=="function"){Tr.callback=i,uc(t),e=!0;break e}Tr===cn(Pn)&&fc(Pn),uc(t)}else fc(Pn);Tr=cn(Pn)}if(Tr!==null)e=!0;else{var a=cn(ui);a!==null&&tv($d,a.startTime-t),e=!1}}break t}finally{Tr=null,ke=r,Gd=!1}e=void 0}}finally{e?so():vo=!1}}}var so;typeof XA=="function"?so=function(){XA(Jd)}:typeof MessageChannel<"u"?(Kd=new MessageChannel,IA=Kd.port2,Kd.port1.onmessage=Jd,so=function(){IA.postMessage(null)}):so=function(){FA(Jd,0)};var Kd,IA;function tv(t,e){Ql=FA(function(){t(Kt.unstable_now())},e)}Kt.unstable_IdlePriority=5;Kt.unstable_ImmediatePriority=1;Kt.unstable_LowPriority=4;Kt.unstable_NormalPriority=3;Kt.unstable_Profiling=null;Kt.unstable_UserBlockingPriority=2;Kt.unstable_cancelCallback=function(t){t.callback=null};Kt.unstable_forceFrameRate=function(t){0>t||125<t?console.error("forceFrameRate takes a positive int between 0 and 125, forcing frame rates higher than 125 fps is not supported"):kA=0<t?Math.floor(1e3/t):5};Kt.unstable_getCurrentPriorityLevel=function(){return ke};Kt.unstable_next=function(t){switch(ke){case 1:case 2:case 3:var e=3;break;default:e=ke}var r=ke;ke=e;try{return t()}finally{ke=r}};Kt.unstable_requestPaint=function(){_d=!0};Kt.unstable_runWithPriority=function(t,e){switch(t){case 1:case 2:case 3:case 4:case 5:break;default:t=3}var r=ke;ke=t;try{return e()}finally{ke=r}};Kt.unstable_scheduleCallback=function(t,e,r){var n=Kt.unstable_now();switch(typeof r=="object"&&r!==null?(r=r.delay,r=typeof r=="number"&&0<r?n+r:n):r=n,t){case 1:var i=-1;break;case 2:i=250;break;case 5:i=1073741823;break;case 4:i=1e4;break;default:i=5e3}return i=r+i,t={id:fz++,callback:e,priorityLevel:t,startTime:r,expirationTime:i,sortIndex:-1},r>n?(t.sortIndex=r,Wd(ui,t),cn(Pn)===null&&t===cn(ui)&&(Ll?(NA(Ql),Ql=-1):Ll=!0,tv($d,r-n))):(t.sortIndex=i,Wd(Pn,t),Rl||Gd||(Rl=!0,vo||(vo=!0,so()))),t};Kt.unstable_shouldYield=ZA;Kt.unstable_wrapCallback=function(t){var e=ke;return function(){var r=ke;ke=e;try{return t.apply(this,arguments)}finally{ke=r}}}});var QA=Jt((T8,LA)=>{"use strict";LA.exports=RA()});var VA=Jt(Ue=>{"use strict";var cz=oc();function HA(t){var e="https://react.dev/errors/"+t;if(1<arguments.length){e+="?args[]="+encodeURIComponent(arguments[1]);for(var r=2;r<arguments.length;r++)e+="&args[]="+encodeURIComponent(arguments[r])}return"Minified React error #"+t+"; visit "+e+" for the full message or use the non-minified dev environment for full errors and additional helpful warnings."}function fi(){}var Ve={d:{f:fi,r:function(){throw Error(HA(522))},D:fi,C:fi,L:fi,m:fi,X:fi,S:fi,M:fi},p:0,findDOMNode:null},sz=Symbol.for("react.portal");function dz(t,e,r){var n=3<arguments.length&&arguments[3]!==void 0?arguments[3]:null;return{$$typeof:sz,key:n==null?null:""+n,children:t,containerInfo:e,implementation:r}}var Hl=cz.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;function cc(t,e){if(t==="font")return"";if(typeof e=="string")return e==="use-credentials"?e:""}Ue.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE=Ve;Ue.createPortal=function(t,e){var r=2<arguments.length&&arguments[2]!==void 0?arguments[2]:null;if(!e||e.nodeType!==1&&e.nodeType!==9&&e.nodeType!==11)throw Error(HA(299));return dz(t,e,null,r)};Ue.flushSync=function(t){var e=Hl.T,r=Ve.p;try{if(Hl.T=null,Ve.p=2,t)return t()}finally{Hl.T=e,Ve.p=r,Ve.d.f()}};Ue.preconnect=function(t,e){typeof t=="string"&&(e?(e=e.crossOrigin,e=typeof e=="string"?e==="use-credentials"?e:"":void 0):e=null,Ve.d.C(t,e))};Ue.prefetchDNS=function(t){typeof t=="string"&&Ve.d.D(t)};Ue.preinit=function(t,e){if(typeof t=="string"&&e&&typeof e.as=="string"){var r=e.as,n=cc(r,e.crossOrigin),i=typeof e.integrity=="string"?e.integrity:void 0,a=typeof e.fetchPriority=="string"?e.fetchPriority:void 0;r==="style"?Ve.d.S(t,typeof e.precedence=="string"?e.precedence:void 0,{crossOrigin:n,integrity:i,fetchPriority:a}):r==="script"&&Ve.d.X(t,{crossOrigin:n,integrity:i,fetchPriority:a,nonce:typeof e.nonce=="string"?e.nonce:void 0})}};Ue.preinitModule=function(t,e){if(typeof t=="string")if(typeof e=="object"&&e!==null){if(e.as==null||e.as==="script"){var r=cc(e.as,e.crossOrigin);Ve.d.M(t,{crossOrigin:r,integrity:typeof e.integrity=="string"?e.integrity:void 0,nonce:typeof e.nonce=="string"?e.nonce:void 0})}}else e==null&&Ve.d.M(t)};Ue.preload=function(t,e){if(typeof t=="string"&&typeof e=="object"&&e!==null&&typeof e.as=="string"){var r=e.as,n=cc(r,e.crossOrigin);Ve.d.L(t,r,{crossOrigin:n,integrity:typeof e.integrity=="string"?e.integrity:void 0,nonce:typeof e.nonce=="string"?e.nonce:void 0,type:typeof e.type=="string"?e.type:void 0,fetchPriority:typeof e.fetchPriority=="string"?e.fetchPriority:void 0,referrerPolicy:typeof e.referrerPolicy=="string"?e.referrerPolicy:void 0,imageSrcSet:typeof e.imageSrcSet=="string"?e.imageSrcSet:void 0,imageSizes:typeof e.imageSizes=="string"?e.imageSizes:void 0,media:typeof e.media=="string"?e.media:void 0})}};Ue.preloadModule=function(t,e){if(typeof t=="string")if(e){var r=cc(e.as,e.crossOrigin);Ve.d.m(t,{as:typeof e.as=="string"&&e.as!=="script"?e.as:void 0,crossOrigin:r,integrity:typeof e.integrity=="string"?e.integrity:void 0})}else Ve.d.m(t)};Ue.requestFormReset=function(t){Ve.d.r(t)};Ue.unstable_batchedUpdates=function(t,e){return t(e)};Ue.useFormState=function(t,e,r){return Hl.H.useFormState(t,e,r)};Ue.useFormStatus=function(){return Hl.H.useHostTransitionStatus()};Ue.version="19.2.5"});var YA=Jt((B8,qA)=>{"use strict";function UA(){if(!(typeof __REACT_DEVTOOLS_GLOBAL_HOOK__>"u"||typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.checkDCE!="function"))try{__REACT_DEVTOOLS_GLOBAL_HOOK__.checkDCE(UA)}catch(t){console.error(t)}}UA(),qA.exports=VA()});var a7=Jt(Fs=>{"use strict";var ge=QA(),yg=oc(),vz=YA();function X(t){var e="https://react.dev/errors/"+t;if(1<arguments.length){e+="?args[]="+encodeURIComponent(arguments[1]);for(var r=2;r<arguments.length;r++)e+="&args[]="+encodeURIComponent(arguments[r])}return"Minified React error #"+t+"; visit "+e+" for the full message or use the non-minified dev environment for full errors and additional helpful warnings."}function bg(t){return!(!t||t.nodeType!==1&&t.nodeType!==9&&t.nodeType!==11)}function Pu(t){var e=t,r=t;if(t.alternate)for(;e.return;)e=e.return;else{t=e;do e=t,(e.flags&4098)!==0&&(r=e.return),t=e.return;while(t)}return e.tag===3?r:null}function zg(t){if(t.tag===13){var e=t.memoizedState;if(e===null&&(t=t.alternate,t!==null&&(e=t.memoizedState)),e!==null)return e.dehydrated}return null}function xg(t){if(t.tag===31){var e=t.memoizedState;if(e===null&&(t=t.alternate,t!==null&&(e=t.memoizedState)),e!==null)return e.dehydrated}return null}function JA(t){if(Pu(t)!==t)throw Error(X(188))}function hz(t){var e=t.alternate;if(!e){if(e=Pu(t),e===null)throw Error(X(188));return e!==t?null:t}for(var r=t,n=e;;){var i=r.return;if(i===null)break;var a=i.alternate;if(a===null){if(n=i.return,n!==null){r=n;continue}break}if(i.child===a.child){for(a=i.child;a;){if(a===r)return JA(i),t;if(a===n)return JA(i),e;a=a.sibling}throw Error(X(188))}if(r.return!==n.return)r=i,n=a;else{for(var o=!1,l=i.child;l;){if(l===r){o=!0,r=i,n=a;break}if(l===n){o=!0,n=i,r=a;break}l=l.sibling}if(!o){for(l=a.child;l;){if(l===r){o=!0,r=a,n=i;break}if(l===n){o=!0,n=a,r=i;break}l=l.sibling}if(!o)throw Error(X(189))}}if(r.alternate!==n)throw Error(X(190))}if(r.tag!==3)throw Error(X(188));return r.stateNode.current===r?t:e}function Sg(t){var e=t.tag;if(e===5||e===26||e===27||e===6)return t;for(t=t.child;t!==null;){if(e=Sg(t),e!==null)return e;t=t.sibling}return null}var qt=Object.assign,pz=Symbol.for("react.element"),sc=Symbol.for("react.transitional.element"),Gl=Symbol.for("react.portal"),yo=Symbol.for("react.fragment"),Cg=Symbol.for("react.strict_mode"),Iv=Symbol.for("react.profiler"),Dg=Symbol.for("react.consumer"),kn=Symbol.for("react.context"),Ph=Symbol.for("react.forward_ref"),Fv=Symbol.for("react.suspense"),Nv=Symbol.for("react.suspense_list"),Th=Symbol.for("react.memo"),ci=Symbol.for("react.lazy"),kv=Symbol.for("react.activity"),Az=Symbol.for("react.memo_cache_sentinel"),KA=Symbol.iterator;function Vl(t){return t===null||typeof t!="object"?null:(t=KA&&t[KA]||t["@@iterator"],typeof t=="function"?t:null)}var mz=Symbol.for("react.client.reference");function jv(t){if(t==null)return null;if(typeof t=="function")return t.$$typeof===mz?null:t.displayName||t.name||null;if(typeof t=="string")return t;switch(t){case yo:return"Fragment";case Iv:return"Profiler";case Cg:return"StrictMode";case Fv:return"Suspense";case Nv:return"SuspenseList";case kv:return"Activity"}if(typeof t=="object")switch(t.$$typeof){case Gl:return"Portal";case kn:return t.displayName||"Context";case Dg:return(t._context.displayName||"Context")+".Consumer";case Ph:var e=t.render;return t=t.displayName,t||(t=e.displayName||e.name||"",t=t!==""?"ForwardRef("+t+")":"ForwardRef"),t;case Th:return e=t.displayName||null,e!==null?e:jv(t.type)||"Memo";case ci:e=t._payload,t=t._init;try{return jv(t(e))}catch{}}return null}var _l=Array.isArray,at=yg.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,Pt=vz.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,va={pending:!1,data:null,method:null,action:null},Zv=[],bo=-1;function pn(t){return{current:t}}function Ce(t){0>bo||(t.current=Zv[bo],Zv[bo]=null,bo--)}function Zt(t,e){bo++,Zv[bo]=t.current,t.current=e}var hn=pn(null),pu=pn(null),zi=pn(null),Vc=pn(null);function Uc(t,e){switch(Zt(zi,e),Zt(pu,t),Zt(hn,null),e.nodeType){case 9:case 11:t=(t=e.documentElement)&&(t=t.namespaceURI)?rg(t):0;break;default:if(t=e.tagName,e=e.namespaceURI)e=rg(e),t=Uy(e,t);else switch(t){case"svg":t=1;break;case"math":t=2;break;default:t=0}}Ce(hn),Zt(hn,t)}function jo(){Ce(hn),Ce(pu),Ce(zi)}function Rv(t){t.memoizedState!==null&&Zt(Vc,t);var e=hn.current,r=Uy(e,t.type);e!==r&&(Zt(pu,t),Zt(hn,r))}function qc(t){pu.current===t&&(Ce(hn),Ce(pu)),Vc.current===t&&(Ce(Vc),Ou._currentValue=va)}var ev,WA;function fa(t){if(ev===void 0)try{throw Error()}catch(r){var e=r.stack.trim().match(/\n( *(at )?)/);ev=e&&e[1]||"",WA=-1<r.stack.indexOf(`
     at`)?" (<anonymous>)":-1<r.stack.indexOf("@")?"@unknown:0:0":""}return`
