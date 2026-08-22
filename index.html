@@ -12,11 +12,11 @@
 <meta property="og:title" content="Oral Surgery Assess" />
 <meta property="og:description" content="Chairside decision-support tools for oral surgery and dental sedation." />
 <meta property="og:url" content="https://oralsurgeryassess.com/" />
-<meta property="og:image" content="https://oralsurgeryassess.com/icon-512.png" />
-<meta name="twitter:card" content="summary" />
+<meta property="og:image" content="https://oralsurgeryassess.com/share-card.png" />
+<meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Oral Surgery Assess" />
 <meta name="twitter:description" content="Chairside decision-support tools for oral surgery and dental sedation." />
-<meta name="theme-color" content="#FFFFFF" />
+<meta name="theme-color" content="#0F2F63" />
 
 <!-- The suite's only manifest. Each tool page deliberately has none, so the
      whole site installs once, from here, with scope "/" covering every tool. -->
@@ -26,9 +26,31 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Oral Surgery" />
 
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* Self-hosted fonts, added 21 Aug 2026. Previously these came from Google's
+     servers, so on a first visit without a connection the headings fell back to
+     Georgia and the body to the system sans - the site looked different in exactly
+     the situation the offline support exists for. Same files, same licence (OFL),
+     now served from this origin and cached by each tool's service worker. */
+  @font-face{font-family:"Source Serif 4";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/source-serif-4-500.woff2") format("woff2");}
+  @font-face{font-family:"Source Serif 4";font-style:normal;font-weight:600;font-display:swap;
+    src:url("/fonts/source-serif-4-600.woff2") format("woff2");}
+  @font-face{font-family:"Source Serif 4";font-style:normal;font-weight:700;font-display:swap;
+    src:url("/fonts/source-serif-4-700.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-400.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-500.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:600;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-600.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:700;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-700.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/fonts/ibm-plex-mono-400.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/ibm-plex-mono-500.woff2") format("woff2");}
+</style>
 
 <style>
   :root {
@@ -52,14 +74,14 @@
   }
 
   /* switcher */
-  .ostb{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:8px clamp(16px,4vw,32px);background:#FFFFFF;border-bottom:1px solid #D6DCE8;}
+  .ostb{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:8px clamp(16px,4vw,32px);background:#FFFFFF;border-bottom:1px solid #D6DCE8;}
   .ostb-label{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:10px;}
   .ostb a{font-size:13px;font-weight:600;color:var(--soft);text-decoration:none;padding:6px 12px;border-radius:7px;border:1px solid transparent;line-height:1.2;}
   .ostb a:hover{color:var(--navy);background:#EDF3FC;}
   .ostb a[aria-current="page"]{color:var(--navy);background:var(--tint);border-color:var(--chip-line);}
   .ostb a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
   @media print{.ostb{display:none !important;}}
-  @media (max-width:480px){.ostb-label{width:100%;margin-bottom:2px;}}
+  @media (max-width:480px){.ostb{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;}.ostb::-webkit-scrollbar{display:none;}.ostb-label{display:none;}.ostb a{white-space:nowrap;}}
 
   .shell{max-width:700px;margin:0 auto;padding:30px 20px 72px;}
   header.app{margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--line);}
@@ -166,6 +188,63 @@
     }
   })();
 </script>
+<style>
+  /* Interaction polish. Self-contained like the offline notice above, so it
+     applies identically on all five pages without touching any tool's own code.
+
+     This block sits after each page's own stylesheet, so where it repeats a
+     property the page already sets, it wins. The transition below therefore
+     names background-color and border-color as well as transform, so it adds
+     the press feedback without discarding hover behaviour the pages already had. */
+
+  a, button, [role="button"], input, select, textarea, label, summary {
+    -webkit-tap-highlight-color: rgba(15, 47, 99, 0.08);
+  }
+
+  button, [role="button"], a.tool, .ostb a {
+    transition: transform 80ms ease, background-color 120ms ease, border-color 120ms ease;
+  }
+  /* Nothing on the site acknowledged a touch until the next screen appeared.
+     One pixel of travel is enough to feel like the tap registered. */
+  button:not(:disabled):active,
+  [role="button"]:active,
+  a.tool:active,
+  .ostb a:active {
+    transform: translateY(1px);
+  }
+
+  /* Switcher links were about 29px tall. Touch devices get a full 44px target;
+     pointer devices keep the compact bar. */
+  .ostb a { display: inline-flex; align-items: center; }
+  @media (pointer: coarse) {
+    .ostb a { min-height: 44px; padding-left: 14px; padding-right: 14px; }
+  }
+
+  /* Figures should not change width as they change value. */
+  input[type="number"], input[inputmode="decimal"], input[inputmode="numeric"],
+  table, td, th, output {
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1, h2, h3 { text-wrap: balance; }
+  p { text-wrap: pretty; }
+
+  /* The switcher is sticky now, so an in-page jump would land under it.
+     The third molar tool alone has 26 anchor links. */
+  html { scroll-padding-top: 56px; }
+  @media (pointer: coarse) { html { scroll-padding-top: 72px; } }
+
+  ::selection { background: #E8EEF9; color: #0F2F63; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+</style>
 </head>
 <body>
 <nav class="ostb" aria-label="Assessment tools">

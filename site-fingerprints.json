@@ -1,22 +1,22 @@
 {
   ".": {
-    "hash": "c70430f6b0f0d5d1",
-    "cache": "tma-hub-v5"
+    "hash": "080f3c62eb496460",
+    "cache": "tma-hub-v6"
   },
   "third-molar": {
-    "hash": "0c68eeb7ddc566de",
-    "cache": "tm-v1-4-25-d"
+    "hash": "1ec8c3060b7a1399",
+    "cache": "tm-v1-4-25-e"
   },
   "sedation": {
-    "hash": "a1f5adeac42dc6d6",
-    "cache": "sedation-v8"
+    "hash": "b32ca92ea9e1ff70",
+    "cache": "sedation-v9"
   },
   "local-anaesthetic": {
-    "hash": "0ab7ec353a577f09",
-    "cache": "la-v0-14-2-d"
+    "hash": "8ee34b2f7c9584a0",
+    "cache": "la-v0-14-2-e"
   },
   "asa-assessment": {
-    "hash": "5a9012399aab1613",
-    "cache": "asa-v9"
+    "hash": "e94d56c01f619e98",
+    "cache": "asa-v10"
   }
 }
