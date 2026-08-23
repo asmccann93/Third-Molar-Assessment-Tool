@@ -1,0 +1,8 @@
+# oralsurgeryassess.com
+# Clinical decision-support tools for UK dentists. Everything here is public
+# and safe to index; the tools hold no patient data of any kind.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://oralsurgeryassess.com/sitemap.xml
