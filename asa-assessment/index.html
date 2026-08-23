@@ -779,6 +779,19 @@ document.addEventListener("input", function(e){
 
 render();
 
+/* This tool deliberately writes nothing to storage, so a stray refresh, a back
+   gesture or a closed tab discards the assessment with no way to recover it.
+   Rather than start storing clinical findings on a shared surgery device -
+   which would contradict what the cover page promises - warn on the way out
+   while an assessment is actually in progress. The browser supplies its own
+   wording; setting the flag is all a page is allowed to do. */
+window.addEventListener("beforeunload", function (e) {
+  var inProgress = started && !halted && !showResult && Object.keys(answers).length > 0;
+  if (!inProgress) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
 if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
   window.addEventListener("load", function(){
     navigator.serviceWorker.register("sw.js").catch(function(){});
