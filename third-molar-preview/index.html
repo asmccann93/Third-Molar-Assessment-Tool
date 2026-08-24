@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="robots" content="noindex, nofollow" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="theme-color" content="#0F2F63" />
-<title>Third Molar Extraction Assessment</title>
+<title>PREVIEW — Third Molar Extraction Assessment</title>
+<meta name="robots" content="noindex" />
 <meta name="description" content="Structured chairside assessment for third molar extraction, giving a surgical difficulty score, clinical findings and the recommended level of clinician." />
 <link rel="canonical" href="https://oralsurgeryassess.com/third-molar/" />
 <meta name="author" content="Aiden McCann" />
@@ -49,7 +49,42 @@
   body { margin: 0; }
   button { font: inherit; cursor: pointer; }
 </style>
-<!-- service worker registration deliberately removed: this is a preview copy -->
+<script>
+  // Service workers require http/https. Opening index.html straight from disk
+  // (file://) is perfectly fine for previewing, but registration is impossible
+  // there - so don't attempt it, and don't warn about it either.
+  (function () {
+    var served = location.protocol === "http:" || location.protocol === "https:";
+    if (!("serviceWorker" in navigator) || !served) return;
+    window.addEventListener("load", function () {
+      Promise.reject(new Error("preview: service worker deliberately disabled")).catch(function (err) {
+        // Don't assume a cause. Registration is also blocked by policy in
+        // in-app browsers (iOS WKWebView) and some private modes - neither of
+        // which the deployment can do anything about. So check whether the
+        // supporting files are genuinely reachable before blaming them.
+        var detail = (err && err.message) ? err.message : String(err);
+        fetch("sw.js", { method: "HEAD" })
+          .then(function (r) {
+            if (!r.ok) {
+              console.warn(
+                "Offline support unavailable: sw.js returned " + r.status +
+                ". Check that sw.js sits in the same folder as index.html."
+              );
+            } else {
+              console.info(
+                "Offline support unavailable in this browser (" + detail + "). " +
+                "Supporting files are present, so this is a browser restriction - " +
+                "commonly an in-app browser. The assessment tool itself is unaffected."
+              );
+            }
+          })
+          .catch(function () {
+            console.info("Offline support unavailable. The assessment tool itself is unaffected.");
+          });
+      });
+    });
+  })();
+</script>
 
 <!-- Cross-tool switcher. This lives here, not in the built bundle: it was
      previously only in the deployed index.html, so every rebuild silently
@@ -196,7 +231,6 @@
   <a href="/local-anaesthetic/">Local Anaesthetic</a>
   <a href="/asa-assessment/">ASA Assessment</a>
 </nav>
-<div style="background:#0F2F63;color:#fff;font:600 13px/1.4 'IBM Plex Sans',sans-serif;padding:10px 16px;text-align:center">PREVIEW COPY — not the live tool. Diagrams load as separate files here.</div>
 <div id="root"><div class="tmboot" role="status" aria-live="polite">
   <div class="tmboot-eyebrow">Oral Surgery &middot; Chairside Support Tool</div>
   <div class="tmboot-title">Third Molar Assessment Tool</div>
