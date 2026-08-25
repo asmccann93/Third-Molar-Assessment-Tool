@@ -1,0 +1,47 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "_comment": [
+    "New file — the project had none. Only 'headers' and 'functions' are set.",
+    "No 'routes', 'rewrites', 'cleanUrls' or 'trailingSlash' keys: adding any of",
+    "those changes behaviour for the five existing tools, which is the one thing",
+    "this file must not do. Every header block below is path-scoped to /ai-notes/",
+    "or /api/.",
+    "",
+    "maxDuration of 300s needs a Pro plan. On Hobby it silently caps at 60s and a",
+    "long recording will fail at the transcription step. Check the plan before",
+    "the first real test."
+  ],
+
+  "functions": {
+    "api/transcribe.mjs": { "maxDuration": 300, "memory": 1024 },
+    "api/extract.mjs":    { "maxDuration": 120, "memory": 1024 },
+    "api/auth.mjs":       { "maxDuration": 10,  "memory": 512  }
+  },
+
+  "headers": [
+    {
+      "source": "/ai-notes/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive, nosnippet" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Permissions-Policy", "value": "microphone=(self), camera=(), geolocation=(), interest-cohort=()" },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        }
+      ]
+    },
+    {
+      "source": "/api/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" },
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
+      ]
+    }
+  ]
+}

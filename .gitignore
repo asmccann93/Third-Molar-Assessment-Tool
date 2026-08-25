@@ -1,0 +1,24 @@
+# Secrets — never commit. .env.example is the template and is safe; a real
+# .env holds the Speechmatics key, the AWS secret and the passcode.
+#
+# NOTE: this file protects `git add`. It does NOT protect the GitHub web
+# uploader, which commits whatever you drag in regardless. The real rule is
+# simpler: never put a .env file in an upload folder.
+.env
+.env.*
+!.env.example
+
+# Vercel
+.vercel
+
+# macOS
+.DS_Store
+.localized
+
+# Editors
+.vscode/
+.idea/
+
+# Node, if a toolchain is ever added
+node_modules/
+npm-debug.log*
