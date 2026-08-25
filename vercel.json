@@ -1,24 +1,4 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-
-  "_comment": [
-    "New file — the project had none. Only 'headers' and 'functions' are set.",
-    "No 'routes', 'rewrites', 'cleanUrls' or 'trailingSlash' keys: adding any of",
-    "those changes behaviour for the five existing tools, which is the one thing",
-    "this file must not do. Every header block below is path-scoped to /ai-notes/",
-    "or /api/.",
-    "",
-    "maxDuration of 300s needs a Pro plan. On Hobby it silently caps at 60s and a",
-    "long recording will fail at the transcription step. Check the plan before",
-    "the first real test."
-  ],
-
-  "functions": {
-    "api/transcribe.mjs": { "maxDuration": 300, "memory": 1024 },
-    "api/extract.mjs":    { "maxDuration": 120, "memory": 1024 },
-    "api/auth.mjs":       { "maxDuration": 10,  "memory": 512  }
-  },
-
   "headers": [
     {
       "source": "/ai-notes/:path*",
