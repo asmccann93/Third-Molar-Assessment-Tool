@@ -1,0 +1,1102 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>AI Notes</title>
+
+<!-- No manifest link: this page must not be installable in its own right, and
+     the hub manifest already has scope '/'. No favicon request either — one
+     fewer thing to cache. -->
+
+<style>
+  /* Self-hosted faces, copied from the suite. Same files, same paths, so they
+     are already in the browser cache from the other tools. Only the weights
+     this page actually uses — no Source Serif, which this page does not set. */
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-400.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-500.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:600;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-600.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:700;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-700.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/fonts/ibm-plex-mono-400.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/ibm-plex-mono-500.woff2") format("woff2");}
+</style>
+
+<style>
+/* ===================================================================
+   TOKENS
+   Top block copied verbatim from asa-assessment/index.html so this page
+   matches the suite. Bottom block is page-local: names this page needs
+   that the suite does not define. Kept separate so a future token change
+   in the suite can be pasted straight over the top half.
+
+   FONTS: the suite self-hosts IBM Plex and Source Serif under /fonts/.
+   This page loads the same files from the same paths, so they are already
+   cached from the other tools and no third-party request is made. CSP
+   font-src is 'self', which permits exactly this and nothing else.
+   =================================================================== */
+:root {
+  /* ---- from the suite, verbatim ---- */
+  --navy:#0F2F63; --ink:#0F2F63; --accent:#1E4D9B; --soft:#3F5A8A; --muted:#4A6FA5;
+  --line:#D6DCE8; --tint:#E8EEF9; --tint-soft:#F2F7FE; --chip-bg:#E7EEF9; --chip-line:#C9D9F0;
+  --bg:#FFFFFF; --surface:#FFFFFF; --clay:#A11D2E; --amber:#C43A32; --alert-bg:#FDF2F2;
+  --disabled:#9FB0CC;
+  --sans:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+  --serif:"Source Serif 4","Iowan Old Style",Georgia,ui-serif,serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",monospace;
+
+  /* ---- page-local ---- */
+  --page-bg:   #F7F9FC;              /* matches the .ostb bar */
+  --ink-muted: var(--soft);
+  --ink-faint: var(--muted);
+  --line-firm: var(--chip-line);
+  --stop:      var(--clay);          /* recording / destructive only */
+  --stop-bg:   var(--alert-bg);
+
+  /* The suite has no amber-warning token. The gap list must not read as an
+     error — a gap is an action, not a failure — so it gets its own. */
+  --warn-bg:   #FDF4EC;
+  --warn-line: #E8C9A6;
+  --warn-ink:  #8A4B12;
+
+  --radius:    8px;
+  --tap:       48px;                 /* minimum touch target, chairside */
+  --font-ui:   var(--sans);
+  --font-mono: var(--mono);
+
+  color-scheme: light;               /* site is light-mode only */
+}
+
+/* ===================================================================
+   BASE
+   =================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--page-bg);
+  color: var(--ink);
+  font: 400 16px/1.55 var(--font-ui);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.005em; }
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-firm);
+  background: var(--surface);
+  min-height: var(--tap);
+  padding: 0 18px;
+}
+button:disabled { opacity: .45; cursor: default; }
+
+:where(a, button, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+
+.wrap { max-width: 780px; margin: 0 auto; padding: 20px 16px 72px; }
+.hidden { display: none !important; }
+.sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ===================================================================
+   TOOL SWITCHER  (.ostb)
+   Copied verbatim from asa-assessment/index.html. Do not restyle — the
+   bar must look identical across every page.
+
+   The deliberate variant noted in README is the MARKUP, not the CSS:
+   this page carries one extra entry that appears nowhere else.
+   =================================================================== */
+.ostb{display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:8px 16px;background:#F7F9FC;border-bottom:1px solid #E2E8F2;}
+.ostb-label{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:10px;}
+.ostb a{font-size:13px;font-weight:600;color:var(--soft);text-decoration:none;padding:6px 12px;border-radius:7px;border:1px solid transparent;line-height:1.2;}
+.ostb a:hover{color:var(--navy);background:#EDF3FC;}
+.ostb a[aria-current="page"]{color:var(--navy);background:var(--tint);border-color:var(--chip-line);}
+.ostb a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+@media print{.ostb{display:none !important;}}
+@media (max-width:480px){.ostb-label{width:100%;margin-bottom:2px;}}
+
+/* ===================================================================
+   MASTHEAD
+   =================================================================== */
+.masthead { padding: 24px 0 20px; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+.masthead h1 { font-size: 1.375rem; }
+.masthead p { margin: 4px 0 0; font-size: .8125rem; color: var(--ink-faint); }
+
+/* ===================================================================
+   CARDS
+   =================================================================== */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.card > h2 {
+  font-size: .75rem; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--ink-faint); margin-bottom: 12px;
+}
+
+/* ---- consent gate ---- */
+.consent-script {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-left: 3px solid var(--accent);
+  background: var(--tint-soft);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+.consent-script + p { margin: 0 0 16px; font-size: .8125rem; color: var(--ink-muted); }
+
+.consent-confirm {
+  display: flex; align-items: center; gap: 12px;
+  min-height: var(--tap); padding: 10px 14px;
+  border: 1px solid var(--line-firm); border-radius: var(--radius);
+  cursor: pointer; user-select: none;
+}
+.consent-confirm:has(input:checked) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.consent-confirm input { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
+.consent-confirm span { font-weight: 500; }
+
+/* ---- consult type ---- */
+.types { display: flex; flex-wrap: wrap; gap: 8px; }
+.types button {
+  flex: 1 1 auto; min-width: 130px;
+  font-size: .875rem; padding: 0 14px;
+}
+.types button[aria-pressed="true"] {
+  background: var(--accent); border-color: var(--accent);
+  color: #fff; font-weight: 600;
+}
+
+/* ---- record ---- */
+.record-row { display: flex; gap: 12px; align-items: stretch; margin-top: 4px; }
+.btn-record {
+  flex: 1; min-height: 64px; font-size: 1.0625rem; font-weight: 600;
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.btn-record:disabled { background: var(--line-firm); border-color: var(--line-firm); color: #fff; }
+.btn-stop {
+  flex: 1; min-height: 64px; font-size: 1.0625rem; font-weight: 600;
+  background: var(--stop); border-color: var(--stop); color: #fff;
+}
+.btn-discard { flex: none; background: var(--surface); color: var(--stop); border-color: var(--line-firm); }
+
+/* ---- recording state ---- */
+#recbar {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: var(--stop); color: #fff;
+  font-size: .875rem; font-weight: 600;
+}
+.dot {
+  width: 10px; height: 10px; border-radius: 50%; background: #fff; flex: none;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+.timer {
+  font: 600 2.75rem/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center; margin: 8px 0 4px;
+}
+.timer.over { color: var(--stop); }
+.timer-note { text-align: center; font-size: .8125rem; color: var(--ink-muted); margin: 0 0 18px; }
+
+.level { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-bottom: 6px; }
+.level > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .08s linear; }
+.level-note { text-align: center; font-size: .75rem; color: var(--ink-faint); margin: 0 0 18px; min-height: 1.1em; }
+.level-note.alert { color: var(--stop); font-weight: 600; }
+
+/* ---- working ---- */
+.working { display: flex; align-items: center; gap: 12px; font-size: .9375rem; }
+.spinner {
+  width: 18px; height: 18px; flex: none; border-radius: 50%;
+  border: 2px solid var(--line-firm); border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- gaps ---- */
+.gaps {
+  border: 1px solid var(--warn-line); background: var(--warn-bg);
+  border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+}
+.gaps h2 { font-size: .9375rem; color: var(--warn-ink); margin-bottom: 4px; text-transform: none; letter-spacing: 0; }
+.gaps p.lead { margin: 0 0 12px; font-size: .8125rem; color: var(--warn-ink); }
+.gaps ul { margin: 0; padding-left: 20px; }
+.gaps li { margin-bottom: 6px; color: var(--warn-ink); font-size: .9375rem; }
+.gaps.clear { border-color: var(--line); background: var(--surface); }
+.gaps.clear h2, .gaps.clear p.lead { color: var(--ink-muted); }
+
+/* ---- note fields ---- */
+.field { border-top: 1px solid var(--line); padding: 16px 0; }
+.field:first-of-type { border-top: 0; }
+.field-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.field-head h3 { font-size: .9375rem; flex: 1; }
+.field-head .copy {
+  min-height: 34px; padding: 0 12px; font-size: .75rem; font-weight: 600;
+  border-radius: 6px; flex: none;
+}
+.core-tag {
+  font-size: .625rem; text-transform: uppercase; letter-spacing: .06em;
+  font-weight: 700; color: var(--accent); flex: none;
+}
+.field pre {
+  margin: 0; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 400 .9375rem/1.6 var(--font-ui); color: var(--ink);
+}
+.field.is-gap pre { color: var(--ink-faint); font-style: italic; }
+.field.is-core .field-head h3 { color: var(--accent); }
+
+/* ---- footer actions ---- */
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
+.actions .primary { flex: 1 1 200px; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.actions .danger  { flex: 1 1 140px; background: var(--stop-bg); border-color: var(--stop); color: var(--stop); font-weight: 600; }
+
+/* ---- errors ---- */
+.error {
+  border: 1px solid var(--stop); background: var(--stop-bg);
+  border-radius: var(--radius); padding: 16px 20px; margin-bottom: 16px;
+}
+.error h2 { font-size: .9375rem; color: var(--stop); margin-bottom: 4px; text-transform: none; letter-spacing: 0; }
+.error p { margin: 0; font-size: .875rem; color: var(--ink); }
+
+/* ---- privacy mask ---- */
+#mask {
+  position: fixed; inset: 0; z-index: 90;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--page-bg) 92%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+#mask button { min-height: 56px; padding: 0 28px; font-weight: 600; background: var(--surface); }
+#mask p { margin: 14px 0 0; font-size: .8125rem; color: var(--ink-muted); }
+#mask div { text-align: center; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 95; padding: 12px 20px; border-radius: 999px;
+  background: var(--ink); color: #fff; font-size: .875rem; font-weight: 500;
+  box-shadow: 0 4px 16px rgb(0 0 0 / .18);
+}
+</style>
+</head>
+
+<body>
+
+<!-- ============================================================
+     TOOL SWITCHER
+     The four public entries are copied verbatim from the bar on
+     asa-assessment/index.html. The fifth, AI Notes, exists only on
+     this page and is never added to the four public pages.
+     ============================================================ -->
+<nav class="ostb" aria-label="Assessment tools">
+  <span class="ostb-label">Oral Surgery Tools</span>
+  <a href="/">Overview</a>
+  <a href="/third-molar/">Third Molar</a>
+  <a href="/sedation/">Sedation</a>
+  <a href="/local-anaesthetic/">Local Anaesthetic</a>
+  <a href="/asa-assessment/">ASA Assessment</a>
+  <a href="/ai-notes/" aria-current="page">AI Notes</a>
+</nav>
+
+<div id="recbar" class="hidden" role="status">
+  <span class="dot" aria-hidden="true"></span>
+  <span>Recording — conversation only</span>
+</div>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <h1>AI Notes</h1>
+    <p>Dentist with special interest in oral surgery</p>
+  </header>
+
+  <div id="error" class="error hidden" role="alert">
+    <h2 id="error-title"></h2>
+    <p id="error-body"></p>
+  </div>
+
+  <!-- ============ SETUP ============ -->
+  <section id="setup">
+
+    <div class="card">
+      <h2>Before you start</h2>
+      <p class="consent-script" id="script"></p>
+      <p>Wait for an answer. If the patient hesitates or declines, don't record — say “no problem at all” and move on.</p>
+      <label class="consent-confirm">
+        <input type="checkbox" id="consent">
+        <span>The patient has agreed to be recorded</span>
+      </label>
+    </div>
+
+    <div class="card">
+      <h2>Consult type</h2>
+      <div class="types" id="types" role="group" aria-label="Consult type"></div>
+    </div>
+
+    <div class="card">
+      <h2>Record</h2>
+      <div class="record-row">
+        <button class="btn-record" id="start" disabled>Start recording</button>
+      </div>
+      <p class="timer-note" style="margin:12px 0 0">
+        Conversation only. Stop before you start treating.
+      </p>
+    </div>
+
+  </section>
+
+  <!-- ============ RECORDING ============ -->
+  <section id="recording" class="hidden">
+    <div class="card">
+      <h2>Recording</h2>
+      <p class="timer" id="timer">0:00</p>
+      <p class="timer-note" id="timer-note">Stops automatically at 15:00</p>
+      <div class="level" aria-hidden="true"><i id="level"></i></div>
+      <p class="level-note" id="level-note" role="status"></p>
+      <div class="record-row">
+        <button class="btn-stop" id="stop">Stop and draft note</button>
+        <button class="btn-discard" id="discard">Discard</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WORKING ============ -->
+  <section id="working" class="hidden">
+    <div class="card">
+      <div class="working">
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="working-text" role="status">Transcribing…</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DRAFT ============ -->
+  <section id="draft" class="hidden">
+
+    <div class="gaps" id="gaps">
+      <h2 id="gaps-title">Check before you paste</h2>
+      <p class="lead" id="gaps-lead"></p>
+      <ul id="gaps-list"></ul>
+    </div>
+
+    <div class="card">
+      <h2 id="draft-heading">Draft note</h2>
+      <div id="fields"></div>
+    </div>
+
+    <div class="card">
+      <div class="actions">
+        <button class="primary" id="copy-all">Copy whole note</button>
+        <button class="danger" id="clear">Clear everything</button>
+      </div>
+      <p class="timer-note" style="margin:14px 0 0">
+        This is a draft. Read it against what you remember, then paste it into the record.
+        Nothing here is saved — closing the tab destroys it.
+      </p>
+    </div>
+
+  </section>
+
+</div>
+
+<div id="mask" class="hidden">
+  <div>
+    <button id="unmask" type="button">Show draft</button>
+    <p>Hidden while the tab was in the background.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ==================================================================
+     CONFIG — the behavioural knobs. Two of these have DPIA consequences
+     and are flagged as such.
+     ================================================================== */
+  var CFG = {
+    MAX_MS:        15 * 60 * 1000,   // hard cap; auto-stops
+    WARN_MS:       13 * 60 * 1000,   // timer turns red
+    IDLE_WIPE_MS:  10 * 60 * 1000,   // no interaction -> destroy everything
+    AUDIO_BPS:     24000,            // 15 min mono Opus ~= 2.7 MB, under Vercel's 4.5 MB
+    MAX_BYTES:     4.2 * 1024 * 1024,
+    SILENCE_MS:    6000,             // no sound for this long -> warn
+    POLL_MS:       5000,
+    POLL_MAX:      120,
+
+    // DPIA §2.1 step 6 / R13. The spec says destroy on tab hide. That would
+    // break the workflow: copying block by block into a web PMS in another tab
+    // hides this one every single time, and the draft would be gone before the
+    // second paste. So hiding MASKS the draft instead — nothing is readable on
+    // an unattended screen, which is what R13 actually protects against — and
+    // destruction is driven by the idle timer, tab close, and the Clear button.
+    // Set to true for the literal behaviour if you'd rather not amend the DPIA.
+    WIPE_ON_HIDE:  false
+  };
+
+  var CONSULT_TYPES = [
+    ['exam-recall',        'Exam / recall'],
+    ['restorative',        'Restorative'],
+    ['perio',              'Perio'],
+    ['endo',               'Endo'],
+    ['extraction-surgery', 'Extraction / surgery'],
+    ['emergency',          'Emergency'],
+    ['treatment-plan',     'Treatment plan consult'],
+    ['sedation',           'Sedation']
+  ];
+
+  // Order and headings mirror FIELDS in api/_prompt.mjs. Keep them in step.
+  var FIELDS = [
+    ['reasonForAttendance', 'Reason for attendance',            false],
+    ['medicalHistory',      'Relevant medical history',         false],
+    ['proposed',            'Treatment proposed',               false],
+    ['alternatives',        'Alternatives, including no treatment', true],
+    ['risks',               'Material risks named, per option',  true],
+    ['benefits',            'Benefits and realistic expectations', false],
+    ['costs',               'Costs discussed',                  false],
+    ['patientQuestions',    "Patient's own questions and concerns", true],
+    ['patientFactors',      'Patient-specific factors',         true],
+    ['informationGiven',    'Information given',                false],
+    ['decision',            'Decision',                         false],
+    ['nextStep',            'Next step',                        false]
+  ];
+
+  var CONSENT_SCRIPT =
+    'Before we start — I use a tool that listens to our conversation so my notes ' +
+    'are accurate. It\u2019s deleted as soon as I\u2019ve written them up, and it\u2019s ' +
+    'not recording while I\u2019m treating you. Happy for me to use it?';
+
+  /* ==================================================================
+     STATE — everything lives here and nowhere else. No storage of any
+     kind: no localStorage, no sessionStorage, no IndexedDB, no cache.
+     ================================================================== */
+  var S = {
+    consent: false,
+    consultType: null,
+    recorder: null,
+    stream: null,
+    chunks: [],
+    audioType: '',
+    startedAt: 0,
+    tickId: null,
+    idleId: null,
+    audioCtx: null,
+    analyser: null,
+    rafId: null,
+    lastSoundAt: 0,
+    jobId: null,
+    note: null,
+    busy: false
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ==================================================================
+     VIEW
+     ================================================================== */
+  function show(name) {
+    ['setup', 'recording', 'working', 'draft'].forEach(function (k) {
+      $(k).classList.toggle('hidden', k !== name);
+    });
+    $('recbar').classList.toggle('hidden', name !== 'recording');
+  }
+
+  function fail(title, body) {
+    $('error-title').textContent = title;
+    $('error-body').textContent = body;
+    $('error').classList.remove('hidden');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function clearError() { $('error').classList.add('hidden'); }
+
+  var toastId = null;
+  function toast(message) {
+    var existing = document.querySelector('.toast');
+    if (existing) existing.remove();
+    clearTimeout(toastId);
+    var el = document.createElement('div');
+    el.className = 'toast';
+    el.setAttribute('role', 'status');
+    el.textContent = message;
+    document.body.appendChild(el);
+    toastId = setTimeout(function () { el.remove(); }, 1800);
+  }
+
+  /* ==================================================================
+     SETUP
+     ================================================================== */
+  $('script').textContent = CONSENT_SCRIPT;
+
+  CONSULT_TYPES.forEach(function (pair) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = pair[1];
+    b.setAttribute('aria-pressed', 'false');
+    b.addEventListener('click', function () {
+      S.consultType = pair[0];
+      Array.prototype.forEach.call($('types').children, function (other) {
+        other.setAttribute('aria-pressed', String(other === b));
+      });
+      refreshStart();
+    });
+    $('types').appendChild(b);
+  });
+
+  $('consent').addEventListener('change', function (e) {
+    S.consent = e.target.checked;
+    refreshStart();
+  });
+
+  function refreshStart() {
+    $('start').disabled = !(S.consent && S.consultType);
+  }
+
+  /* ==================================================================
+     RECORDING
+     ================================================================== */
+  function pickMimeType() {
+    // Safari and iPadOS do not produce webm. Ordered by what Speechmatics
+    // handles most cleanly.
+    var candidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/mp4;codecs=mp4a.40.2',
+      'audio/mp4'
+    ];
+    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return '';
+    for (var i = 0; i < candidates.length; i++) {
+      if (MediaRecorder.isTypeSupported(candidates[i])) return candidates[i];
+    }
+    return '';
+  }
+
+  $('start').addEventListener('click', async function () {
+    clearError();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return fail('No microphone access', 'This browser will not expose a microphone to the page. Use Chrome or Safari over https.');
+    }
+
+    try {
+      S.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+    } catch (err) {
+      return fail('Microphone blocked',
+        'The browser refused access to the microphone. Check the padlock in the address bar and allow it for this site, then try again.');
+    }
+
+    var mime = pickMimeType();
+    var options = { audioBitsPerSecond: CFG.AUDIO_BPS };
+    if (mime) options.mimeType = mime;
+
+    try {
+      S.recorder = new MediaRecorder(S.stream, options);
+    } catch (err) {
+      try { S.recorder = new MediaRecorder(S.stream); }
+      catch (err2) { stopTracks(); return fail('Cannot record', 'MediaRecorder is unavailable in this browser.'); }
+    }
+
+    S.chunks = [];
+    S.audioType = S.recorder.mimeType || mime || 'audio/webm';
+    S.recorder.addEventListener('dataavailable', function (e) {
+      if (e.data && e.data.size > 0) S.chunks.push(e.data);
+    });
+    S.recorder.addEventListener('stop', onRecorderStop);
+    S.recorder.start(1000);
+
+    S.startedAt = Date.now();
+    S.lastSoundAt = Date.now();
+    startMeter();
+    startTicking();
+    show('recording');
+    resetIdle();
+  });
+
+  function startTicking() {
+    tick();
+    S.tickId = setInterval(tick, 250);
+  }
+
+  function tick() {
+    var elapsed = Date.now() - S.startedAt;
+    var total = Math.floor(elapsed / 1000);
+    var mins = Math.floor(total / 60);
+    var secs = total % 60;
+    $('timer').textContent = mins + ':' + (secs < 10 ? '0' : '') + secs;
+    $('timer').classList.toggle('over', elapsed >= CFG.WARN_MS);
+
+    if (elapsed >= CFG.WARN_MS && elapsed < CFG.MAX_MS) {
+      var left = Math.ceil((CFG.MAX_MS - elapsed) / 1000);
+      $('timer-note').textContent = 'Stops automatically in ' + left + 's';
+    }
+
+    if (elapsed >= CFG.MAX_MS) {
+      $('timer-note').textContent = 'Reached the 15 minute limit.';
+      stopRecording();
+    }
+  }
+
+  function startMeter() {
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      S.audioCtx = new Ctx();
+      var source = S.audioCtx.createMediaStreamSource(S.stream);
+      S.analyser = S.audioCtx.createAnalyser();
+      S.analyser.fftSize = 512;
+      source.connect(S.analyser);
+      meterFrame();
+    } catch (err) {
+      // A missing level meter is cosmetic. Recording continues.
+    }
+  }
+
+  function meterFrame() {
+    if (!S.analyser) return;
+    var data = new Uint8Array(S.analyser.fftSize);
+    S.analyser.getByteTimeDomainData(data);
+
+    var peak = 0;
+    for (var i = 0; i < data.length; i++) {
+      var deviation = Math.abs(data[i] - 128);
+      if (deviation > peak) peak = deviation;
+    }
+    var level = Math.min(100, (peak / 128) * 260);
+    $('level').style.width = level + '%';
+
+    if (peak > 4) S.lastSoundAt = Date.now();
+    var silentFor = Date.now() - S.lastSoundAt;
+    var note = $('level-note');
+    if (silentFor > CFG.SILENCE_MS) {
+      note.textContent = 'No sound detected — check the microphone is not muted.';
+      note.classList.add('alert');
+    } else if (note.textContent) {
+      note.textContent = '';
+      note.classList.remove('alert');
+    }
+
+    S.rafId = requestAnimationFrame(meterFrame);
+  }
+
+  $('stop').addEventListener('click', function () { resetIdle(); stopRecording(); });
+
+  $('discard').addEventListener('click', function () {
+    if (!confirm('Discard this recording? Nothing will be kept.')) return;
+    S.discarding = true;
+    stopRecording();
+    wipe();
+    show('setup');
+    toast('Discarded');
+  });
+
+  function stopRecording() {
+    if (S.tickId) { clearInterval(S.tickId); S.tickId = null; }
+    if (S.rafId) { cancelAnimationFrame(S.rafId); S.rafId = null; }
+    if (S.recorder && S.recorder.state !== 'inactive') {
+      try { S.recorder.stop(); } catch (err) { /* already stopped */ }
+    } else {
+      stopTracks();
+    }
+    $('recbar').classList.add('hidden');
+  }
+
+  function stopTracks() {
+    if (S.stream) {
+      S.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      S.stream = null;
+    }
+    if (S.audioCtx) {
+      try { S.audioCtx.close(); } catch (e) {}
+      S.audioCtx = null;
+      S.analyser = null;
+    }
+  }
+
+  async function onRecorderStop() {
+    stopTracks();
+    if (S.discarding) { S.discarding = false; return; }
+
+    var blob = new Blob(S.chunks, { type: S.audioType });
+    S.chunks = [];
+
+    if (blob.size < 2000) {
+      show('setup');
+      return fail('Nothing recorded', 'The recording was empty. Check the microphone and try again.');
+    }
+    if (blob.size > CFG.MAX_BYTES) {
+      show('setup');
+      return fail('Recording too long to send',
+        'The file is ' + (blob.size / 1048576).toFixed(1) + ' MB, over the upload limit. Record shorter conversations, or lower AUDIO_BPS.');
+    }
+
+    await process(blob);
+  }
+
+  /* ==================================================================
+     PIPELINE
+     ================================================================== */
+  async function process(blob) {
+    S.busy = true;
+    show('working');
+    $('working-text').textContent = 'Transcribing\u2026';
+    resetIdle();
+
+    var turns;
+    try {
+      turns = await transcribe(blob);
+    } catch (err) {
+      S.busy = false;
+      show('setup');
+      return fail('Transcription failed', String(err.message || err));
+    }
+    blob = null;
+
+    if (!turns || turns.length === 0) {
+      S.busy = false;
+      show('setup');
+      return fail('Nothing to transcribe', 'No speech was recognised in the recording.');
+    }
+
+    $('working-text').textContent = 'Drafting the note\u2026';
+
+    try {
+      var res = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turns: turns, consultType: S.consultType })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+      S.note = data.note;
+    } catch (err) {
+      S.busy = false;
+      show('setup');
+      return fail('Could not draft the note', String(err.message || err));
+    }
+
+    turns = null;
+    S.busy = false;
+    render(S.note);
+    show('draft');
+    resetIdle();
+  }
+
+  async function transcribe(blob) {
+    var res = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+      body: blob
+    });
+
+    var data = await res.json().catch(function () { return {}; });
+
+    if (res.status === 401) throw new Error('The session expired. Reload the page and enter the passcode again.');
+    if (!res.ok && res.status !== 202) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+
+    if (data.status === 'done') return data.turns;
+
+    if (data.status === 'pending' && data.jobId) {
+      S.jobId = data.jobId;
+      $('working-text').textContent = 'Transcribing\u2026 this one is taking a little longer.';
+      for (var i = 0; i < CFG.POLL_MAX; i++) {
+        await new Promise(function (r) { setTimeout(r, CFG.POLL_MS); });
+        var pr = await fetch('/api/transcribe?jobId=' + encodeURIComponent(data.jobId));
+        var pd = await pr.json().catch(function () { return {}; });
+        if (pd.status === 'done') { S.jobId = null; return pd.turns; }
+        if (!pr.ok && pr.status !== 202) throw new Error(pd.detail || pd.error || ('HTTP ' + pr.status));
+      }
+      throw new Error('Transcription did not finish in time.');
+    }
+
+    throw new Error('Unexpected response from the transcription service.');
+  }
+
+  /* ==================================================================
+     RENDER — all model output goes in via textContent. Nothing the
+     model produces is ever parsed as HTML.
+     ================================================================== */
+  function render(note) {
+    var gaps = Array.isArray(note.gaps) ? note.gaps : [];
+    var box = $('gaps');
+    var list = $('gaps-list');
+    list.textContent = '';
+
+    if (gaps.length) {
+      box.classList.remove('clear');
+      $('gaps-title').textContent = 'Check before you paste — ' + gaps.length + (gaps.length === 1 ? ' gap' : ' gaps');
+      $('gaps-lead').textContent = 'These were not captured. Add them from memory, or leave them out honestly.';
+      gaps.forEach(function (g) {
+        var li = document.createElement('li');
+        li.textContent = g;
+        list.appendChild(li);
+      });
+    } else {
+      box.classList.add('clear');
+      $('gaps-title').textContent = 'No gaps flagged';
+      $('gaps-lead').textContent = 'Every field was filled from the transcript. Still read it through — a filled field can still be wrong.';
+    }
+
+    // Speaker mapping banner, only if the prompt is later amended to report it.
+    var existingMap = document.getElementById('speaker-map');
+    if (existingMap) existingMap.remove();
+    if (note.speakers && typeof note.speakers === 'object') {
+      var entries = Object.keys(note.speakers).map(function (k) { return k + ' = ' + note.speakers[k]; });
+      if (entries.length) {
+        var banner = document.createElement('div');
+        banner.id = 'speaker-map';
+        banner.className = 'gaps';
+        banner.style.marginBottom = '16px';
+        var h = document.createElement('h2');
+        h.textContent = 'Check the speaker mapping';
+        var p = document.createElement('p');
+        p.className = 'lead';
+        p.textContent = entries.join('  \u00b7  ') +
+          (note.speakerConfidence ? '  \u2014  confidence: ' + note.speakerConfidence : '');
+        banner.appendChild(h);
+        banner.appendChild(p);
+        box.parentNode.insertBefore(banner, box);
+      }
+    }
+
+    var host = $('fields');
+    host.textContent = '';
+
+    FIELDS.forEach(function (spec) {
+      var key = spec[0], heading = spec[1], isCore = spec[2];
+      var value = note[key];
+      var isGap = value === null || value === undefined || String(value).trim() === '';
+
+      var wrap = document.createElement('div');
+      wrap.className = 'field' + (isGap ? ' is-gap' : '') + (isCore ? ' is-core' : '');
+
+      var head = document.createElement('div');
+      head.className = 'field-head';
+
+      var h3 = document.createElement('h3');
+      h3.textContent = heading;
+      head.appendChild(h3);
+
+      if (isCore) {
+        var tag = document.createElement('span');
+        tag.className = 'core-tag';
+        tag.textContent = 'Montgomery';
+        tag.title = 'One of the four fields a consent claim turns on';
+        head.appendChild(tag);
+      }
+
+      if (!isGap) {
+        var copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'copy';
+        copy.textContent = 'Copy';
+        copy.addEventListener('click', function () {
+          writeClipboard(heading + '\n' + String(value).trim(), copy);
+        });
+        head.appendChild(copy);
+      }
+
+      var pre = document.createElement('pre');
+      pre.textContent = isGap ? 'Not captured' : String(value).trim();
+
+      wrap.appendChild(head);
+      wrap.appendChild(pre);
+      host.appendChild(wrap);
+    });
+  }
+
+  function noteAsText(note) {
+    var lines = [];
+    FIELDS.forEach(function (spec) {
+      var value = note[spec[0]];
+      if (value === null || value === undefined || String(value).trim() === '') return;
+      lines.push(spec[1]);
+      lines.push(String(value).trim());
+      lines.push('');
+    });
+    return lines.join('\n').trim();
+  }
+
+  $('copy-all').addEventListener('click', function () {
+    if (!S.note) return;
+    writeClipboard(noteAsText(S.note), $('copy-all'));
+  });
+
+  async function writeClipboard(text, button) {
+    var original = button.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = 'Copied';
+      toast('Copied');
+    } catch (err) {
+      // Fallback for browsers that refuse the async clipboard API.
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); button.textContent = 'Copied'; toast('Copied'); }
+      catch (e) { toast('Could not copy — select the text manually'); }
+      ta.remove();
+    }
+    setTimeout(function () { button.textContent = original; }, 1600);
+    resetIdle();
+  }
+
+  /* ==================================================================
+     DESTRUCTION
+     ================================================================== */
+  function wipe() {
+    if (S.tickId) { clearInterval(S.tickId); S.tickId = null; }
+    if (S.rafId) { cancelAnimationFrame(S.rafId); S.rafId = null; }
+    if (S.idleId) { clearTimeout(S.idleId); S.idleId = null; }
+
+    if (S.recorder && S.recorder.state !== 'inactive') {
+      try { S.recorder.stop(); } catch (e) {}
+    }
+    S.recorder = null;
+    stopTracks();
+
+    // Best-effort tidy-up of an abandoned Speechmatics job so nothing is left
+    // sitting on their side. keepalive lets it survive the page going away.
+    if (S.jobId) {
+      try {
+        fetch('/api/transcribe?jobId=' + encodeURIComponent(S.jobId), {
+          method: 'DELETE',
+          keepalive: true
+        });
+      } catch (e) {}
+      S.jobId = null;
+    }
+
+    S.chunks = [];
+    S.note = null;
+    S.busy = false;
+    S.discarding = false;
+
+    $('fields').textContent = '';
+    $('gaps-list').textContent = '';
+    var map = document.getElementById('speaker-map');
+    if (map) map.remove();
+    $('timer').textContent = '0:00';
+    $('timer').classList.remove('over');
+    $('timer-note').textContent = 'Stops automatically at 15:00';
+    $('level').style.width = '0';
+    $('level-note').textContent = '';
+    $('level-note').classList.remove('alert');
+
+    $('consent').checked = false;
+    S.consent = false;
+    S.consultType = null;
+    Array.prototype.forEach.call($('types').children, function (b) {
+      b.setAttribute('aria-pressed', 'false');
+    });
+    refreshStart();
+    unmask();
+  }
+
+  $('clear').addEventListener('click', function () {
+    wipe();
+    clearError();
+    show('setup');
+    toast('Cleared');
+  });
+
+  /* ---- idle ---- */
+  function resetIdle() {
+    if (S.idleId) clearTimeout(S.idleId);
+    S.idleId = setTimeout(function () {
+      if (S.recorder && S.recorder.state === 'recording') { resetIdle(); return; }
+      var hadSomething = !!S.note;
+      wipe();
+      show('setup');
+      if (hadSomething) fail('Cleared after 10 minutes idle', 'The draft was destroyed. Nothing was saved.');
+    }, CFG.IDLE_WIPE_MS);
+  }
+
+  ['pointerdown', 'keydown', 'scroll'].forEach(function (evt) {
+    window.addEventListener(evt, function () { if (S.idleId) resetIdle(); }, { passive: true });
+  });
+
+  /* ---- tab hide ---- */
+  function mask() {
+    if (!S.note) return;
+    $('mask').classList.remove('hidden');
+  }
+  function unmask() { $('mask').classList.add('hidden'); }
+  $('unmask').addEventListener('click', function () { unmask(); resetIdle(); });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'hidden') return;
+    if (CFG.WIPE_ON_HIDE) { wipe(); show('setup'); return; }
+    mask();
+  });
+
+  /* ---- page going away ---- */
+  window.addEventListener('pagehide', wipe);
+  window.addEventListener('beforeunload', function (e) {
+    if (S.recorder && S.recorder.state === 'recording') {
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    }
+    if (S.note || S.busy) {
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    }
+  });
+
+  /* ==================================================================
+     SERVICE WORKER — network-only, scope /ai-notes/. Registered so it
+     claims this path ahead of the hub SW at scope '/'.
+     ================================================================== */
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/ai-notes/sw.js', { scope: '/ai-notes/' })
+        .catch(function (err) { console.warn('ai-notes SW registration failed:', err && err.message); });
+    });
+  }
+
+  refreshStart();
+  show('setup');
+})();
+</script>
+
+</body>
+</html>
