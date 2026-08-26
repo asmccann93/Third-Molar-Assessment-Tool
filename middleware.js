@@ -114,8 +114,17 @@ function challengePage() {
         body: JSON.stringify({ passcode: document.getElementById('p').value })
       });
       if (r.ok) { location.reload(); return; }
-      if (r.status === 429) { e.textContent = 'Too many attempts. Wait a minute and try again.'; }
-      else { e.textContent = 'That passcode was not recognised.'; }
+      // Distinguish the failure modes. Reporting "wrong passcode" for a server
+      // that has no passcode configured sends you looking in the wrong place.
+      if (r.status === 429) {
+        e.textContent = 'Too many attempts. Wait a minute and try again.';
+      } else if (r.status === 500) {
+        e.textContent = 'Not a passcode problem \u2014 the server has no passcode set. Add APP_PASSCODE and SESSION_SECRET in Vercel (Production scope), then redeploy.';
+      } else if (r.status === 404 || r.status === 405) {
+        e.textContent = 'The sign-in endpoint returned ' + r.status + '. The deployment may be mid-build.';
+      } else {
+        e.textContent = 'That passcode was not recognised.';
+      }
     } catch (err) {
       e.textContent = 'Could not reach the server. Check the connection.';
     }

@@ -1,4 +1,4 @@
-const CACHE = "tma-hub-v8";
+const CACHE = "tma-hub-v9";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
@@ -29,6 +29,18 @@ self.addEventListener("activate", (e) => {
 });
 
 self.addEventListener("fetch", (e) => {
+  // AI Notes is never cached. This worker's scope is the whole origin, so a
+  // navigation to /ai-notes/ lands here first and the network-first branch below
+  // would put the page in the cache. /ai-notes/sw.js is network-only and scoped
+  // more specifically, but it cannot help on the very first visit, before it has
+  // installed. Returning without calling respondWith() hands the request back to
+  // the browser untouched.
+  //
+  // This must stay the first statement in the handler. Do not move it below the
+  // method check: a non-GET request falls through to the browser anyway, but a
+  // future edit that reorders these would silently reopen the hole.
+  if (new URL(e.request.url).pathname.startsWith("/ai-notes/")) return;
+
   if (e.request.method !== "GET") return;
 
   // Network-first for page loads: users always get the latest deployed

@@ -1,8 +1,16 @@
 # oralsurgeryassess.com
-# Clinical decision-support tools for UK dentists. Everything here is public
-# and safe to index; the tools hold no patient data of any kind.
+# The hub and the four clinical tools are public and safe to index. They hold
+# no patient data of any kind.
+#
+# /ai-notes/ is private and passcode-gated. It is already unindexable without
+# this line: every unauthenticated request returns 401, and vercel.json sets
+# X-Robots-Tag: noindex on that path. The Disallow below is belt and braces.
+#
+# Worth knowing: robots.txt is public, so this line also tells anyone who reads
+# it that the path exists. Deleting it costs nothing in protection.
 
 User-agent: *
 Allow: /
+Disallow: /ai-notes/
 
 Sitemap: https://oralsurgeryassess.com/sitemap.xml
