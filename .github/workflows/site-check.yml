@@ -6,14 +6,26 @@ name: Site check
 #   - index.html changed without the service worker CACHE name moving, so
 #     installed browsers keep serving the old page indefinitely
 # This catches both before Vercel deploys.
+#
+# AI Notes added a third: a bad deploy on that path can now take the four
+# clinical tools down with it, because middleware.js and vercel.json sit at the
+# repo root and apply to the whole origin. The canary job at the bottom watches
+# for exactly that.
 
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Daily canary. Not tied to a deploy: it answers "is the live site still
+    # correct right now", which is the question that matters after a change
+    # nobody noticed.
+    - cron: '17 7 * * *'
+  workflow_dispatch:
 
 jobs:
   check:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,8 +37,10 @@ jobs:
           node-version: '20'
 
       # Switcher completeness, aria-current placement and manifest icons.
-      # The stored fingerprint baseline goes stale the moment anything is
-      # committed, so the cache comparison is done from git history instead.
+      # Also, since AI Notes: that the private tool is absent from every public
+      # switcher, that its worker caches nothing, and that its page persists
+      # nothing. The stored fingerprint baseline goes stale the moment anything
+      # is committed, so the cache comparison is done from git history instead.
       - name: Structure
         run: node site-check.js . --skip-cache
 
@@ -35,6 +49,12 @@ jobs:
           before=$(git rev-parse HEAD~1 2>/dev/null || echo "")
           if [ -z "$before" ]; then echo "No previous commit - nothing to compare."; exit 0; fi
           fail=0
+          # ai-notes is deliberately NOT in this list. Its service worker has no
+          # CACHE constant and never will - it caches nothing, which is the
+          # entire point of it. Adding it here would fail this step every single
+          # time the page is edited, because the matching sw.js has no reason to
+          # change. site-check.js asserts the inverse for that path instead:
+          # that no cache exists. Do not "fix" this by adding it.
           for dir in "." "third-molar" "sedation" "local-anaesthetic" "asa-assessment"; do
             if [ "$dir" = "." ]; then idx="index.html"; sw="sw.js";
             else idx="$dir/index.html"; sw="$dir/sw.js"; fi
@@ -50,4 +70,77 @@ jobs:
               fi
             fi
           done
+          exit $fail
+
+  canary:
+    # Hits production, so it cannot run on push: Vercel is still building at
+    # that point and this would test the previous deployment. Run it by hand
+    # from the Actions tab a minute after a deploy, or let the schedule catch it.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      SITE: https://oralsurgeryassess.com
+    steps:
+      - name: The four tools and the hub must stay open
+        run: |
+          fail=0
+          for p in "/" "/third-molar/" "/sedation/" "/local-anaesthetic/" "/asa-assessment/"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE$p")
+            if [ "$code" = "200" ]; then
+              echo "ok    $p  $code"
+            else
+              echo "FAIL  $p  $code  - expected 200."
+              echo "      A public clinical tool is unreachable. If this began after an"
+              echo "      AI Notes change, suspect the middleware.js matcher first."
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: AI Notes must stay shut
+        run: |
+          fail=0
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE/ai-notes/")
+          if [ "$code" = "401" ]; then
+            echo "ok    /ai-notes/  401"
+          else
+            echo "FAIL  /ai-notes/  $code  - expected 401."
+            [ "$code" = "200" ] && echo "      The gate is OPEN. Treat as urgent."
+            [ "$code" = "404" ] && echo "      The deploy did not land, or middleware is not running."
+            fail=1
+          fi
+
+          # The API must be gated too. /api/auth is deliberately open (there is
+          # otherwise no way to log in) so it is checked separately below.
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE/api/transcribe")
+          if [ "$code" = "401" ]; then
+            echo "ok    /api/transcribe  401"
+          else
+            echo "FAIL  /api/transcribe  $code  - expected 401. This route proxies a paid"
+            echo "      transcription account and must never answer unauthenticated."
+            fail=1
+          fi
+
+          # Open by design, but must not accept GET.
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE/api/auth")
+          if [ "$code" = "405" ]; then
+            echo "ok    /api/auth  405 (open by design, POST only)"
+          else
+            echo "warn  /api/auth  $code  - expected 405."
+          fi
+          exit $fail
+
+      - name: AI Notes must stay unindexable and uncached
+        run: |
+          fail=0
+          hdr=$(curl -s -D - -o /dev/null "$SITE/ai-notes/" | tr 'A-Z' 'a-z')
+          echo "$hdr" | grep -q 'x-robots-tag:.*noindex' \
+            && echo "ok    x-robots-tag: noindex" \
+            || { echo "FAIL  /ai-notes/ is missing X-Robots-Tag: noindex"; fail=1; }
+          echo "$hdr" | grep -q 'cache-control:.*no-store' \
+            && echo "ok    cache-control: no-store" \
+            || { echo "FAIL  /ai-notes/ is missing Cache-Control: no-store"; fail=1; }
+          curl -s "$SITE/sitemap.xml" | grep -q 'ai-notes' \
+            && { echo "FAIL  sitemap.xml lists /ai-notes/. Remove it."; fail=1; } \
+            || echo "ok    sitemap.xml does not mention it"
           exit $fail
