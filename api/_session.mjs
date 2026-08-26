@@ -68,6 +68,18 @@ export async function verifyToken(secret, token) {
   return safeEqual(sig, expected);
 }
 
+// Seconds remaining on a token, or 0 if absent, malformed or expired. Does NOT
+// verify the signature — call verifyToken for that. This is only for telling the
+// clinician how long they have left.
+export function secondsRemaining(token) {
+  if (!token) return 0;
+  const parts = String(token).split('.');
+  if (parts.length !== 3 || parts[0] !== 'v1') return 0;
+  const exp = Number(parts[1]);
+  if (!Number.isFinite(exp)) return 0;
+  return Math.max(0, exp - Math.floor(Date.now() / 1000));
+}
+
 export function buildCookie(token, ttlSeconds = DEFAULT_TTL_SECONDS) {
   return [
     `${COOKIE_NAME}=${token}`,

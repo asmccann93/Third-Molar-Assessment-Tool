@@ -7,7 +7,10 @@
 // guessing tedious, and the passcode should be long enough that guessing is not
 // the threat model. Use a passphrase, not four digits.
 
-import { mintToken, buildCookie, clearCookie, safeEqual, DEFAULT_TTL_SECONDS } from './_session.mjs';
+import {
+  mintToken, buildCookie, clearCookie, safeEqual, verifyToken,
+  readCookie, secondsRemaining, DEFAULT_TTL_SECONDS
+} from './_session.mjs';
 
 const WINDOW_MS = 60_000;
 const MAX_ATTEMPTS = 8;
@@ -17,13 +20,31 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
 
+  // Session status. Open like the rest of this route, and deliberately says
+  // nothing an unauthenticated caller could not already work out: whether the
+  // cookie they are holding is good, and for how long.
+  //
+  // This exists because a twelve-hour session can lapse between pressing Stop
+  // and the transcript coming back, and the recording is held only in memory.
+  // Losing a consent conversation to an expired cookie would be indefensible,
+  // so the page checks before it starts rather than discovering it afterwards.
+  if (req.method === 'GET') {
+    const secret = process.env.SESSION_SECRET;
+    const token = readCookie(req.headers.cookie);
+    const valid = secret ? await verifyToken(secret, token) : false;
+    return res.status(200).json({
+      authenticated: valid,
+      expiresIn: valid ? secondsRemaining(token) : 0
+    });
+  }
+
   if (req.method === 'DELETE') {
     res.setHeader('Set-Cookie', clearCookie());
     return res.status(200).json({ ok: true });
   }
 
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST, DELETE');
+    res.setHeader('Allow', 'GET, POST, DELETE');
     return res.status(405).json({ error: 'method_not_allowed' });
   }
 
