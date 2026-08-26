@@ -140,8 +140,17 @@ button:disabled { opacity: .45; cursor: default; }
    MASTHEAD
    =================================================================== */
 .masthead { padding: 24px 0 20px; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+.masthead-row { display: flex; align-items: flex-start; gap: 16px; }
+.masthead-row > div { flex: 1; }
 .masthead h1 { font-size: 1.375rem; }
 .masthead p { margin: 4px 0 0; font-size: .8125rem; color: var(--ink-faint); }
+.masthead #lock {
+  flex: none; min-height: 40px; padding: 0 16px;
+  font-size: .8125rem; font-weight: 600; color: var(--ink-muted);
+}
+.masthead #lock:hover { color: var(--stop); border-color: var(--stop); }
+.session-note { margin: 10px 0 0 !important; font-size: .75rem; min-height: 1em; }
+.session-note.warn { color: var(--stop); font-weight: 600; }
 
 /* ===================================================================
    CARDS
@@ -335,8 +344,14 @@ button:disabled { opacity: .45; cursor: default; }
 <div class="wrap">
 
   <header class="masthead">
-    <h1>AI Notes</h1>
-    <p>Dentist with special interest in oral surgery</p>
+    <div class="masthead-row">
+      <div>
+        <h1>AI Notes</h1>
+        <p>Dentist with special interest in oral surgery</p>
+      </div>
+      <button type="button" id="lock" title="End this session and require the passcode again">Lock</button>
+    </div>
+    <p class="session-note" id="session-note" role="status"></p>
   </header>
 
   <div id="error" class="error hidden" role="alert">
@@ -452,6 +467,8 @@ button:disabled { opacity: .45; cursor: default; }
     SILENCE_MS:    6000,             // no sound for this long -> warn
     POLL_MS:       5000,
     POLL_MAX:      120,
+    SESSION_WARN_S: 25 * 60,   // refuse to start a recording with less than this
+                               // left on the session
 
     // DPIA §2.1 step 6 / R13. The spec says destroy on tab hide. That would
     // break the workflow: copying block by block into a web PMS in another tab
@@ -581,6 +598,54 @@ button:disabled { opacity: .45; cursor: default; }
   }
 
   /* ==================================================================
+     SESSION
+     A twelve-hour session can lapse between pressing Stop and the
+     transcript returning, and the audio exists only in memory. Rather
+     than discover that afterwards, check before starting.
+     ================================================================== */
+  var sessionSeconds = null;
+
+  async function checkSession() {
+    try {
+      var r = await fetch('/api/auth', { cache: 'no-store' });
+      var d = await r.json();
+      sessionSeconds = d.authenticated ? d.expiresIn : 0;
+    } catch (err) {
+      sessionSeconds = null; // unknown; do not block on a network blip
+    }
+    renderSession();
+    return sessionSeconds;
+  }
+
+  function renderSession() {
+    var el = $('session-note');
+    if (sessionSeconds === null) { el.textContent = ''; el.classList.remove('warn'); return; }
+    if (sessionSeconds <= 0) {
+      el.textContent = 'Session expired. Reload the page to sign in again.';
+      el.classList.add('warn');
+      return;
+    }
+    if (sessionSeconds < CFG.SESSION_WARN_S) {
+      var mins = Math.max(1, Math.round(sessionSeconds / 60));
+      el.textContent = 'Session ends in about ' + mins + ' minute' + (mins === 1 ? '' : 's') +
+        ' \u2014 lock and sign in again before recording.';
+      el.classList.add('warn');
+    } else {
+      el.textContent = '';
+      el.classList.remove('warn');
+    }
+  }
+
+  $('lock').addEventListener('click', async function () {
+    if (S.note || (S.recorder && S.recorder.state === 'recording')) {
+      if (!confirm('Lock now? Anything on screen will be destroyed.')) return;
+    }
+    wipe();
+    try { await fetch('/api/auth', { method: 'DELETE' }); } catch (err) {}
+    location.reload();
+  });
+
+  /* ==================================================================
      RECORDING
      ================================================================== */
   function pickMimeType() {
@@ -602,6 +667,20 @@ button:disabled { opacity: .45; cursor: default; }
 
   $('start').addEventListener('click', async function () {
     clearError();
+
+    var left = await checkSession();
+    if (left !== null && left <= 0) {
+      return fail('Session expired',
+        'Reload the page and enter the passcode before recording. Starting now would lose the conversation at the transcription step.');
+    }
+    if (left !== null && left < CFG.SESSION_WARN_S) {
+      var mins = Math.max(1, Math.round(left / 60));
+      if (!confirm('This session ends in about ' + mins + ' minute' + (mins === 1 ? '' : 's') +
+                   '. If it lapses before the transcript returns, the recording is lost.\n\nLock and sign in again first?\n\nOK = carry on anyway, Cancel = go and sign in.')) {
+        return;
+      }
+    }
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       return fail('No microphone access', 'This browser will not expose a microphone to the page. Use Chrome or Safari over https.');
     }
@@ -1095,6 +1174,10 @@ button:disabled { opacity: .45; cursor: default; }
 
   refreshStart();
   show('setup');
+  checkSession();
+  setInterval(function () {
+    if (sessionSeconds !== null && sessionSeconds > 0) { sessionSeconds -= 60; renderSession(); }
+  }, 60000);
 })();
 </script>
 
