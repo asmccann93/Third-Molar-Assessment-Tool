@@ -469,6 +469,8 @@ button:disabled { opacity: .45; cursor: default; }
     POLL_MAX:      120,
     SESSION_WARN_S: 25 * 60,   // refuse to start a recording with less than this
                                // left on the session
+    SIZE_WARN:     0.80,       // warn at this fraction of MAX_BYTES
+    SIZE_STOP:     0.95,       // stop here, while the result still fits
 
     // DPIA §2.1 step 6 / R13. The spec says destroy on tab hide. That would
     // break the workflow: copying block by block into a web PMS in another tab
@@ -532,7 +534,14 @@ button:disabled { opacity: .45; cursor: default; }
     lastSoundAt: 0,
     jobId: null,
     note: null,
-    busy: false
+    busy: false,
+    bytes: 0,
+
+    // Incremented by wipe(). Every async path captures it and re-checks after
+    // each await, so anything the clinician destroyed cannot come back when a
+    // slow request finally returns. Without this, pressing Clear during a two
+    // minute transcription still rendered the draft when it arrived.
+    gen: 0
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -711,11 +720,30 @@ button:disabled { opacity: .45; cursor: default; }
     }
 
     S.chunks = [];
+    S.bytes = 0;
     S.audioType = S.recorder.mimeType || mime || 'audio/webm';
+
+    var gen = S.gen;   // this recording's identity, for the async handlers below
+
     S.recorder.addEventListener('dataavailable', function (e) {
-      if (e.data && e.data.size > 0) S.chunks.push(e.data);
+      if (gen !== S.gen) return;                 // discarded mid-flight
+      if (!e.data || e.data.size === 0) return;
+      S.chunks.push(e.data);
+      S.bytes += e.data.size;
+
+      // Watch the real size rather than trusting the bitrate. Safari has been
+      // known to ignore audioBitsPerSecond, and discovering at minute fifteen
+      // that the file is too large to send loses the whole conversation.
+      if (S.bytes >= CFG.MAX_BYTES * CFG.SIZE_STOP) {
+        $('timer-note').textContent = 'Stopped: reached the upload size limit.';
+        stopRecording();
+      } else if (S.bytes >= CFG.MAX_BYTES * CFG.SIZE_WARN) {
+        var note = $('level-note');
+        note.textContent = 'Approaching the size limit \u2014 wrap up shortly.';
+        note.classList.add('alert');
+      }
     });
-    S.recorder.addEventListener('stop', onRecorderStop);
+    S.recorder.addEventListener('stop', function () { onRecorderStop(gen); });
     S.recorder.start(1000);
 
     S.startedAt = Date.now();
@@ -795,9 +823,14 @@ button:disabled { opacity: .45; cursor: default; }
 
   $('discard').addEventListener('click', function () {
     if (!confirm('Discard this recording? Nothing will be kept.')) return;
-    S.discarding = true;
-    stopRecording();
+    // wipe() first, so the generation is bumped BEFORE the recorder's final
+    // dataavailable and stop events fire. Previously wipe() ran after
+    // stopRecording() and reset the S.discarding flag that onRecorderStop was
+    // about to check; the recorder's last chunk then repopulated S.chunks and
+    // the discarded audio was sent for transcription anyway. If a patient
+    // withdraws consent, that is the one thing that must not happen.
     wipe();
+    stopRecording();
     show('setup');
     toast('Discarded');
   });
@@ -825,12 +858,14 @@ button:disabled { opacity: .45; cursor: default; }
     }
   }
 
-  async function onRecorderStop() {
+  async function onRecorderStop(gen) {
     stopTracks();
-    if (S.discarding) { S.discarding = false; return; }
+    // Discarded, cleared or timed out while the recorder was shutting down.
+    if (gen !== S.gen) { S.chunks = []; S.bytes = 0; return; }
 
     var blob = new Blob(S.chunks, { type: S.audioType });
     S.chunks = [];
+    S.bytes = 0;
 
     if (blob.size < 2000) {
       show('setup');
@@ -849,6 +884,9 @@ button:disabled { opacity: .45; cursor: default; }
      PIPELINE
      ================================================================== */
   async function process(blob) {
+    var gen = S.gen;
+    var live = function () { return gen === S.gen; };
+
     S.busy = true;
     show('working');
     $('working-text').textContent = 'Transcribing\u2026';
@@ -856,13 +894,15 @@ button:disabled { opacity: .45; cursor: default; }
 
     var turns;
     try {
-      turns = await transcribe(blob);
+      turns = await transcribe(blob, live);
     } catch (err) {
+      if (!live()) return;
       S.busy = false;
       show('setup');
       return fail('Transcription failed', String(err.message || err));
     }
     blob = null;
+    if (!live()) return;   // cleared, locked or timed out while we waited
 
     if (!turns || turns.length === 0) {
       S.busy = false;
@@ -879,22 +919,26 @@ button:disabled { opacity: .45; cursor: default; }
         body: JSON.stringify({ turns: turns, consultType: S.consultType })
       });
       var data = await res.json().catch(function () { return {}; });
+      if (!live()) return;
       if (!res.ok) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
       S.note = data.note;
     } catch (err) {
+      if (!live()) return;
       S.busy = false;
       show('setup');
       return fail('Could not draft the note', String(err.message || err));
     }
 
     turns = null;
+    if (!live()) { S.note = null; return; }
     S.busy = false;
     render(S.note);
     show('draft');
     resetIdle();
   }
 
-  async function transcribe(blob) {
+  async function transcribe(blob, live) {
+    live = live || function () { return true; };
     var res = await fetch('/api/transcribe', {
       method: 'POST',
       headers: { 'Content-Type': blob.type || 'application/octet-stream' },
@@ -913,6 +957,9 @@ button:disabled { opacity: .45; cursor: default; }
       $('working-text').textContent = 'Transcribing\u2026 this one is taking a little longer.';
       for (var i = 0; i < CFG.POLL_MAX; i++) {
         await new Promise(function (r) { setTimeout(r, CFG.POLL_MS); });
+        // Stop polling the moment the clinician has destroyed the session. The
+        // Clear button has already asked the server to delete the job.
+        if (!live()) return null;
         var pr = await fetch('/api/transcribe?jobId=' + encodeURIComponent(data.jobId));
         var pd = await pr.json().catch(function () { return {}; });
         if (pd.status === 'done') { S.jobId = null; return pd.turns; }
@@ -1061,6 +1108,8 @@ button:disabled { opacity: .45; cursor: default; }
      DESTRUCTION
      ================================================================== */
   function wipe() {
+    S.gen++;                      // invalidates every in-flight async path
+    S.bytes = 0;
     if (S.tickId) { clearInterval(S.tickId); S.tickId = null; }
     if (S.rafId) { cancelAnimationFrame(S.rafId); S.rafId = null; }
     if (S.idleId) { clearTimeout(S.idleId); S.idleId = null; }
@@ -1121,6 +1170,9 @@ button:disabled { opacity: .45; cursor: default; }
     if (S.idleId) clearTimeout(S.idleId);
     S.idleId = setTimeout(function () {
       if (S.recorder && S.recorder.state === 'recording') { resetIdle(); return; }
+      // Do not destroy a consultation that is mid-transcription. The clinician
+      // is waiting on it, not idle, and the audio only exists in memory.
+      if (S.busy) { resetIdle(); return; }
       var hadSomething = !!S.note;
       wipe();
       show('setup');
