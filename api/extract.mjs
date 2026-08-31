@@ -26,7 +26,7 @@
 // Fails closed: an unrecognised combination is rejected before any request is
 // signed, not after.
 
-import { buildSystemPrompt, buildUserMessage, parseNote } from './_prompt.mjs';
+import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS } from './_prompt.mjs';
 
 export const config = { maxDuration: 120 };
 
@@ -140,6 +140,7 @@ export default async function handler(req, res) {
       .join('');
 
     const note = parseNote(text); // throws on malformed output
+    assertShape(note);            // and on output of the wrong shape
 
     return res.status(200).json({ status: 'done', note });
   } catch (err) {
@@ -149,6 +150,34 @@ export default async function handler(req, res) {
       error: 'extraction_failed',
       detail: String((err && err.message) || 'unknown error').slice(0, 300)
     });
+  }
+}
+
+/**
+ * parseNote checks that every field is PRESENT. This checks that every field is
+ * the right TYPE, which is a different failure and a worse one.
+ *
+ * A field returned as an object passes parseNote, renders as "[object Object]",
+ * and — because it is not null — is not reported as a gap. So {"text": "nerve
+ * injury"} in the risks field means a risk that was genuinely discussed vanishes
+ * from the note while the note reports itself complete. Silent content loss in a
+ * field a complaint would turn on.
+ *
+ * Rejecting rather than coercing, deliberately. Joining an array or stringifying
+ * an object would be inventing structure the model did not produce, which is the
+ * one thing this tool must not do. A visible failure is the correct outcome.
+ */
+function assertShape(note) {
+  for (const [key, label] of FIELDS) {
+    const v = note[key];
+    if (v === null || v === undefined) continue;
+    if (typeof v !== 'string') {
+      throw new Error(`Field "${key}" (${label}) came back as ${Array.isArray(v) ? 'an array' : typeof v}, not text`);
+    }
+  }
+  if (!Array.isArray(note.gaps)) throw new Error('gaps is not an array');
+  for (const g of note.gaps) {
+    if (typeof g !== 'string') throw new Error(`A gap came back as ${typeof g}, not text`);
   }
 }
 
@@ -250,6 +279,10 @@ async function signRequest({ method, host, path, body, region, service, creds, e
 
 async function readJson(req) {
   if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
+  // Already parsed to a string by the platform; the stream is spent.
+  if (typeof req.body === 'string') {
+    try { return JSON.parse(req.body); } catch { return null; }
+  }
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const text = Buffer.concat(chunks).toString('utf8');

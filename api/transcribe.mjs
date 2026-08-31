@@ -104,7 +104,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const jobId = jobIdFrom(req);
       if (!jobId) return res.status(400).json({ error: 'missing_job_id' });
-      return await pollToCompletion(key, jobId, res, BUDGET_MS);
+      return await pollOrCleanUp(key, jobId, res, BUDGET_MS);
     }
 
     if (req.method !== 'POST') {
@@ -131,7 +131,7 @@ export default async function handler(req, res) {
 
     const contentType = req.headers['content-type'] || 'audio/webm';
     const jobId = await submitJob(key, audio, contentType);
-    return await pollToCompletion(key, jobId, res, BUDGET_MS - 5000);
+    return await pollOrCleanUp(key, jobId, res, BUDGET_MS - 5000);
   } catch (err) {
     // Never log payloads — R11. Message only.
     console.error('transcribe failed:', err && err.message);
@@ -174,6 +174,25 @@ async function submitJob(key, audio, contentType) {
   return data.id;
 }
 
+/**
+ * pollToCompletion, but guaranteeing the job is deleted if anything goes wrong.
+ *
+ * A failed status poll used to abandon the job entirely: the request returned
+ * 502 and the audio stayed on the provider's side. Zero retention has to hold on
+ * the unhappy paths too, or it is not a property, only an intention.
+ *
+ * The one path that must NOT delete is the 202 pending return — the client is
+ * coming back for that job.
+ */
+async function pollOrCleanUp(key, jobId, res, budgetMs) {
+  try {
+    return await pollToCompletion(key, jobId, res, budgetMs);
+  } catch (err) {
+    await deleteJob(key, jobId);
+    throw err;
+  }
+}
+
 async function pollToCompletion(key, jobId, res, budgetMs) {
   const deadline = Date.now() + budgetMs;
   let waitMs = 1500;
@@ -187,9 +206,15 @@ async function pollToCompletion(key, jobId, res, budgetMs) {
     const status = (await r.json())?.job?.status;
 
     if (status === 'done') {
-      const turns = await fetchTranscript(key, jobId);
-      await deleteJob(key, jobId);
-      return res.status(200).json({ status: 'done', turns });
+      // finally, not sequential. If fetchTranscript throws — a network blip, a
+      // 500 from the provider — the old code returned an error and left the
+      // audio and transcript sitting on their side indefinitely.
+      try {
+        const turns = await fetchTranscript(key, jobId);
+        return res.status(200).json({ status: 'done', turns });
+      } finally {
+        await deleteJob(key, jobId);
+      }
     }
     if (status === 'rejected' || status === 'expired' || status === 'deleted') {
       await deleteJob(key, jobId);
@@ -267,6 +292,9 @@ function jobIdFrom(req) {
 async function readBody(req) {
   if (Buffer.isBuffer(req.body)) return req.body;
   if (req.body instanceof Uint8Array) return Buffer.from(req.body);
+  // Vercel parses some content types into a string before the handler runs, and
+  // the underlying stream is spent by then — reading it would yield nothing.
+  if (typeof req.body === 'string') return Buffer.from(req.body, 'binary');
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   return Buffer.concat(chunks);
