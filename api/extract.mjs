@@ -148,7 +148,7 @@ export default async function handler(req, res) {
     console.error('extract failed:', err && err.message);
     return res.status(502).json({
       error: 'extraction_failed',
-      detail: String((err && err.message) || 'unknown error').slice(0, 300)
+      detail: String((err && err.message) || 'unknown error').slice(0, 1600)
     });
   }
 }
@@ -185,7 +185,19 @@ function assertShape(note) {
 
 async function invokeModel(payload, creds) {
   const host = `bedrock-runtime.${REGION}.amazonaws.com`;
-  const path = `/model/${encodeURIComponent(MODEL_ID)}/invoke`;
+
+  // The model id goes into the path RAW, not percent-encoded.
+  //
+  // SigV4 requires the canonical string's path to be the escaped form of the
+  // path actually sent. Model ids contain only alphanumerics, dots, hyphens and
+  // colons, and a colon needs no escaping inside a path segment (RFC 3986 pchar
+  // includes ':'). So encoding it to %3A signs one thing while fetch normalises
+  // the URL and sends another — the signature then cannot match.
+  //
+  // This was invisible until now: the Claude 5 ids have no special characters,
+  // so encodeURIComponent was a no-op and canonical == wire by accident. The
+  // dated ids on earlier models (…-v1:0) are what exposed it.
+  const path = `/model/${MODEL_ID}/invoke`;
   const bodyText = JSON.stringify(payload);
 
   const headers = await signRequest({
@@ -201,7 +213,10 @@ async function invokeModel(payload, creds) {
 
   const r = await fetch(`https://${host}${path}`, { method: 'POST', headers, body: bodyText });
   if (!r.ok) {
-    const detail = (await r.text().catch(() => '')).slice(0, 300);
+    // Generous limit on purpose. On a signature mismatch AWS returns the exact
+    // canonical string it expected, which is the fastest way to find the
+    // difference — and truncating at 300 characters threw that away twice.
+    const detail = (await r.text().catch(() => '')).slice(0, 1500);
     throw new Error(`bedrock ${r.status}: ${detail}`);
   }
   return r.json();
