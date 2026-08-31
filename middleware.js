@@ -50,7 +50,16 @@ export default async function middleware(request) {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
       'x-robots-tag': 'noindex, nofollow',
-      'referrer-policy': 'no-referrer'
+      'referrer-policy': 'no-referrer',
+      // vercel.json headers do not reach this response: middleware short-circuits
+      // before that layer. So the sign-in page, the one page carrying an inline
+      // script and a password field, would otherwise be the only page on the
+      // origin with no CSP at all. Set it here.
+      'content-security-policy':
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+        "connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+      'x-content-type-options': 'nosniff',
+      'permissions-policy': 'microphone=(), camera=(), geolocation=()'
     }
   });
 }
@@ -98,7 +107,18 @@ function challengePage() {
   <h1>AI Notes</h1>
   <p>Enter the passcode to continue.</p>
   <label for="p">Passcode</label>
-  <input id="p" name="passcode" type="password" inputmode="numeric" autocomplete="current-password" required autofocus>
+  <!-- No inputmode="numeric" here. It was set on the assumption of a numeric PIN,
+       which forces iOS to show the number pad and makes a passphrase literally
+       impossible to type. The passcode is a passphrase precisely because the
+       per-instance throttle cannot stop a determined guesser at four digits, so
+       the field has to accept a full keyboard.
+       autocapitalize/autocorrect off: iOS would otherwise capitalise the first
+       word and autocorrect the rest, silently altering what you typed. -->
+  <input id="p" name="passcode" type="password"
+         autocomplete="current-password"
+         autocapitalize="off" autocorrect="off" spellcheck="false"
+         enterkeyhint="go"
+         required autofocus>
   <button id="b" type="submit">Unlock</button>
   <p class="err" id="e" role="status" aria-live="polite"></p>
 </form>
