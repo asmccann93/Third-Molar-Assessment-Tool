@@ -112,7 +112,9 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: 'method_not_allowed' });
     }
 
-    const audio = await readBody(req);
+    const { buf: audio, via } = await readBody(req);
+    const contentTypeRaw = req.headers['content-type'] || 'audio/webm';
+
     if (!audio || audio.length < MIN_BYTES) {
       // Fail here rather than at Speechmatics: submitting a few bytes of
       // container header creates a job, costs a credit, and then has to be
@@ -129,8 +131,41 @@ export default async function handler(req, res) {
       });
     }
 
-    const contentType = req.headers['content-type'] || 'audio/webm';
-    const jobId = await submitJob(key, audio, contentType);
+    // Size first, then content. An oversized file should say so, not report an
+    // unreadable container.
+    {
+      // Check the container before creating a job. A corrupted upload would
+      // otherwise cost a Speechmatics job and come back as a vague rejection.
+      const container = sniffContainer(audio);
+      if (container === 'webm-UNSUPPORTED') {
+        return res.status(400).json({
+          error: 'audio_format_unsupported',
+          detail:
+            'The recording is WebM, which Speechmatics explicitly does not accept — their ' +
+            'supported list (wav, mp3, aac, ogg, mpeg, amr, m4a, mp4, flac) is documented as ' +
+            'exhaustive. The browser should be recording MP4 or Ogg. If this appears, the ' +
+            'format preference in ai-notes/index.html is not taking effect.'
+        });
+      }
+      if (container === 'UNRECOGNISED' || container === 'too-short') {
+        return res.status(400).json({
+          error: 'audio_not_readable',
+          detail:
+            `The recording did not arrive as valid audio, so it was not submitted. ` +
+            `${audio.length} bytes, container "${container}", read via "${via}", ` +
+            `declared type "${contentTypeRaw}", first bytes ${audio.slice(0, 12).toString('hex')}. ` +
+            (via === 'string'
+              ? 'Read via "string" means the platform decoded the body as text before this handler ran, which destroys binary audio. That is the fault.'
+              : 'The bytes reached the server but do not carry a recognised container header.')
+        });
+      }
+    }
+
+
+    // Strip codec parameters: "audio/webm;codecs=opus" as a multipart part type
+    // is not reliably accepted. The extension on the filename is what matters.
+    const contentType = contentTypeRaw.split(';')[0].trim() || 'audio/webm';
+    const jobId = await submitJob(key, audio, contentType, via);
     return await pollOrCleanUp(key, jobId, res, BUDGET_MS - 5000);
   } catch (err) {
     // Never log payloads — R11. Message only.
@@ -141,14 +176,42 @@ export default async function handler(req, res) {
 
 /* ---------- Speechmatics ---------- */
 
-async function submitJob(key, audio, contentType) {
+async function submitJob(key, audio, contentType, via) {
   const config = {
     type: 'transcription',
     transcription_config: {
       language: 'en',
-      operating_point: 'enhanced',
+
+      // "model", not "operating_point". The latter was the old field name and
+      // appears nowhere in current documentation. An unrecognised field is not
+      // necessarily rejected — it may simply be ignored — which would silently
+      // leave every transcript on the standard model. That would show up as poor
+      // accuracy on dental terminology and be blamed on the tool rather than on
+      // one wrong word here.
+      model: 'enhanced',
+
       diarization: 'speaker',
-      speaker_diarization_config: { speaker_sensitivity: 0.5 },
+
+      speaker_diarization_config: {
+        // 0.5 is the documented default; stated explicitly because it is the
+        // first thing to tune if the clinician and patient are being merged or
+        // one person is being split across labels. Higher yields more speakers.
+        speaker_sensitivity: 0.5
+
+        // prefer_current_speaker is deliberately NOT enabled.
+        //
+        // It reduces false switches between similar-sounding speakers, which
+        // sounds desirable — but the documented cost is that "shorter speaker
+        // turn changes between similar speakers" get missed. In this room the
+        // short turn is almost always the patient interjecting a question, and
+        // absorbing that into the clinician's speech is precisely the failure
+        // the whole tool is built to prevent: a risk the patient raised being
+        // recorded as one the clinician named.
+        //
+        // The safer error here is splitting one speaker in two. The clinician
+        // sees that immediately. A merge is invisible.
+      },
+
       additional_vocab: ADDITIONAL_VOCAB,
       enable_entities: true
     }
@@ -168,7 +231,14 @@ async function submitJob(key, audio, contentType) {
     body: form
   });
 
-  if (!r.ok) throw new Error(`submit ${r.status}: ${await shortText(r)}`);
+  if (!r.ok) {
+    // Say what was actually sent. A bare "invalid audio" leaves nothing to act on.
+    throw new Error(
+      `submit ${r.status}: ${await shortText(r)} ` +
+      `[sent ${audio.length} bytes, container ${sniffContainer(audio)}, ` +
+      `type ${contentType}, filename consult${extensionFor(contentType)}, read via ${via}]`
+    );
+  }
   const data = await r.json();
   if (!data.id) throw new Error('submit returned no job id');
   return data.id;
@@ -289,15 +359,43 @@ function jobIdFrom(req) {
   return id && /^[A-Za-z0-9_-]{4,64}$/.test(id) ? id : null;
 }
 
+/**
+ * Audio is binary, so the raw stream is the only lossless source. Read it FIRST.
+ *
+ * The previous version checked req.body first and, if the platform had decoded
+ * the body to a string, did Buffer.from(str, 'binary') — which cannot recover
+ * anything the decode already destroyed. That yields a file of roughly the right
+ * size that no decoder can read, which is exactly what "Job rejected due to
+ * invalid audio" looks like.
+ *
+ * Returns which path was used so a failure can say so rather than leaving it to
+ * be guessed at.
+ */
 async function readBody(req) {
-  if (Buffer.isBuffer(req.body)) return req.body;
-  if (req.body instanceof Uint8Array) return Buffer.from(req.body);
-  // Vercel parses some content types into a string before the handler runs, and
-  // the underlying stream is spent by then — reading it would yield nothing.
-  if (typeof req.body === 'string') return Buffer.from(req.body, 'binary');
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  return Buffer.concat(chunks);
+  try {
+    for await (const chunk of req) chunks.push(chunk);
+  } catch { /* already consumed */ }
+  if (chunks.length) return { buf: Buffer.concat(chunks), via: 'stream' };
+
+  if (Buffer.isBuffer(req.body)) return { buf: req.body, via: 'buffer' };
+  if (req.body instanceof Uint8Array) return { buf: Buffer.from(req.body), via: 'uint8array' };
+  if (typeof req.body === 'string') return { buf: Buffer.from(req.body, 'binary'), via: 'string' };
+  return { buf: Buffer.alloc(0), via: 'none' };
+}
+
+/** Identify the container from its magic bytes, so corruption is visible. */
+function sniffContainer(buf) {
+  if (buf.length < 12) return 'too-short';
+  const b = buf;
+  // WebM is recognisable but NOT accepted by Speechmatics — their supported list
+  // (wav, mp3, aac, ogg, mpeg, amr, m4a, mp4, flac) is documented as exhaustive.
+  // Naming it specifically turns a vague "invalid audio" into an actionable one.
+  if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return 'webm-UNSUPPORTED';
+  if (b.slice(4, 8).toString('latin1') === 'ftyp') return 'mp4';
+  if (b.slice(0, 4).toString('latin1') === 'OggS') return 'ogg';
+  if (b.slice(0, 4).toString('latin1') === 'RIFF') return 'wav';
+  return 'UNRECOGNISED';
 }
 
 function extensionFor(contentType) {
