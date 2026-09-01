@@ -186,24 +186,33 @@ function assertShape(note) {
 async function invokeModel(payload, creds) {
   const host = `bedrock-runtime.${REGION}.amazonaws.com`;
 
-  // The model id goes into the path RAW, not percent-encoded.
+  // TWO different paths, deliberately. This is the whole subtlety of SigV4 here.
   //
-  // SigV4 requires the canonical string's path to be the escaped form of the
-  // path actually sent. Model ids contain only alphanumerics, dots, hyphens and
-  // colons, and a colon needs no escaping inside a path segment (RFC 3986 pchar
-  // includes ':'). So encoding it to %3A signs one thing while fetch normalises
-  // the URL and sends another — the signature then cannot match.
+  // The canonical string's path must be the ESCAPED FORM of the path actually
+  // sent — escaped, not identical. So the request goes out with a raw colon and
+  // the signature is computed over the percent-encoded version.
   //
-  // This was invisible until now: the Claude 5 ids have no special characters,
-  // so encodeURIComponent was a no-op and canonical == wire by accident. The
-  // dated ids on earlier models (…-v1:0) are what exposed it.
-  const path = `/model/${MODEL_ID}/invoke`;
+  // Confirmed against what Bedrock itself returns on a mismatch:
+  //   The Canonical String for this request should have been
+  //   'POST
+  //   /model/eu.anthropic.claude-sonnet-4-5-20250929-v1%3A0/invoke
+  //
+  // Getting this wrong is silent until a model id contains a colon. Claude 5
+  // ids (eu.anthropic.claude-opus-5) have no special characters, so encoding was
+  // a no-op and any of the three variants appeared to work. The dated ids on
+  // earlier models (…-v1:0) are what expose it.
+  //
+  // Both of the obvious wrong answers fail:
+  //   send %3A, sign %3A  -> AWS receives %3A, escapes again, expects %253A
+  //   send :,    sign :    -> AWS escapes to %3A, we signed :
+  const wirePath = `/model/${MODEL_ID}/invoke`;
+  const canonicalPath = `/model/${encodeURIComponent(MODEL_ID)}/invoke`;
   const bodyText = JSON.stringify(payload);
 
   const headers = await signRequest({
     method: 'POST',
     host,
-    path,
+    path: canonicalPath,
     body: bodyText,
     region: REGION,
     service: SERVICE,
@@ -211,7 +220,7 @@ async function invokeModel(payload, creds) {
     extraHeaders: { 'content-type': 'application/json', accept: 'application/json' }
   });
 
-  const r = await fetch(`https://${host}${path}`, { method: 'POST', headers, body: bodyText });
+  const r = await fetch(`https://${host}${wirePath}`, { method: 'POST', headers, body: bodyText });
   if (!r.ok) {
     // Generous limit on purpose. On a signature mismatch AWS returns the exact
     // canonical string it expected, which is the fastest way to find the
@@ -261,7 +270,7 @@ async function signRequest({ method, host, path, body, region, service, creds, e
 
   const canonicalRequest = [
     method,
-    path,             // already encoded, and identical to the URL actually fetched
+    path,             // the ESCAPED form of the path being sent — see invokeModel
     '',               // no query string
     canonicalHeaders,
     signedHeaders,
