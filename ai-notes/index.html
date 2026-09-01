@@ -296,6 +296,10 @@ button:disabled { opacity: .45; cursor: default; }
 }
 .error h2 { font-size: .9375rem; color: var(--stop); margin-bottom: 4px; text-transform: none; letter-spacing: 0; }
 .error p { margin: 0; font-size: .875rem; color: var(--ink); }
+.error-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.error-actions button { min-height: 40px; padding: 0 16px; font-size: .8125rem; font-weight: 600; }
+.error-actions #retry { background: var(--accent); border-color: var(--accent); color: #fff; }
+.error-actions #discard-transcript { color: var(--stop); border-color: var(--line-firm); }
 
 /* ---- privacy mask ---- */
 #mask {
@@ -347,7 +351,7 @@ button:disabled { opacity: .45; cursor: default; }
     <div class="masthead-row">
       <div>
         <h1>AI Notes</h1>
-        <p>Dentist with special interest in oral surgery</p>
+        <p class="byline">Developed by Aiden McCann &middot; Dentist with special interest in oral surgery</p>
       </div>
       <button type="button" id="lock" title="End this session and require the passcode again">Lock</button>
     </div>
@@ -357,6 +361,10 @@ button:disabled { opacity: .45; cursor: default; }
   <div id="error" class="error hidden" role="alert">
     <h2 id="error-title"></h2>
     <p id="error-body"></p>
+    <div class="error-actions hidden" id="error-actions">
+      <button type="button" id="retry">Try drafting again</button>
+      <button type="button" id="discard-transcript">Discard the transcript</button>
+    </div>
   </div>
 
   <!-- ============ SETUP ============ -->
@@ -533,6 +541,7 @@ button:disabled { opacity: .45; cursor: default; }
     rafId: null,
     lastSoundAt: 0,
     jobId: null,
+    turns: null,      // held ONLY between a failed draft and a retry
     note: null,
     busy: false,
     bytes: 0,
@@ -556,13 +565,17 @@ button:disabled { opacity: .45; cursor: default; }
     $('recbar').classList.toggle('hidden', name !== 'recording');
   }
 
-  function fail(title, body) {
+  function fail(title, body, retryable) {
     $('error-title').textContent = title;
     $('error-body').textContent = body;
+    $('error-actions').classList.toggle('hidden', !retryable);
     $('error').classList.remove('hidden');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
-  function clearError() { $('error').classList.add('hidden'); }
+  function clearError() {
+    $('error').classList.add('hidden');
+    $('error-actions').classList.add('hidden');
+  }
 
   var toastId = null;
   function toast(message) {
@@ -657,21 +670,31 @@ button:disabled { opacity: .45; cursor: default; }
   /* ==================================================================
      RECORDING
      ================================================================== */
+  // Ordered by what SPEECHMATICS ACCEPTS, not by what browsers do best.
+  //
+  // Their supported list is wav, mp3, aac, ogg, mpeg, amr, m4a, mp4, flac, and
+  // the documentation states it is exhaustive: "any file format outside the list
+  // above is explicitly not supported."
+  //
+  // WebM is not on it. This list previously put audio/webm first, which is what
+  // Chrome produces, so every Chrome recording was rejected with "Job rejected
+  // due to invalid audio". WebM stays last only so that a browser offering
+  // nothing else can still record — but startRecording warns before a whole
+  // consultation is committed to a format that cannot be transcribed.
+  var MIME_CANDIDATES = [
+    { type: 'audio/mp4;codecs=mp4a.40.2', ok: true },
+    { type: 'audio/mp4',                  ok: true },
+    { type: 'audio/ogg;codecs=opus',      ok: true },
+    { type: 'audio/webm;codecs=opus',     ok: false },
+    { type: 'audio/webm',                 ok: false }
+  ];
+
   function pickMimeType() {
-    // Safari and iPadOS do not produce webm. Ordered by what Speechmatics
-    // handles most cleanly.
-    var candidates = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/mp4;codecs=mp4a.40.2',
-      'audio/mp4'
-    ];
-    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return '';
-    for (var i = 0; i < candidates.length; i++) {
-      if (MediaRecorder.isTypeSupported(candidates[i])) return candidates[i];
+    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return null;
+    for (var i = 0; i < MIME_CANDIDATES.length; i++) {
+      if (MediaRecorder.isTypeSupported(MIME_CANDIDATES[i].type)) return MIME_CANDIDATES[i];
     }
-    return '';
+    return null;
   }
 
   $('start').addEventListener('click', async function () {
@@ -708,7 +731,14 @@ button:disabled { opacity: .45; cursor: default; }
         'The browser refused access to the microphone. Check the padlock in the address bar and allow it for this site, then try again.');
     }
 
-    var mime = pickMimeType();
+    var picked = pickMimeType();
+    if (picked && !picked.ok) {
+      stopTracks();
+      return fail('This browser cannot record a supported format',
+        'The only format available here is WebM, which the transcription service explicitly does not accept. ' +
+        'Use Safari, or Firefox, which can produce MP4 or Ogg. Better to know now than after a full consultation.');
+    }
+    var mime = picked ? picked.type : '';
     var options = { audioBitsPerSecond: CFG.AUDIO_BPS };
     if (mime) options.mimeType = mime;
 
@@ -734,17 +764,22 @@ button:disabled { opacity: .45; cursor: default; }
       // Watch the real size rather than trusting the bitrate. Safari has been
       // known to ignore audioBitsPerSecond, and discovering at minute fifteen
       // that the file is too large to send loses the whole conversation.
-      if (S.bytes >= CFG.MAX_BYTES * CFG.SIZE_STOP) {
-        $('timer-note').textContent = 'Stopped: reached the upload size limit.';
-        stopRecording();
-      } else if (S.bytes >= CFG.MAX_BYTES * CFG.SIZE_WARN) {
-        var note = $('level-note');
-        note.textContent = 'Approaching the size limit \u2014 wrap up shortly.';
-        note.classList.add('alert');
-      }
     });
     S.recorder.addEventListener('stop', function () { onRecorderStop(gen); });
-    S.recorder.start(1000);
+
+    // start() with NO timeslice, deliberately.
+    //
+    // A timeslice makes the recorder emit periodic chunks. On Safari that
+    // produces fragmented MP4: an init segment followed by media fragments.
+    // Concatenating those does not reliably give a file a decoder can inspect,
+    // and Speechmatics only accepts files "where the type can be determined by
+    // data inspection". Without a timeslice the recorder emits one complete,
+    // well-formed container at stop.
+    //
+    // The cost is that accumulated size cannot be watched live, so the size
+    // guard in tick() estimates from elapsed time and bitrate instead. The real
+    // size is still checked against the limit after stop.
+    S.recorder.start();
 
     S.startedAt = Date.now();
     S.lastSoundAt = Date.now();
@@ -775,6 +810,22 @@ button:disabled { opacity: .45; cursor: default; }
     if (elapsed >= CFG.MAX_MS) {
       $('timer-note').textContent = 'Reached the 15 minute limit.';
       stopRecording();
+      return;
+    }
+
+    // Size is estimated rather than measured: without a timeslice there are no
+    // chunks to count until stop. Bitrate times elapsed is close enough for a
+    // safety net, and the real size is checked before upload.
+    var estimated = (elapsed / 1000) * (CFG.AUDIO_BPS / 8);
+    if (estimated >= CFG.MAX_BYTES * CFG.SIZE_STOP) {
+      $('timer-note').textContent = 'Stopped: approaching the upload size limit.';
+      stopRecording();
+    } else if (estimated >= CFG.MAX_BYTES * CFG.SIZE_WARN) {
+      var note = $('level-note');
+      if (!note.textContent) {
+        note.textContent = 'Approaching the size limit \u2014 wrap up shortly.';
+        note.classList.add('alert');
+      }
     }
   }
 
@@ -910,32 +961,68 @@ button:disabled { opacity: .45; cursor: default; }
       return fail('Nothing to transcribe', 'No speech was recognised in the recording.');
     }
 
+    // Hold the transcript. If drafting fails, throwing it away would mean the
+    // consultation is gone and the clinician has to reconstruct a consent
+    // discussion from memory — for what is usually a transient error. It stays
+    // in memory only, and Clear, Lock, tab close and the idle timer all destroy
+    // it exactly as they destroy everything else.
+    S.turns = turns;
+    await draft(gen);
+  }
+
+  async function draft(gen) {
+    var live = function () { return gen === S.gen; };
+    S.busy = true;
+    clearError();
+    show('working');
     $('working-text').textContent = 'Drafting the note\u2026';
+    resetIdle();
 
     try {
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ turns: turns, consultType: S.consultType })
+        body: JSON.stringify({ turns: S.turns, consultType: S.consultType })
       });
       var data = await res.json().catch(function () { return {}; });
       if (!live()) return;
-      if (!res.ok) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+      if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error('The session expired while drafting. Reload the page, sign in, then press Try drafting again \u2014 the recording is still held in memory.');
+        }
+        throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+      }
       S.note = data.note;
     } catch (err) {
       if (!live()) return;
       S.busy = false;
       show('setup');
-      return fail('Could not draft the note', String(err.message || err));
+      return fail('Could not draft the note',
+        String(err.message || err) +
+        '  \u2014  The recording has been transcribed and is still held in memory, so this can be retried without recording again.',
+        true);
     }
 
-    turns = null;
     if (!live()) { S.note = null; return; }
+    S.turns = null;      // drafted successfully; no longer needed
     S.busy = false;
     render(S.note);
     show('draft');
     resetIdle();
   }
+
+  $('retry').addEventListener('click', function () {
+    if (!S.turns) { clearError(); return; }
+    draft(S.gen);
+  });
+
+  $('discard-transcript').addEventListener('click', function () {
+    if (!confirm('Discard the transcript? The recording is already gone, so this cannot be undone.')) return;
+    wipe();
+    clearError();
+    show('setup');
+    toast('Discarded');
+  });
 
   async function transcribe(blob, live) {
     live = live || function () { return true; };
@@ -1133,6 +1220,7 @@ button:disabled { opacity: .45; cursor: default; }
     }
 
     S.chunks = [];
+    S.turns = null;
     S.note = null;
     S.busy = false;
     S.discarding = false;
@@ -1173,7 +1261,7 @@ button:disabled { opacity: .45; cursor: default; }
       // Do not destroy a consultation that is mid-transcription. The clinician
       // is waiting on it, not idle, and the audio only exists in memory.
       if (S.busy) { resetIdle(); return; }
-      var hadSomething = !!S.note;
+      var hadSomething = !!(S.note || S.turns);
       wipe();
       show('setup');
       if (hadSomething) fail('Cleared after 10 minutes idle', 'The draft was destroyed. Nothing was saved.');
@@ -1186,7 +1274,7 @@ button:disabled { opacity: .45; cursor: default; }
 
   /* ---- tab hide ---- */
   function mask() {
-    if (!S.note) return;
+    if (!S.note && !S.turns) return;
     $('mask').classList.remove('hidden');
   }
   function unmask() { $('mask').classList.add('hidden'); }
