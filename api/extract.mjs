@@ -105,6 +105,14 @@ export default async function handler(req, res) {
     const body = await readJson(req);
     const turns = Array.isArray(body?.turns) ? body.turns.slice(0, MAX_TURNS) : null;
     const consultType = typeof body?.consultType === 'string' ? body.consultType : null;
+    // Where the clinician paused. Shapes the prompt so the note cannot assert a
+    // sequence across unrecorded time. Bounded and sanitised like everything else.
+    const pauses = Array.isArray(body?.pauses)
+      ? body.pauses
+          .filter((p) => p && Number.isFinite(p.forMs) && Number.isFinite(p.atRecordedMs) && p.forMs > 1000)
+          .slice(0, 20)
+          .map((p) => ({ atRecordedMs: Math.max(0, p.atRecordedMs), forMs: Math.max(0, p.forMs) }))
+      : [];
 
     if (!turns || turns.length === 0) {
       return res.status(400).json({ error: 'empty_transcript' });
@@ -122,7 +130,7 @@ export default async function handler(req, res) {
       max_tokens: 4096,
       temperature: 0,
       system: buildSystemPrompt(consultType),
-      messages: [{ role: 'user', content: buildUserMessage(transcript) }]
+      messages: [{ role: 'user', content: buildUserMessage(transcript, pauses) }]
     };
 
     const raw = await invokeModel(payload, creds);

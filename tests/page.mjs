@@ -607,6 +607,74 @@ async function testDraftRetry() {
 /* ================================================================
    8. Recording format and size guard
    ================================================================ */
+async function testPauseResume() {
+  section('Pause and resume — the examination is not recorded, and the note knows it');
+  const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
+
+  ok('every limit is measured in recorded time, not wall clock',
+    /function recordedMs\(\)/.test(src) && /var elapsed = recordedMs\(\);/.test(src));
+  ok('the capture-shortfall check uses recorded time, so pausing does not trip it',
+    /var wallS = recordedMs\(\) \/ 1000;/.test(src));
+  ok('a paused recording is not treated as idle and wiped',
+    /S\.recorder\.state === 'paused'\)\) \{ resetIdle\(\); return; \}/.test(src));
+  ok('pause works by disconnecting the mic from the encoder, so no silence is encoded',
+    /rec\.pause = function[\s\S]{0,200}source\.disconnect\(rec\.node\)/.test(src));
+
+  let sentBody = null;
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        sentBody = JSON.parse(opts.body);
+        return { ok: true, status: 200, json: async () => ({ note: { gaps: ['Costs'], reasonForAttendance: 'x' } }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  click($(doc, 'start'));
+  await tick(80);
+
+  const node = win.__encoder.instances[0];
+  const pagesBefore = node ? true : false;
+  ok('recording started', pagesBefore);
+
+  // Pause, and hold the pause across a simulated 30 minutes of treatment.
+  const realNow = win.Date.now.bind(win.Date);
+  let offset = 0;
+  win.Date.now = () => realNow() + offset;
+  click($(doc, 'pause'));
+  await tick(40);
+  ok('the button offers to resume', $(doc, 'pause').textContent === 'Resume');
+  ok('the timer says nothing is being recorded', /Paused/.test($(doc, 'timer-note').textContent), $(doc, 'timer-note').textContent);
+  const bytesAtPause = node.bytesSeen === undefined ? null : node.bytesSeen;
+
+  offset += 30 * 60 * 1000;          // 30 minutes of examination and treatment
+  await tick(40);
+  ok('a long pause does not hit the 25-minute cap',
+    !$(doc, 'recording').classList.contains('hidden'), 'recording view was left');
+
+  click($(doc, 'pause'));
+  await tick(40);
+  ok('resuming restores the Pause label', $(doc, 'pause').textContent === 'Pause');
+
+  click($(doc, 'stop'));
+  await tick(300);
+  ok('the draft still arrives', !$(doc, 'draft').classList.contains('hidden'));
+  ok('the pause is reported to the drafting API',
+    Array.isArray(sentBody?.pauses) && sentBody.pauses.length === 1, JSON.stringify(sentBody?.pauses));
+  ok('with a duration the model can use',
+    sentBody?.pauses?.[0]?.forMs >= 30 * 60 * 1000, String(sentBody?.pauses?.[0]?.forMs));
+  const gaps = [...$(doc, 'gaps-list').children].map((li) => li.textContent);
+  ok('and the clinician is told in the gap list', /paused 1 time/.test(gaps[0]) && /30 minutes/.test(gaps[0]), JSON.stringify(gaps));
+  ok('the model\'s own gaps are kept', gaps.includes('Costs'));
+  ok('no spurious short-capture warning on a paused recording',
+    !gaps.some((g) => /was captured/.test(g)), JSON.stringify(gaps));
+}
+
 async function testFormatAndSize() {
   section('Recording format and size — Opus in Ogg, encoded in the browser, measured not estimated');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -734,6 +802,7 @@ await testGaps();
 await testDiscardAndCancellation();
 await testDraftRetry();
 await testFormatAndSize();
+await testPauseResume();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);

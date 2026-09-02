@@ -302,6 +302,18 @@ async function testTranscribe() {
   ok('after exactly one status check, with no sleeping', calls.length === 1 && Date.now() - t0 < 1000, `${calls.length} calls, ${Date.now() - t0} ms`);
   ok('and the job is NOT deleted while it is still wanted', !calls.some((c) => c.method === 'DELETE'));
 
+  // --- paused recordings reach the prompt ---------------------------------
+  const { buildUserMessage } = await import('../api/_prompt.mjs');
+  const plain = buildUserMessage('hello');
+  ok('an unpaused recording gets no pause preamble', plain.startsWith('Transcript of the consultation:'));
+  const spliced = buildUserMessage('hello', [{ atRecordedMs: 305000, forMs: 2400000 }]);
+  ok('a paused recording is declared as spliced', /PAUSED and resumed/.test(spliced) && /not spoken contiguously/.test(spliced));
+  ok('and the gap is located and measured', /at 5:05 into the recording, paused for 40 minutes/.test(spliced), spliced.slice(0, 200));
+  ok('a sub-second blip is not reported as a pause', buildUserMessage('hello', [{ atRecordedMs: 1000, forMs: 400 }]).startsWith('Transcript'));
+  const { buildSystemPrompt } = await import('../api/_prompt.mjs');
+  const sys = buildSystemPrompt(null);
+  ok('the system prompt forbids asserting sequence across a gap', /Never assert or imply a sequence across a gap/.test(sys));
+
   const { config: fnConfig } = await import('../api/transcribe.mjs');
   ok('maxDuration fits the Hobby plan cap, so no invocation can be killed mid-poll', fnConfig?.maxDuration <= 60, String(fnConfig?.maxDuration));
 }
@@ -337,6 +349,27 @@ async function testExtract() {
   await handler(mockReq({ body: { turns, consultType: 'extraction-surgery' } }), res);
   ok('valid note returned', res.statusCode === 200 && res.body?.note?.reasonForAttendance === 'Recorded.', `got ${res.statusCode} ${JSON.stringify(res.body).slice(0,90)}`);
   ok('gap preserved, not filled in', res.body?.note?.risks === null && res.body?.note?.gaps?.length === 1);
+
+  // --- pauses reach the model, sanitised ---
+  let sentBody = null;
+  stubFetch(async (c, opts) => { sentBody = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'extraction-surgery',
+    pauses: [{ atRecordedMs: 60000, forMs: 1800000 }, { atRecordedMs: 5, forMs: 10 }] } }), res);
+  let userMsg = sentBody?.messages?.[0]?.content || '';
+  ok('a paused recording is declared to the model', /PAUSED and resumed/.test(userMsg), userMsg.slice(0, 100));
+  ok('and the sub-second blip is dropped', (userMsg.match(/into the recording/g) || []).length === 1);
+
+  stubFetch(async (c, opts) => { sentBody = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'extraction-surgery' } }), res);
+  ok('an unpaused recording says nothing about pauses',
+    !/PAUSED/.test(sentBody?.messages?.[0]?.content || ''));
+
+  stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, pauses: 'not an array' } }), res);
+  ok('a malformed pauses field is ignored, not fatal', res.statusCode === 200, `got ${res.statusCode}`);
   ok('signed request went to eu-west-2 bedrock', calls[0]?.url.includes('bedrock-runtime.eu-west-2.amazonaws.com'), calls[0]?.url);
 
   // The path must carry the model id verbatim. Percent-encoding the colon signs

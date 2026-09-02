@@ -242,6 +242,9 @@ button:disabled { opacity: .45; cursor: default; }
 .level > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .08s linear; }
 .level-note { text-align: center; font-size: .75rem; color: var(--ink-faint); margin: 0 0 18px; min-height: 1.1em; }
 .level-note.alert { color: var(--stop); font-weight: 600; }
+.timer.paused { opacity: .55; }
+.btn-pause { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
+.btn-pause.resuming { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 
 /* ---- working ---- */
 .working { display: flex; align-items: center; gap: 12px; font-size: .9375rem; }
@@ -405,6 +408,7 @@ button:disabled { opacity: .45; cursor: default; }
       <div class="level" aria-hidden="true"><i id="level"></i></div>
       <p class="level-note" id="level-note" role="status"></p>
       <div class="record-row">
+        <button class="btn-pause" id="pause">Pause</button>
         <button class="btn-stop" id="stop">Stop and draft note</button>
         <button class="btn-discard" id="discard">Discard</button>
       </div>
@@ -559,7 +563,11 @@ button:disabled { opacity: .45; cursor: default; }
     rafId: null,
     lastSoundAt: 0,
     sizeNote: '',     // size / stall warning; the meter merges it with its own silence note
-    captureNote: null,// set when the encoder captured less than the wall clock; rendered as a gap
+    captureNote: null,// set when the encoder captured less than the recorded clock; rendered as a gap
+    paused: false,
+    pausedAt: 0,      // when the current pause began
+    pausedMs: 0,      // total time paused across the whole recording
+    pauses: [],       // [{ atRecordedMs, forMs }] — where in the RECORDING each gap falls
     jobId: null,
     turns: null,      // held ONLY between a failed draft and a retry
     note: null,
@@ -761,8 +769,28 @@ button:disabled { opacity: .45; cursor: default; }
       rec.state = 'recording';
     };
 
+    // Pause and resume by disconnecting the microphone from the encoder node.
+    // The encoder is simply not fed while paused, so the paused time does not
+    // exist in the file at all — no silence, no size cost, and crucially still
+    // ONE Speechmatics job, so diarisation labels stay consistent. Splitting a
+    // consultation across jobs would not preserve them.
+    rec.pause = function () {
+      if (rec.state !== 'recording') return false;
+      try { source.disconnect(rec.node); } catch (e) { return false; }
+      rec.state = 'paused';
+      return true;
+    };
+
+    rec.resume = function () {
+      if (rec.state !== 'paused') return false;
+      try { source.connect(rec.node); } catch (e) { return false; }
+      rec.state = 'recording';
+      rec.lastPageAt = Date.now();   // don't count the pause as an encoder stall
+      return true;
+    };
+
     rec.stop = function () {
-      if (rec.state !== 'recording' && rec.state !== 'starting') return Promise.resolve();
+      if (rec.state !== 'recording' && rec.state !== 'starting' && rec.state !== 'paused') return Promise.resolve();
       rec.state = 'stopping';
       try { source.disconnect(rec.node); } catch (e) {}
       var finished = new Promise(function (resolve) {
@@ -872,6 +900,11 @@ button:disabled { opacity: .45; cursor: default; }
     S.lastSoundAt = Date.now();
     S.sizeNote = '';
     S.captureNote = null;
+    S.paused = false;
+    S.pausedAt = 0;
+    S.pausedMs = 0;
+    S.pauses = [];
+    S.pausesForDraft = null;
     startMeter();
     startTicking();
     show('recording');
@@ -890,8 +923,26 @@ button:disabled { opacity: .45; cursor: default; }
     return mins + ':' + (secs < 10 ? '0' : '') + secs;
   }
 
+  // Time actually being recorded: wall clock minus everything spent paused.
+  // Every limit and warning below is expressed in this, not wall clock, because
+  // a two-hour appointment with twenty minutes of talking is twenty minutes of
+  // audio and should be treated as such.
+  function recordedMs() {
+    var paused = S.pausedMs + (S.paused ? Date.now() - S.pausedAt : 0);
+    return Math.max(0, Date.now() - S.startedAt - paused);
+  }
+
   function tick() {
-    var elapsed = Date.now() - S.startedAt;
+    var elapsed = recordedMs();
+
+    if (S.paused) {
+      $('timer').textContent = fmtTime(elapsed / 1000);
+      $('timer').classList.add('paused');
+      $('timer-note').textContent = 'Paused \u2014 nothing is being recorded. ' +
+        fmtTime(elapsed / 1000) + ' captured so far.';
+      return;                       // no size, silence or stall checks while paused
+    }
+    $('timer').classList.remove('paused');
     $('timer').textContent = fmtTime(elapsed / 1000);
     $('timer').classList.toggle('over', elapsed >= CFG.WARN_MS);
 
@@ -959,7 +1010,7 @@ button:disabled { opacity: .45; cursor: default; }
     var level = Math.min(100, (peak / 128) * 260);
     $('level').style.width = level + '%';
 
-    if (peak > 4) S.lastSoundAt = Date.now();
+    if (peak > 4 || S.paused) S.lastSoundAt = Date.now();
     var silentFor = Date.now() - S.lastSoundAt;
 
     // One status line, three claims on it. Silence first: a muted microphone is
@@ -975,6 +1026,38 @@ button:disabled { opacity: .45; cursor: default; }
 
     S.rafId = requestAnimationFrame(meterFrame);
   }
+
+  $('pause').addEventListener('click', function () {
+    resetIdle();
+    var rec = S.recorder;
+    if (!rec) return;
+
+    if (S.paused) {
+      if (!rec.resume()) return;
+      var last = S.pauses[S.pauses.length - 1];
+      if (last && !last.forMs) last.forMs = Date.now() - S.pausedAt;
+      S.pausedMs += Date.now() - S.pausedAt;
+      S.paused = false;
+      S.pausedAt = 0;
+      $('pause').textContent = 'Pause';
+      $('pause').classList.remove('resuming');
+      $('recbar').textContent = 'Recording';
+    } else {
+      if (!rec.pause()) return;
+      S.paused = true;
+      S.pausedAt = Date.now();
+      // Where this gap falls in the RECORDING, which is what the transcript
+      // timeline will look like — the drafting prompt is told about it so the
+      // note cannot assert that two things said either side of it were said
+      // one after the other.
+      S.pauses.push({ atRecordedMs: recordedMs(), forMs: 0 });
+      $('pause').textContent = 'Resume';
+      $('pause').classList.add('resuming');
+      $('recbar').textContent = 'Paused';
+      $('level').style.width = '0%';
+    }
+    tick();
+  });
 
   $('stop').addEventListener('click', function () { resetIdle(); stopRecording(); });
 
@@ -994,6 +1077,13 @@ button:disabled { opacity: .45; cursor: default; }
   });
 
   function stopRecording() {
+    if (S.paused) {
+      var last = S.pauses[S.pauses.length - 1];
+      if (last && !last.forMs) last.forMs = Date.now() - S.pausedAt;
+      S.pausedMs += Date.now() - S.pausedAt;
+      S.paused = false;
+      S.pausedAt = 0;
+    }
     if (S.tickId) { clearInterval(S.tickId); S.tickId = null; }
     if (S.rafId) { cancelAnimationFrame(S.rafId); S.rafId = null; }
     if (S.recorder && S.recorder.state !== 'inactive') {
@@ -1028,9 +1118,11 @@ button:disabled { opacity: .45; cursor: default; }
     // Discarded, cleared or timed out while the recorder was shutting down.
     if (gen !== S.gen || !rec) { if (rec) rec.pages = []; return; }
 
+    S.pausesForDraft = S.pauses.filter(function (p) { return p.forMs > 1000; });
+
     var blob = rec.blob();
     var encodedS = rec.samplePosition / 48000;
-    var wallS = (Date.now() - S.startedAt) / 1000;
+    var wallS = recordedMs() / 1000;      // excludes deliberate pauses
     rec.pages = [];
 
     if (blob.size < 2000) {
@@ -1051,9 +1143,13 @@ button:disabled { opacity: .45; cursor: default; }
     // short of the wall clock — the tab was backgrounded, the device slept —
     // the note must say so, because a consent discussion with a hole in it is
     // worse than one you know is incomplete.
+    // Deliberate pauses are already excluded from wallS, so this only fires on
+    // capture the clinician did not ask for — a backgrounded tab, a sleeping
+    // device. A warning that fired on every paused recording would be one you
+    // learned to ignore.
     if (wallS > 30 && encodedS > 0 && encodedS < wallS * 0.9) {
       S.captureNote = 'Only ' + fmtTime(encodedS) + ' of the ' + fmtTime(wallS) +
-        ' recording was captured. Part of the conversation may be missing from every field below.';
+        ' recorded was captured. Part of the conversation may be missing from every field below.';
     }
 
     await process(blob);
@@ -1110,7 +1206,7 @@ button:disabled { opacity: .45; cursor: default; }
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ turns: S.turns, consultType: S.consultType })
+        body: JSON.stringify({ turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [] })
       });
       var data = await res.json().catch(function () { return {}; });
       if (!live()) return;
@@ -1192,6 +1288,13 @@ button:disabled { opacity: .45; cursor: default; }
      ================================================================== */
   function render(note) {
     var gaps = Array.isArray(note.gaps) ? note.gaps.slice() : [];
+    var ps = S.pausesForDraft || [];
+    if (ps.length) {
+      var totalMin = Math.round(ps.reduce(function (a, p) { return a + p.forMs; }, 0) / 60000);
+      gaps.unshift('Recording paused ' + ps.length + (ps.length === 1 ? ' time' : ' times') +
+        ', ' + (totalMin < 1 ? 'under a minute' : totalMin + ' minute' + (totalMin === 1 ? '' : 's')) +
+        ' in total. Anything said while paused is not in this note.');
+    }
     if (S.captureNote) gaps.unshift(S.captureNote);
     var box = $('gaps');
     var list = $('gaps-list');
@@ -1354,6 +1457,11 @@ button:disabled { opacity: .45; cursor: default; }
     S.busy = false;
     S.sizeNote = '';
     S.captureNote = null;
+    S.paused = false;
+    S.pausedAt = 0;
+    S.pausedMs = 0;
+    S.pauses = [];
+    S.pausesForDraft = null;
 
     $('fields').textContent = '';
     $('gaps-list').textContent = '';
@@ -1391,6 +1499,10 @@ button:disabled { opacity: .45; cursor: default; }
       // Do not destroy a consultation that is mid-transcription. The clinician
       // is waiting on it, not idle, and the audio only exists in memory.
       if (S.busy) { resetIdle(); return; }
+      // Paused means the clinician is mid-appointment with the consultation
+      // still held. Wiping it here would destroy a consent discussion during
+      // the treatment it belongs to.
+      if (S.recorder && (S.recorder.state === 'recording' || S.recorder.state === 'paused')) { resetIdle(); return; }
       var hadSomething = !!(S.note || S.turns);
       wipe();
       show('setup');

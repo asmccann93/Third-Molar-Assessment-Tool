@@ -120,6 +120,25 @@ The transcript is diarised. Work out from context who is the clinician, who is t
 - NURSE speech is excluded from the note, with one exception: where the nurse gives post-operative or aftercare instructions, record that under informationGiven and attribute it to her.
 - Where an accompanying adult speaks (parent, partner, carer), their contributions go in patientQuestions, marked as coming from the accompanying person.
 
+## PAUSED RECORDINGS
+
+The clinician can pause the recording, typically to examine or treat the patient,
+and resume for the post-operative discussion. When that has happened you are told
+so before the transcript, with the point in the recording where each gap falls.
+
+A paused recording is spliced. The audio either side of a gap is contiguous in the
+transcript but was NOT spoken contiguously — minutes or an hour of unrecorded
+appointment may sit between.
+
+- Never assert or imply a sequence across a gap. Do not write that the patient
+  agreed "after" being told something, or that advice "followed" a discussion,
+  where the two sit on opposite sides of a gap.
+- Do not treat a topic raised before a gap and answered after it as one exchange.
+- Add a gaps entry naming what was not recorded, e.g. "Recording paused for the
+  examination; anything discussed during it is not in this note."
+- Everything else is unchanged: record only what was said, and attribute it
+  normally. A gap is missing time, not a reason to hedge what IS on the recording.
+
 ## GAPS
 
 Every field you cannot fill from the transcript becomes an explicit gap. Never silently omit a field, and never soften a gap into vague prose.
@@ -182,8 +201,21 @@ Return a single JSON object and nothing else. No markdown fences, no explanation
  * User message
  * ------------------------------------------------------------------ */
 
-export function buildUserMessage(transcript) {
-  return `Transcript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>\n\nReturn the JSON object.`;
+export function buildUserMessage(transcript, pauses) {
+  const list = Array.isArray(pauses) ? pauses.filter((p) => p && p.forMs > 1000) : [];
+  if (!list.length) {
+    return `Transcript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>\n\nReturn the JSON object.`;
+  }
+  const mins = (ms) => {
+    const m = Math.round(ms / 60000);
+    return m < 1 ? 'under a minute' : `${m} minute${m === 1 ? '' : 's'}`;
+  };
+  const at = (ms) => {
+    const t = Math.round(ms / 1000);
+    return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+  };
+  const lines = list.map((p) => `- at ${at(p.atRecordedMs)} into the recording, paused for ${mins(p.forMs)}`).join('\n');
+  return `This recording was PAUSED and resumed. The transcript is spliced: the audio either side of each gap below is contiguous in the transcript but was not spoken contiguously.\n\n${lines}\n\nApply the PAUSED RECORDINGS rules.\n\nTranscript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>\n\nReturn the JSON object.`;
 }
 
 /* ------------------------------------------------------------------ *
