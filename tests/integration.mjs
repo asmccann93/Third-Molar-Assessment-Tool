@@ -349,9 +349,11 @@ async function testExtract() {
   await handler(mockReq({ body: { turns, consultType: 'extraction-surgery' } }), res);
   ok('valid note returned', res.statusCode === 200 && res.body?.note?.reasonForAttendance === 'Recorded.', `got ${res.statusCode} ${JSON.stringify(res.body).slice(0,90)}`);
   ok('gap preserved, not filled in', res.body?.note?.risks === null && res.body?.note?.gaps?.[0] === 'No risks named by the clinician.', JSON.stringify(res.body?.note?.gaps));
-  ok('with no checklist report, every extraction checklist item becomes a gap in the clinician\'s wording',
-    res.body?.note?.gaps?.some((g) => g === 'Not mentioned: bleeding.') && res.body?.note?.gaps?.some((g) => g.startsWith('Not asked about:')),
-    JSON.stringify(res.body?.note?.gaps));
+  ok('a model that reports no checklist at all does NOT produce a wall of false "not mentioned" lines',
+    res.body?.note?.notSaid?.length === 1 && /could not be applied/.test(res.body.notSaid?.[0] ?? res.body.note.notSaid[0]),
+    JSON.stringify(res.body?.note?.notSaid));
+  ok('and checklist findings never land in the model gap list',
+    !res.body?.note?.gaps?.some((g) => /^Not mentioned:|^Not asked about:/.test(g)), JSON.stringify(res.body?.note?.gaps));
   ok('the raw checklist report is not passed to the client', !('checklist' in (res.body?.note || {})));
 
   // --- checklist: found items produce no gap; nulls do; unknown keys are ignored ---
@@ -359,13 +361,13 @@ async function testExtract() {
   bedrockReturning(JSON.stringify(withChecklist));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'extraction-surgery' } }), res);
-  ok('a checklist item with evidence is not a gap', !res.body?.note?.gaps?.includes('Not mentioned: bleeding.'), JSON.stringify(res.body?.note?.gaps));
-  ok('a checklist item reported null is a gap', res.body?.note?.gaps?.includes('Not mentioned: infection or dry socket.'));
-  ok('a key the checklist does not know cannot create a gap', !res.body?.note?.gaps?.some((g) => /made-up/.test(g)));
+  ok('a checklist item with evidence is not reported', !res.body?.note?.notSaid?.includes('Not mentioned: bleeding.'), JSON.stringify(res.body?.note?.notSaid));
+  ok('a checklist item reported null is reported as not said', res.body?.note?.notSaid?.includes('Not mentioned: infection or dry socket.'));
+  ok('a key the checklist does not know cannot create an entry', !res.body?.note?.notSaid?.some((g) => /made-up/.test(g)));
   bedrockReturning(JSON.stringify(withChecklist));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'restorative' } }), res);
-  ok('a consult type with no checklist adds no checklist gaps', res.body?.note?.gaps?.length === 1, JSON.stringify(res.body?.note?.gaps));
+  ok('a consult type with no checklist reports nothing as not said', res.body?.note?.notSaid?.length === 0, JSON.stringify(res.body?.note?.notSaid));
 
   // --- dictation: the marker lands before the first turn at or after the timestamp ---
   let sentBody2 = null;

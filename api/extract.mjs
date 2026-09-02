@@ -165,7 +165,10 @@ export default async function handler(req, res) {
 
     const payload = {
       anthropic_version: 'bedrock-2023-05-31',
-      max_tokens: 4096,
+      // Raised from 4096 when the checklist, dictated fields and implant log
+      // were added to the response shape. A truncated draft is thrown away
+      // whole, so the headroom is worth more than the tokens.
+      max_tokens: 8192,
       temperature: 0,
       system: buildSystemPrompt(consultType),
       messages: [{ role: 'user', content: buildUserMessage(transcript, pauses) }]
@@ -192,8 +195,11 @@ export default async function handler(req, res) {
     // of what it did not find is the clinician's, from _checklists.mjs, so no
     // gap text is ever the model's invention. Appended after the model's own
     // gaps, deduplicated.
-    const extra = checklistGaps(consultType, note.checklist);
-    for (const g of extra) if (!note.gaps.includes(g)) note.gaps.push(g);
+    // Kept separate from the model's own gaps. They mean different things: a
+    // model gap is "the transcript did not tell me"; a checklist gap is "you
+    // did not say this". Merging them into one list would attach the wrong
+    // instruction to the wrong kind of gap — see the two leads on the page.
+    note.notSaid = checklistGaps(consultType, note.checklist);
     delete note.checklist;        // internal; the gaps are the product
 
     return res.status(200).json({ status: 'done', note });

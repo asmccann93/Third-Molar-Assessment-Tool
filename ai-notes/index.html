@@ -352,7 +352,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
 <div id="recbar" class="hidden" role="status">
   <span class="dot" aria-hidden="true"></span>
-  <span>Recording — conversation only</span>
+  <span id="recbar-label">Recording — conversation only</span>
 </div>
 
 <div class="wrap">
@@ -435,6 +435,16 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   <!-- ============ DRAFT ============ -->
   <section id="draft" class="hidden">
+
+    <div class="gaps" id="notsaid">
+      <h2 id="notsaid-title">Not said during this consultation</h2>
+      <p class="lead">
+        These are things the checklist for this procedure looked for and did not find in the recording.
+        If you discussed one and the recording missed it, add it. <strong>If you did not discuss it, do not
+        add it to the record</strong> — raise it with the patient instead.
+      </p>
+      <ul id="notsaid-list"></ul>
+    </div>
 
     <div class="gaps" id="gaps">
       <h2 id="gaps-title">Check before you paste</h2>
@@ -1089,7 +1099,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       S.pausedAt = 0;
       $('pause').textContent = 'Pause';
       $('pause').classList.remove('resuming');
-      $('recbar').textContent = 'Recording';
+      $('recbar-label').textContent = 'Recording \u2014 conversation only';
     } else {
       if (!rec.pause()) return;
       S.paused = true;
@@ -1101,7 +1111,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       S.pauses.push({ atRecordedMs: recordedMs(), forMs: 0 });
       $('pause').textContent = 'Resume';
       $('pause').classList.add('resuming');
-      $('recbar').textContent = 'Paused';
+      $('recbar-label').textContent = 'Paused \u2014 nothing is being recorded';
       $('level').style.width = '0%';
     }
     tick();
@@ -1128,7 +1138,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.dictationFromMs = recordedMs();
     $('dictate').textContent = 'Dictating';
     $('dictate').disabled = true;
-    $('recbar').textContent = 'Dictating';
+    $('recbar-label').textContent = 'Dictating \u2014 the patient has left';
     tick();
   });
 
@@ -1366,6 +1376,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      model produces is ever parsed as HTML.
      ================================================================== */
   function render(note) {
+    renderNotSaid(note);
     var gaps = Array.isArray(note.gaps) ? note.gaps.slice() : [];
     var ps = S.pausesForDraft || [];
     if (ps.length) {
@@ -1465,6 +1476,25 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   }
 
   function hasText(v) { return !(v === null || v === undefined || String(v).trim() === ''); }
+
+  // Checklist findings, kept apart from the model's gaps. The instruction is
+  // the opposite one: a model gap invites you to add what you remember; this
+  // list must never invite you to record a discussion that did not happen.
+  function renderNotSaid(note) {
+    var items = Array.isArray(note.notSaid) ? note.notSaid : [];
+    var box = $('notsaid');
+    var list = $('notsaid-list');
+    list.textContent = '';
+    if (!items.length) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    $('notsaid-title').textContent = 'Not said during this consultation \u2014 ' + items.length +
+      (items.length === 1 ? ' item' : ' items');
+    items.forEach(function (t) {
+      var li = document.createElement('li');
+      li.textContent = t;
+      list.appendChild(li);
+    });
+  }
 
   // Dictated fields and the implant log. Shown only when there is something,
   // under a heading that says what it is: a dictation is the clinician's own
@@ -1744,8 +1774,16 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     $('consent-text').textContent = '';
     $('make-summary').disabled = false;
     $('make-summary').textContent = 'Patient summary';
+    $('pause').textContent = 'Pause';
+    $('pause').classList.remove('resuming');
+    $('dictate').textContent = 'Dictate';
+    $('dictate').disabled = false;
+    $('recbar-label').textContent = 'Recording \u2014 conversation only';
+    $('timer').classList.remove('paused');
     $('fields').textContent = '';
     $('gaps-list').textContent = '';
+    $('notsaid-list').textContent = '';
+    $('notsaid').classList.add('hidden');
     var map = document.getElementById('speaker-map');
     if (map) map.remove();
     $('timer').textContent = '0:00';

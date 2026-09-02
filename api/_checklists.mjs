@@ -155,6 +155,20 @@ export function checklistFor(consultTypeKey) {
 }
 
 /**
+ * Did the model actually report against the checklist at all? An empty or
+ * unrecognisable report is a MODEL failure, not evidence that eighteen things
+ * went unsaid. Emitting eighteen false "not mentioned" lines would be worse
+ * than emitting none: the clinician learns the gap list cries wolf, and stops
+ * reading the one that matters.
+ */
+export function checklistReported(consultTypeKey, report) {
+  const items = checklistFor(consultTypeKey);
+  if (!items.length) return true;
+  if (!report || typeof report !== 'object') return false;
+  return items.some((i) => Object.prototype.hasOwnProperty.call(report, i.key));
+}
+
+/**
  * Turn the model's report into gaps, in the clinician's wording.
  * `report` is { key: evidence | null }. Anything null, missing, or not a
  * non-empty string counts as not found. Keys the checklist does not know are
@@ -163,6 +177,10 @@ export function checklistFor(consultTypeKey) {
 export function checklistGaps(consultTypeKey, report) {
   const items = checklistFor(consultTypeKey);
   if (!items.length) return [];
+  if (!checklistReported(consultTypeKey, report)) {
+    return ['The procedure checklist could not be applied to this transcript, so nothing below has been ' +
+            'checked against it. Read the note against what you remember discussing.'];
+  }
   const r = report && typeof report === 'object' ? report : {};
   const gaps = [];
   for (const item of items) {

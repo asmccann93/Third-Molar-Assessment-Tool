@@ -655,7 +655,11 @@ async function testDerivedAndDictation() {
   await tick(30);
   ok('Dictate resumes a paused recording', $(doc, 'pause').textContent === 'Pause');
   ok('and locks itself: there is one dictation point', $(doc, 'dictate').disabled && $(doc, 'dictate').textContent === 'Dictating');
-  ok('the bar says so', $(doc, 'recbar').textContent === 'Dictating');
+  // Read defensively: if a future edit writes textContent on the #recbar
+  // container it destroys these children, and the test must report that as a
+  // failure rather than crashing the run.
+  ok('the bar says so', /Dictating/.test($(doc, 'recbar-label')?.textContent || ''), $(doc, 'recbar-label')?.textContent ?? '#recbar-label was destroyed');
+  ok('and the recording bar keeps its pulsing dot and its label', !!doc.querySelector('#recbar .dot') && !!doc.querySelector('#recbar-label'));
   offset += 60 * 1000;                 // a minute of dictation
   click($(doc, 'stop'));
   await tick(300);
@@ -664,6 +668,9 @@ async function testDerivedAndDictation() {
   ok('the dictation point reaches the API in RECORDED seconds, not wall clock',
     noteBody && Math.abs(noteBody.dictationFromS - 90) < 2, String(noteBody?.dictationFromS));
   ok('the pause is still reported alongside it', noteBody?.pauses?.length === 1 && noteBody.pauses[0].forMs >= 40 * 60 * 1000);
+
+  // The two kinds of finding must stay in separate panels with opposite advice.
+  ok('the not-said panel is hidden when there is nothing to report', $(doc, 'notsaid').classList.contains('hidden'));
 
   const text = $(doc, 'fields').textContent;
   ok('the dictated section is rendered under its own heading', /Dictated after the consultation/.test(text));
@@ -697,6 +704,47 @@ async function testDerivedAndDictation() {
   click($(doc, 'clear'));
   await tick(30);
   ok('Clear removes the summary and consent text too', $(doc, 'summary-box').classList.contains('hidden') && $(doc, 'summary-text').textContent === '' && $(doc, 'consent-text').textContent === '');
+}
+
+async function testNotSaidPanel() {
+  section('Checklist findings are kept apart from model gaps');
+  const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
+  ok('the page never tells you to add an undiscussed risk from memory',
+    /If you did not discuss it, do not\s+add it to the record/.test(src));
+  ok('while the model-gap lead still invites memory for things merely not captured',
+    /These were not captured\. Add them from memory/.test(src));
+
+  const ctx = await boot({
+    onFetch: async (entry) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ status: 'done', note: {
+        reasonForAttendance: 'Lower left wisdom tooth.', medicalHistory: null, proposed: 'Surgical removal.', alternatives: null,
+        risks: 'Swelling and bruising.', benefits: null, costs: null, patientQuestions: null, patientFactors: null,
+        informationGiven: null, decision: 'Proceed.', nextStep: 'Book.',
+        gaps: ['Costs were not discussed'],
+        notSaid: ['Not mentioned: altered sensation of the lip and chin (inferior alveolar nerve), temporary or permanent.'] } }) };
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+
+  const notSaid = [...$(doc, 'notsaid-list').children].map((li) => li.textContent);
+  const gaps = [...$(doc, 'gaps-list').children].map((li) => li.textContent);
+  ok('the unsaid risk appears in its own panel', notSaid.length === 1 && /inferior alveolar nerve/.test(notSaid[0]), JSON.stringify(notSaid));
+  ok('and NOT in the gap list that invites you to add from memory', !gaps.some((g) => /inferior alveolar/.test(g)), JSON.stringify(gaps));
+  ok('the model gap is still shown', gaps.includes('Costs were not discussed'));
+  ok('the panel is visible', !$(doc, 'notsaid').classList.contains('hidden'));
+
+  click($(doc, 'clear'));
+  await tick(30);
+  ok('Clear empties the not-said panel too', $(doc, 'notsaid-list').children.length === 0 && $(doc, 'notsaid').classList.contains('hidden'));
 }
 
 async function testPauseResume() {
@@ -896,6 +944,7 @@ await testDraftRetry();
 await testFormatAndSize();
 await testPauseResume();
 await testDerivedAndDictation();
+await testNotSaidPanel();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
