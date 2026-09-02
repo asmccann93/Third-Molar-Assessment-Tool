@@ -57,10 +57,12 @@ function stubFetch(handler) {
 
 // A minimal but genuine WebM/Matroska header, so fixtures look like recordings.
 const WEBM = (n) => Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(Math.max(0, n - 4), 7)]);
-// What the browser now produces, and what Speechmatics accepts.
+// What Safari's MediaRecorder produced, and what Speechmatics accepts.
 const M4A = (n) => Buffer.concat([
   Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42', 'latin1'), Buffer.alloc(Math.max(0, n - 12), 3)
 ]);
+// What the page produces now: Opus in Ogg, encoded in the browser.
+const OGG = (n) => Buffer.concat([Buffer.from('OggS', 'latin1'), Buffer.alloc(Math.max(0, n - 4), 5)]);
 
 const TURNS_PAYLOAD = {
   results: [
@@ -246,6 +248,62 @@ async function testTranscribe() {
   process.env.SPEECHMATICS_API_KEY = saved;
 
   ok('no-store set on every response', res.headers['cache-control']?.includes('no-store'));
+
+  // --- region: the hostname IS the DPIA (§2.7 records EU1) -------------------
+  calls = stubFetch(async (c) => {
+    if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobR' } };
+    if (c.method === 'GET' && c.url.endsWith('/jobs/jobR')) return { status: 200, body: { job: { status: 'done' } } };
+    if (c.method === 'GET' && c.url.includes('/transcript')) return { status: 200, body: TURNS_PAYLOAD };
+    if (c.method === 'DELETE') return { status: 200, body: {} };
+    return { status: 404, body: {} };
+  });
+  res = mockRes();
+  await handler(mockReq({ headers: { 'content-type': 'audio/ogg' }, body: OGG(5000) }), res);
+  ok('every Speechmatics call goes to the EU1 endpoint',
+    calls.length > 0 && calls.every((c) => c.url.startsWith('https://eu1.asr.api.speechmatics.com/')),
+    calls.map((c) => c.url).join(' '));
+
+  process.env.SPEECHMATICS_API_BASE = 'https://asr.api.speechmatics.com/v2';   // the old unregioned host
+  const { default: nonEu } = await import('../api/transcribe.mjs?base=legacy');
+  calls = stubFetch(async () => ({ status: 201, body: { id: 'mustnot' } }));
+  res = mockRes();
+  await nonEu(mockReq({ headers: { 'content-type': 'audio/ogg' }, body: OGG(5000) }), res);
+  ok('a non-EU endpoint fails closed', res.statusCode === 500 && res.body?.error === 'server_misconfigured', `got ${res.statusCode}`);
+  ok('and sends nothing anywhere', calls.length === 0);
+  delete process.env.SPEECHMATICS_API_BASE;
+
+  // --- Ogg Opus, which the page now produces ---------------------------------
+  let submitted = null;
+  calls = stubFetch(async (c, opts) => {
+    if (c.method === 'POST' && c.url.endsWith('/jobs')) {
+      submitted = opts.body;
+      return { status: 201, body: { id: 'jobO' } };
+    }
+    if (c.method === 'GET' && c.url.endsWith('/jobs/jobO')) return { status: 200, body: { job: { status: 'done' } } };
+    if (c.method === 'GET' && c.url.includes('/transcript')) return { status: 200, body: TURNS_PAYLOAD };
+    if (c.method === 'DELETE') return { status: 200, body: {} };
+    return { status: 404, body: {} };
+  });
+  res = mockRes();
+  await handler(mockReq({ headers: { 'content-type': 'audio/ogg' }, body: OGG(5000) }), res);
+  ok('an Ogg recording is accepted and transcribed', res.statusCode === 200, `got ${res.statusCode} ${res.body?.detail || ''}`);
+  const oggPart = submitted && submitted.get && submitted.get('data_file');
+  ok('and submitted with the .ogg filename Speechmatics keys on', !!oggPart && oggPart.name === 'consult.ogg', oggPart && oggPart.name);
+
+  // --- long recordings: GET is one check, never a wait --------------------------
+  calls = stubFetch(async (c) => {
+    if (c.method === 'GET' && c.url.endsWith('/jobs/jobLong')) return { status: 200, body: { job: { status: 'running' } } };
+    return { status: 404, body: {} };
+  });
+  res = mockRes();
+  const t0 = Date.now();
+  await handler(mockReq({ method: 'GET', url: '/api/transcribe?jobId=jobLong' }), res);
+  ok('a still-running job comes back 202 with its id', res.statusCode === 202 && res.body?.jobId === 'jobLong', `got ${res.statusCode}`);
+  ok('after exactly one status check, with no sleeping', calls.length === 1 && Date.now() - t0 < 1000, `${calls.length} calls, ${Date.now() - t0} ms`);
+  ok('and the job is NOT deleted while it is still wanted', !calls.some((c) => c.method === 'DELETE'));
+
+  const { config: fnConfig } = await import('../api/transcribe.mjs');
+  ok('maxDuration fits the Hobby plan cap, so no invocation can be killed mid-poll', fnConfig?.maxDuration <= 60, String(fnConfig?.maxDuration));
 }
 
 /* ================================================================
@@ -432,6 +490,12 @@ async function testMiddleware() {
 
   r = await middleware(req('/ai-notes/sw.js', { accept: '*/*' }));
   ok('/ai-notes/sw.js is open so registration cannot fail', r === undefined, `got ${r?.status}`);
+
+  r = await middleware(req('/ai-notes/encoder.js', { accept: '*/*' }));
+  ok('/ai-notes/encoder.js is open so the worklet load cannot fail on cookies', r === undefined, `got ${r?.status}`);
+
+  r = await middleware(req('/ai-notes/index.html', { accept: '*/*' }));
+  ok('but the page itself is still gated', r?.status === 401, `got ${r?.status}`);
 
   const token = await mintToken(process.env.SESSION_SECRET, 3600);
   r = await middleware(req('/ai-notes/', { cookie: buildCookie(token).split(';')[0] }));

@@ -54,38 +54,58 @@ async function boot({ session = { authenticated: true, expiresIn: 40000 }, onFet
         configurable: true
       });
       win.scrollTo = () => {};
-      // A MediaRecorder that actually produces a plausible blob, so the pipeline
-      // runs end to end rather than being poked at from outside.
-      win.MediaRecorder = class {
-        constructor(stream, opts = {}) {
-          this.stream = stream; this.state = 'inactive'; this._l = {};
-          this.mimeType = opts.mimeType || 'audio/webm';
+      // The page encodes Opus in an AudioWorklet. jsdom has no Web Audio, so
+      // the context, the worklet node and the encoder's message protocol are
+      // stubbed here — producing genuine Ogg-shaped pages so the pipeline runs
+      // end to end rather than being poked at from outside.
+      //
+      // The protocol (opus-recorder's encoderWorker): the page posts `init`,
+      // gets `ready`; posts `getHeaderPages`, gets two header pages; pages then
+      // stream in while recording; `done` flushes the last pages and answers
+      // `done`. A stub that skipped the final flush would hide exactly the class
+      // of bug the discard test exists for.
+      win.WebAssembly = globalThis.WebAssembly;
+      win.__encoder = { instances: [] };
+      win.AudioWorkletNode = class {
+        constructor(ctx, name) {
+          this.name = name;
+          this.disconnected = false;
+          this._timer = null;
+          const node = this;
+          this.port = {
+            onmessage: null,
+            postMessage(msg) {
+              const say = (data) => setTimeout(() => node.port.onmessage && node.port.onmessage({ data }), 2);
+              const page = (n, pos) => {
+                const bytes = new Uint8Array(n); bytes.set([0x4f, 0x67, 0x67, 0x53]); // OggS
+                return { message: 'page', page: bytes, samplePosition: pos };
+              };
+              if (msg.command === 'init') { node.init = msg; say({ message: 'ready' }); }
+              if (msg.command === 'getHeaderPages') {
+                say(page(47, 0)); say(page(60, 0));
+                // then a page every few ms, as the real worklet does every 800 ms
+                let pos = 0;
+                node._timer = setInterval(() => { pos += 38400; say(page(1900, pos)); }, 8);
+              }
+              if (msg.command === 'done') {
+                clearInterval(node._timer);
+                // the final flush: one more page BEFORE done, like the real thing
+                say(page(900, 999999)); say({ message: 'done' });
+              }
+              if (msg.command === 'close') clearInterval(node._timer);
+            }
+          };
+          win.__encoder.instances.push(this);
         }
-        addEventListener(k, f) { (this._l[k] = this._l[k] || []).push(f); }
-        start() {
-          this.state = 'recording';
-          setTimeout(() => (this._l.dataavailable || []).forEach((f) =>
-            f({ data: new win.Blob([new Uint8Array(6000)], { type: this.mimeType }) })), 5);
-        }
-        stop() {
-          this.state = 'inactive';
-          setTimeout(() => {
-            // A real MediaRecorder flushes whatever is still buffered as one
-            // last dataavailable BEFORE firing stop. That final chunk is the
-            // entire discard bug, so the stub has to reproduce it or the
-            // regression test below is worthless.
-            (this._l.dataavailable || []).forEach((f) =>
-              f({ data: new win.Blob([new Uint8Array(4000)], { type: this.mimeType }) }));
-            (this._l.stop || []).forEach((f) => f({}));
-          }, 5);
-        }
+        disconnect() { this.disconnected = true; clearInterval(this._timer); }
       };
-      // Only offer what Speechmatics accepts, as Safari/Firefox would.
-      win.MediaRecorder.isTypeSupported = (t) => /mp4|ogg/.test(t);
       win.AudioContext = class {
-        createMediaStreamSource() { return { connect() {} }; }
+        constructor() { this.sampleRate = 48000; this.state = 'running'; this.closed = false;
+          this.audioWorklet = { addModule: async (path) => { win.__encoder.modulePath = path; } }; }
+        resume() { this.state = 'running'; return Promise.resolve(); }
+        createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
         createAnalyser() { return { fftSize: 512, connect() {}, getByteTimeDomainData(a) { a.fill(128); } }; }
-        close() {}
+        close() { this.closed = true; }
       };
       win.requestAnimationFrame = () => 0;
       win.cancelAnimationFrame = () => {};
@@ -507,6 +527,8 @@ async function testDiscardAndCancellation() {
   ok('the draft view never appears after Lock', $(doc, 'draft').classList.contains('hidden'));
 
   // --- 3. Same again, via the idle timeout path ----------------------------
+  ok('the idle wipe is one hour, by decision of 2 Sep 2026',
+    /IDLE_WIPE_MS:\s*60 \* 60 \* 1000/.test(readFileSync(join(here, '../ai-notes/index.html'), 'utf8')));
   ok('idle timeout does not fire while a transcript is in flight',
     /if \(S\.busy\) \{ resetIdle\(\); return; \}/.test(
       readFileSync(join(here, '../ai-notes/index.html'), 'utf8')));
@@ -586,38 +608,119 @@ async function testDraftRetry() {
    8. Recording format and size guard
    ================================================================ */
 async function testFormatAndSize() {
-  section('Recording format — must be one Speechmatics accepts');
+  section('Recording format and size — Opus in Ogg, encoded in the browser, measured not estimated');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
 
-  const list = src.match(/var MIME_CANDIDATES = \[([\s\S]*?)\];/)[1];
-  const entries = [...list.matchAll(/type: '([^']+)',\s*ok: (true|false)/g)].map((m) => ({ type: m[1], ok: m[2] === 'true' }));
-
-  ok('mp4 is preferred first', entries[0].type.startsWith('audio/mp4'), entries[0].type);
-  ok('every accepted format is on the Speechmatics list',
-    entries.filter((e) => e.ok).every((e) => /mp4|m4a|ogg|wav|mp3|aac|flac/.test(e.type)));
-  ok('webm is marked unacceptable', entries.filter((e) => /webm/.test(e.type)).every((e) => !e.ok));
-  ok('webm is ordered last', /webm/.test(entries[entries.length - 1].type));
-
-  ok('no timeslice, so the container is complete', /S\.recorder\.start\(\);/.test(src) && !/S\.recorder\.start\(\d/.test(src));
-  ok('size is estimated from elapsed time instead', /var estimated = \(elapsed \/ 1000\)/.test(src));
+  ok('MediaRecorder is gone: Safari ignores its bitrate and that was the whole ceiling',
+    !/new MediaRecorder\(/.test(src));
+  ok('the encoder is served from this origin, so still no third-party request',
+    /ENCODER_PATH:\s*'\/ai-notes\/encoder\.js'/.test(src));
+  ok('encodes at 24 kbps, 16 kHz mono, voice application',
+    /OPUS_BPS:\s*24000/.test(src) && /OPUS_RATE:\s*16000/.test(src) && /encoderApplication:\s*2048/.test(src));
+  ok('the cap is now 25 minutes', /MAX_MS:\s*25 \* 60 \* 1000/.test(src));
+  ok('the recording view says so', /Stops automatically at 25:00/.test(src));
+  ok('size is measured from encoded pages, not estimated from a bitrate',
+    /var bytes = rec\.bytes;/.test(src) && !/var estimated = \(elapsed/.test(src));
   ok('and still warns before stopping', /SIZE_WARN/.test(src));
   ok('the stop threshold leaves headroom', /SIZE_STOP:\s*0\.95/.test(src));
+  ok('the blob is typed as Ogg for Speechmatics', /type: 'audio\/ogg'/.test(src));
 
-  // A browser offering only WebM must be told before it records anything.
-  const ctx = await boot();
-  ctx.win.MediaRecorder.isTypeSupported = (t) => /webm/.test(t);
-  const { doc, win } = ctx;
-  $(doc, 'consent').checked = true;
-  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
-  await tick();
-  click($(doc, 'start'));
-  await tick(80);
-  ok('a webm-only browser is refused up front',
-    !$(doc, 'error').classList.contains('hidden') &&
-    /cannot record a supported format/i.test($(doc, 'error-title').textContent),
-    $(doc, 'error-title').textContent);
-  ok('and never enters the recording view', $(doc, 'recording').classList.contains('hidden'));
+  // A full run: the encoder is initialised the way the worklet expects, and the
+  // upload is the concatenated pages, ending with the final flush.
+  let sent = null;
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe') && entry.method === 'POST') {
+        sent = { type: opts.headers['Content-Type'], size: opts.body.size };
+        return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      }
+      if (entry.url.includes('/api/extract')) {
+        return { ok: true, status: 200, json: async () => ({ note: { gaps: [], reasonForAttendance: 'x' } }) };
+      }
+    }
+  });
+  await runConsultation(ctx);
+  await tick(200);
+  const enc = ctx.win.__encoder;
+  ok('the worklet module is loaded from the encoder path', enc.modulePath === '/ai-notes/encoder.js', enc.modulePath);
+  const init = enc.instances[0] && enc.instances[0].init;
+  ok('the encoder is initialised with the device sample rate and the Opus settings',
+    !!init && init.originalSampleRate === 48000 && init.encoderSampleRate === 16000 &&
+    init.encoderBitRate === 24000 && init.streamPages === true && init.numberOfChannels === 1,
+    JSON.stringify(init));
+  ok('the upload is Ogg', sent && sent.type === 'audio/ogg', JSON.stringify(sent));
+  // header pages (47 + 60) + streamed pages + the 900-byte final flush
+  ok('the upload includes the final flushed page', sent && (sent.size - 47 - 60 - 900) % 1900 === 0 && sent.size > 2000, sent && String(sent.size));
+  ok('the audio context is closed afterwards, holding nothing', enc.instances[0].disconnected);
+
+  // The stall warning and the size warning share the meter line; the size
+  // guard must never be wiped by the meter, which was a live bug.
+  ok('the meter line is driven by one merged status, not overwritten per frame',
+    /: S\.sizeNote;/.test(src) && !/note\.textContent = ''/.test(src));
+
+  // Fail before the consultation, never during it.
+  const bad = await boot();
+  bad.win.AudioContext = class {
+    constructor() { this.sampleRate = 48000; this.state = 'running';
+      this.audioWorklet = { addModule: async () => { throw new Error('404 encoder.js'); } }; }
+    resume() { return Promise.resolve(); }
+    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+    createAnalyser() { return { fftSize: 512, connect() {}, getByteTimeDomainData(a) { a.fill(128); } }; }
+    close() {}
+  };
+  {
+    const { doc, win } = bad;
+    $(doc, 'consent').checked = true;
+    $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+    click($(doc, 'types').children[0]);
+    await tick();
+    click($(doc, 'start'));
+    await tick(120);
+    ok('a missing encoder is refused up front',
+      !$(doc, 'error').classList.contains('hidden') && /cannot start the encoder/i.test($(doc, 'error-title').textContent),
+      $(doc, 'error-title').textContent);
+    ok('and names the file', /\/ai-notes\/encoder\.js/.test($(doc, 'error-body').textContent));
+    ok('and never enters the recording view', $(doc, 'recording').classList.contains('hidden'));
+  }
+
+  // A browser with no AudioWorklet is refused before the microphone is even asked for.
+  const old = await boot();
+  delete old.win.AudioWorkletNode;
+  {
+    const { doc, win } = old;
+    $(doc, 'consent').checked = true;
+    $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+    click($(doc, 'types').children[0]);
+    await tick();
+    click($(doc, 'start'));
+    await tick(80);
+    ok('an unsupported browser is told so', /cannot record/i.test($(doc, 'error-title').textContent), $(doc, 'error-title').textContent);
+  }
+
+  // Short of the wall clock: the encoder reports what it captured, and the
+  // draft says so in the gap list rather than presenting a hole as complete.
+  const short = await boot({
+    onFetch: async (entry) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ note: { gaps: ['Costs'], reasonForAttendance: 'x' } }) };
+    }
+  });
+  {
+    const { doc, win } = short;
+    $(doc, 'consent').checked = true;
+    $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+    click($(doc, 'types').children[0]);
+    await tick();
+    click($(doc, 'start'));
+    await tick(60);
+    // Pretend the wall clock has run 10 minutes while the encoder only ever saw seconds.
+    win.Date.now = ((real) => () => real() + 10 * 60 * 1000)(win.Date.now.bind(win.Date));
+    click($(doc, 'stop'));
+    await tick(250);
+    const gaps = [...$(doc, 'gaps-list').children].map((li) => li.textContent);
+    ok('a short capture is flagged first in the gap list', gaps.length === 2 && /was captured/.test(gaps[0]), JSON.stringify(gaps));
+    ok('the model\'s own gaps are kept after it', gaps[1] === 'Costs');
+  }
 }
 
 /* ---------- run ---------- */
