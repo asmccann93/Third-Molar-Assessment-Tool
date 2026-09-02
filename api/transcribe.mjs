@@ -4,22 +4,34 @@
 // the key stays here and the site keeps its property of making zero third-party
 // requests from the client.
 //
-//   POST   /api/transcribe            raw audio body -> submits, polls, returns turns
-//   GET    /api/transcribe?jobId=...  resumes polling if the POST ran out of budget
+//   POST   /api/transcribe            raw audio body -> submits, polls briefly, returns turns or a job id
+//   GET    /api/transcribe?jobId=...  one status check; returns turns when done, 202 otherwise
 //   DELETE /api/transcribe?jobId=...  best-effort cleanup, called by the Clear button
 //
 // Retention: Speechmatics keeps a completed job (audio + transcript) on their
-// side until it is deleted or ages out. That is squarely against the zero
-// retention claim in the DPIA, so every path here deletes the job explicitly.
-// Confirm the account's default retention setting too — belt and braces.
+// side until it is deleted or ages out at 7 days. That is squarely against the
+// zero retention claim in the DPIA, so every path here deletes the job
+// explicitly.
+//
+// Region: the DPIA (§2.7, signed 2 Sep 2026) says audio is processed in
+// Speechmatics' EU1 region. Speechmatics determine the region SOLELY by the
+// hostname called — the old `region` parameter is deprecated and has no effect —
+// so the hostname is the DPIA. The guard below refuses to run against anything
+// that is not an EU endpoint, so an environment-variable slip cannot quietly
+// move patient audio to another jurisdiction.
 
 export const config = {
-  maxDuration: 300 // seconds. Requires Pro. On Hobby this silently caps at 60
-                   // and long recordings will fail — see BUDGET_MS below.
+  // Works on both Hobby (hard cap 60) and Pro. The handler never waits longer
+  // than POST_BUDGET_MS in one invocation; a long transcription is handed back
+  // to the client as a job id and finished through the GET route, one short
+  // check per request. Nothing here needs a plan upgrade.
+  maxDuration: 60
 };
 
-const API_BASE = process.env.SPEECHMATICS_API_BASE || 'https://asr.api.speechmatics.com/v2';
-const BUDGET_MS = 240_000;      // stop polling in time to return cleanly
+const API_BASE = process.env.SPEECHMATICS_API_BASE || 'https://eu1.asr.api.speechmatics.com/v2';
+const EU_HOSTS = ['eu1.asr.api.speechmatics.com', 'eu2.asr.api.speechmatics.com'];
+
+const POST_BUDGET_MS = 35_000;  // short recordings finish inside this; long ones go to GET
 const MAX_BYTES = 4.4 * 1024 * 1024;
 const MIN_BYTES = 2000;        // matches the client-side floor; below this there
                                // is no recording, only container headers
@@ -87,6 +99,15 @@ export default async function handler(req, res) {
     console.error('transcribe: SPEECHMATICS_API_KEY not set');
     return res.status(500).json({ error: 'server_misconfigured' });
   }
+  if (!isEuEndpoint(API_BASE)) {
+    // Refuse rather than proceed. The DPIA asserts EU1; this is how it stays true.
+    console.error('transcribe: SPEECHMATICS_API_BASE is not an EU endpoint:', API_BASE);
+    return res.status(500).json({
+      error: 'server_misconfigured',
+      detail: 'SPEECHMATICS_API_BASE must point at eu1.asr.api.speechmatics.com (or eu2). ' +
+              'The DPIA records EU1 as the processing region; this server will not send audio anywhere else.'
+    });
+  }
 
   try {
     if (req.method === 'DELETE') {
@@ -104,7 +125,9 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const jobId = jobIdFrom(req);
       if (!jobId) return res.status(400).json({ error: 'missing_job_id' });
-      return await pollOrCleanUp(key, jobId, res, BUDGET_MS);
+      // One check per request: the client paces itself, and no invocation
+      // sits waiting long enough to hit a plan's duration cap.
+      return await pollOrCleanUp(key, jobId, res, 0);
     }
 
     if (req.method !== 'POST') {
@@ -166,7 +189,7 @@ export default async function handler(req, res) {
     // is not reliably accepted. The extension on the filename is what matters.
     const contentType = contentTypeRaw.split(';')[0].trim() || 'audio/webm';
     const jobId = await submitJob(key, audio, contentType, via);
-    return await pollOrCleanUp(key, jobId, res, BUDGET_MS - 5000);
+    return await pollOrCleanUp(key, jobId, res, POST_BUDGET_MS);
   } catch (err) {
     // Never log payloads — R11. Message only.
     console.error('transcribe failed:', err && err.message);
@@ -267,7 +290,7 @@ async function pollToCompletion(key, jobId, res, budgetMs) {
   const deadline = Date.now() + budgetMs;
   let waitMs = 1500;
 
-  while (Date.now() < deadline) {
+  for (;;) {
     const r = await fetch(`${API_BASE}/jobs/${jobId}`, {
       headers: { Authorization: `Bearer ${key}` }
     });
@@ -291,12 +314,13 @@ async function pollToCompletion(key, jobId, res, budgetMs) {
       throw new Error(`job ${status}`);
     }
 
+    if (Date.now() + waitMs >= deadline) break;
     await sleep(waitMs);
     waitMs = Math.min(waitMs * 1.3, 5000);
   }
 
-  // Out of budget, job still running. Hand the id back so the client can resume
-  // against the GET route rather than losing the recording.
+  // Out of budget, job still running. Hand the id back so the client can carry
+  // on against the GET route rather than losing the recording.
   return res.status(202).json({ status: 'pending', jobId });
 }
 
@@ -352,6 +376,10 @@ function toTurns(payload) {
 }
 
 /* ---------- helpers ---------- */
+
+function isEuEndpoint(base) {
+  try { return EU_HOSTS.includes(new URL(base).hostname); } catch { return false; }
+}
 
 function jobIdFrom(req) {
   const url = new URL(req.url, 'https://placeholder.local');
