@@ -16,12 +16,12 @@
  *
  * This checks for both across the hub and all four tools.
  *
- * A third failure mode arrived with AI Notes, and it is silent in the other
- * direction: the private tool LEAKING into the public bar. AI Notes is
- * deliberately absent from all five public switchers and must stay that way,
- * so it is checked separately below rather than being added to TOOLS. Adding it
- * there would invert the rule - the cross-check would start demanding an
- * /ai-notes/ link on every public page, which is exactly what must not happen.
+ * AI Notes is the sixth entry in every switcher since 2 September 2026 (a
+ * discoverability decision; the passcode gate is the control and is unchanged).
+ * It is still checked separately rather than being added to TOOLS, because the
+ * other rules do not apply to it: it has no cache and must have none, and it
+ * must stay out of the sitemap. Check 4 asserts the link is present on every
+ * public page, so it cannot vanish from one bar only.
  */
 const fs = require("fs");
 const path = require("path");
@@ -198,15 +198,16 @@ if (sitemap && sitemap.includes(GATED.dir)) {
   );
 }
 
-/* --- 4. the private tool must not leak into the public bar ------------------
-   The inverse of check 2. A stray link here would put a passcode-gated clinical
-   tool in front of every visitor and every crawler. */
+/* --- 4. the gated tool is in every public bar --------------------------------
+   Same failure mode as check 2, for the one entry TOOLS does not cover: a page
+   deployed with a five-entry bar drops AI Notes on that page only. Until
+   2 September 2026 this check asserted the opposite. */
 for (const tool of TOOLS) {
   const index = read(path.join(root, tool.dir, "index.html"));
-  if (index && new RegExp(`href="${GATED.href.replace(/\//g, "\\/")}"`).test(index)) {
+  if (index && !new RegExp(`href="${GATED.href.replace(/\//g, "\\/")}"`).test(index)) {
     problems.push(
-      `${tool.name}: links to ${GATED.href}. That tool is private and must not appear ` +
-        `in any public switcher. Remove the link.`
+      `${tool.name}: the switcher has no link to ${GATED.name} (${GATED.href}). ` +
+        `That tool will vanish from the bar on this page only.`
     );
   }
 }
@@ -232,5 +233,5 @@ if (problems.length) {
   process.exit(1);
 }
 
-console.log("\n  Site check passed: hub and four tools, switchers complete, caches in step,\n  AI Notes gated and storing nothing.\n");
+console.log("\n  Site check passed: hub and four tools, switchers complete, caches in step,\n  AI Notes linked from every bar, gated and storing nothing.\n");
 process.exit(0);

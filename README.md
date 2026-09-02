@@ -134,11 +134,12 @@ the intended behaviour if a device is lost.
 
 ### Two things that look like bugs and are not
 
-**The switcher on `/ai-notes/` has six entries; every other page has five.** AI
-Notes links out to the public tools, but no public tool links to it. That
-asymmetry is the point — the tool stays out of the shop window. `site-check.js`
-enforces it in both directions and will fail the build if a public page ever
-gains an `/ai-notes/` link. Do not "fix" the inconsistency.
+**Every switcher has six entries, and the sixth leads to a passcode prompt.**
+AI Notes has been linked from every public bar since 2 September 2026. A
+visitor who taps it sees a 401 sign-in page and nothing else; the gate, not
+the link's absence, is the control. `site-check.js` now asserts the link is
+present on every public page, so it cannot vanish from one bar only. The tool
+is still kept out of `sitemap.xml`, and that is still enforced.
 
 **`ai-notes/sw.js` has no `CACHE` constant and caches nothing.** Every other
 service worker here is offline-first. This one is network-only, and
