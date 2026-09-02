@@ -402,7 +402,7 @@ button:disabled { opacity: .45; cursor: default; }
     <div class="card">
       <h2>Recording</h2>
       <p class="timer" id="timer">0:00</p>
-      <p class="timer-note" id="timer-note">Stops automatically at 15:00</p>
+      <p class="timer-note" id="timer-note">Stops automatically at 25:00</p>
       <div class="level" aria-hidden="true"><i id="level"></i></div>
       <p class="level-note" id="level-note" role="status"></p>
       <div class="record-row">
@@ -467,14 +467,34 @@ button:disabled { opacity: .45; cursor: default; }
      and are flagged as such.
      ================================================================== */
   var CFG = {
-    MAX_MS:        15 * 60 * 1000,   // hard cap; auto-stops
-    WARN_MS:       13 * 60 * 1000,   // timer turns red
-    IDLE_WIPE_MS:  10 * 60 * 1000,   // no interaction -> destroy everything
-    AUDIO_BPS:     24000,            // 15 min mono Opus ~= 2.7 MB, under Vercel's 4.5 MB
+    MAX_MS:        25 * 60 * 1000,   // hard cap; auto-stops. The measured size
+                                     // guard below usually rules before this.
+    WARN_MS:       22 * 60 * 1000,   // timer turns red
+    IDLE_WIPE_MS:  60 * 60 * 1000,   // no interaction -> destroy everything.
+                                     // Raised from 10 minutes on 2 Sep 2026 by
+                                     // the clinician's decision. The idle timer
+                                     // is the control for a draft left on an
+                                     // unattended screen; if the DPIA states
+                                     // the figure, amend it to match.
+
+    // The recording is encoded IN THE BROWSER as Opus in an Ogg container, by
+    // the encoder at ENCODER_PATH (opus-recorder's libopus build, self-hosted,
+    // so the page still makes no third-party request). MediaRecorder is not
+    // used any more: Safari ignores audioBitsPerSecond and encodes AAC at about
+    // 157 kbps, which hit Vercel's 4.5 MB body limit at three and a half
+    // minutes. Opus at 24 kbps, 16 kHz mono, voice-tuned, measures 2.3-3.0 KB/s
+    // on speech, so 4.2 MB holds 23-30 minutes. Speechmatics accepts Ogg.
+    OPUS_BPS:      24000,
+    OPUS_RATE:     16000,            // encoder sample rate; wideband speech
+    ENCODER_PATH:  '/ai-notes/encoder.js',
+    ENCODER_READY_MS: 8000,          // wasm compile + worklet load, before refusing to start
+    ENCODER_DONE_MS:  15000,         // final flush at stop; pages so far are kept if it lapses
+    STALL_MS:      8000,             // no encoded page for this long -> warn
+
     MAX_BYTES:     4.2 * 1024 * 1024,
     SILENCE_MS:    6000,             // no sound for this long -> warn
     POLL_MS:       5000,
-    POLL_MAX:      120,
+    POLL_MAX:      240,              // x POLL_MS = 20 minutes of client-side polling
     SESSION_WARN_S: 25 * 60,   // refuse to start a recording with less than this
                                // left on the session
     SIZE_WARN:     0.80,       // warn at this fraction of MAX_BYTES
@@ -529,17 +549,18 @@ button:disabled { opacity: .45; cursor: default; }
   var S = {
     consent: false,
     consultType: null,
-    recorder: null,
+    recorder: null,   // the Opus recorder object from createRecorder(); has .state
     stream: null,
-    chunks: [],
-    audioType: '',
     startedAt: 0,
     tickId: null,
     idleId: null,
     audioCtx: null,
+    source: null,     // MediaStreamAudioSourceNode; feeds both the meter and the encoder
     analyser: null,
     rafId: null,
     lastSoundAt: 0,
+    sizeNote: '',     // size / stall warning; the meter merges it with its own silence note
+    captureNote: null,// set when the encoder captured less than the wall clock; rendered as a gap
     jobId: null,
     turns: null,      // held ONLY between a failed draft and a retry
     note: null,
@@ -670,38 +691,125 @@ button:disabled { opacity: .45; cursor: default; }
   /* ==================================================================
      RECORDING
      ================================================================== */
-  // Ordered by what SPEECHMATICS ACCEPTS, not by what browsers do best.
+  // The recorder. Opus in Ogg, encoded in an AudioWorklet from the encoder
+  // script at CFG.ENCODER_PATH. Exposes the same surface the rest of the page
+  // relied on from MediaRecorder — .state, .stop() — so the idle timer, the
+  // unload guard and wipe() are unchanged.
   //
-  // Their supported list is wav, mp3, aac, ogg, mpeg, amr, m4a, mp4, flac, and
-  // the documentation states it is exhaustive: "any file format outside the list
-  // above is explicitly not supported."
+  // Why not MediaRecorder: Safari ignores audioBitsPerSecond and produces AAC
+  // at ~157 kbps, so a consultation hit Vercel's 4.5 MB request limit at three
+  // and a half minutes. There is no way to make Safari's recorder smaller; the
+  // only way to a longer recording without sending audio somewhere new is to
+  // encode it ourselves. libopus in WebAssembly does that at a real, honoured
+  // bitrate, and Ogg is on Speechmatics' accepted list. WebM is not, so this
+  // also removes the "Chrome cannot be used" restriction.
   //
-  // WebM is not on it. This list previously put audio/webm first, which is what
-  // Chrome produces, so every Chrome recording was rejected with "Job rejected
-  // due to invalid audio". WebM stays last only so that a browser offering
-  // nothing else can still record — but startRecording warns before a whole
-  // consultation is committed to a format that cannot be transcribed.
-  var MIME_CANDIDATES = [
-    { type: 'audio/mp4;codecs=mp4a.40.2', ok: true },
-    { type: 'audio/mp4',                  ok: true },
-    { type: 'audio/ogg;codecs=opus',      ok: true },
-    { type: 'audio/webm;codecs=opus',     ok: false },
-    { type: 'audio/webm',                 ok: false }
-  ];
+  // Pages arrive as they are encoded, so the size guard MEASURES bytes rather
+  // than estimating from a bitrate the browser may not honour.
+  function createRecorder(ctx, source, opts) {
+    var rec = {
+      state: 'inactive',       // inactive | starting | recording | stopping
+      bytes: 0,
+      pages: [],
+      samplePosition: 0,       // encoded samples so far; always at 48 kHz for Opus
+      lastPageAt: 0,
+      node: null,
+      onstop: null
+    };
+    var port = null;
+    var resolveDone = null;
 
-  function pickMimeType() {
-    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return null;
-    for (var i = 0; i < MIME_CANDIDATES.length; i++) {
-      if (MediaRecorder.isTypeSupported(MIME_CANDIDATES[i].type)) return MIME_CANDIDATES[i];
-    }
-    return null;
+    rec.start = async function () {
+      rec.state = 'starting';
+      await ctx.audioWorklet.addModule(opts.encoderPath);
+      rec.node = new AudioWorkletNode(ctx, 'encoder-worklet', { numberOfOutputs: 0 });
+      port = rec.node.port;
+
+      var ready = new Promise(function (resolve, reject) {
+        var t = setTimeout(function () { reject(new Error('the encoder did not become ready in time')); }, opts.readyMs);
+        port.onmessage = function (e) {
+          var d = e.data || {};
+          if (d.message === 'ready') { clearTimeout(t); resolve(); return; }
+          if (d.page) {
+            rec.pages.push(d.page);
+            rec.bytes += d.page.length;
+            if (typeof d.samplePosition === 'number') rec.samplePosition = d.samplePosition;
+            rec.lastPageAt = Date.now();
+            return;
+          }
+          if (d.message === 'done') { if (resolveDone) resolveDone(); }
+        };
+      });
+
+      port.postMessage({
+        command: 'init',
+        originalSampleRate: ctx.sampleRate,     // whatever the device runs at; resampled in the worklet
+        wavSampleRate: ctx.sampleRate,
+        encoderSampleRate: opts.rate,
+        encoderBitRate: opts.bps,
+        encoderApplication: 2048,               // voice
+        encoderComplexity: 5,                   // encoding runs on the audio thread; keep it cheap
+        encoderFrameSize: 20,
+        numberOfChannels: 1,
+        resampleQuality: 3,
+        maxFramesPerPage: 40,                   // a page every 800 ms -> the size guard sees bytes live
+        bufferLength: 4096,
+        streamPages: true
+      });
+      await ready;
+      port.postMessage({ command: 'getHeaderPages' });
+      source.connect(rec.node);
+      rec.state = 'recording';
+    };
+
+    rec.stop = function () {
+      if (rec.state !== 'recording' && rec.state !== 'starting') return Promise.resolve();
+      rec.state = 'stopping';
+      try { source.disconnect(rec.node); } catch (e) {}
+      var finished = new Promise(function (resolve) {
+        resolveDone = resolve;
+        // If the flush never answers, keep what we have rather than lose the lot.
+        setTimeout(resolve, opts.doneMs);
+      });
+      try { port.postMessage({ command: 'done' }); } catch (e) { resolveDone(); }
+      return finished.then(function () {
+        rec.state = 'inactive';
+        try { port.postMessage({ command: 'close' }); } catch (e) {}
+        try { rec.node.disconnect(); } catch (e) {}
+        if (rec.onstop) rec.onstop();
+      });
+    };
+
+    rec.blob = function () { return new Blob(rec.pages, { type: 'audio/ogg' }); };
+    return rec;
+  }
+
+  function canRecord() {
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    return !!(Ctx && window.AudioWorkletNode && window.WebAssembly &&
+              navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   }
 
   $('start').addEventListener('click', async function () {
     clearError();
 
+    if (!canRecord()) {
+      return fail('This browser cannot record',
+        'Recording needs a microphone, AudioWorklet and WebAssembly. Use Safari 14.5 or later, Chrome, or Firefox, over https.');
+    }
+
+    // Create the audio context synchronously, inside the tap. Safari will only
+    // let a context run when it was created or resumed from a user gesture, and
+    // the awaits below leave that window.
+    stopTracks();
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    try { S.audioCtx = new Ctx(); } catch (err) {
+      return fail('Cannot record', 'The browser refused to create an audio context.');
+    }
+
     var left = await checkSession();
     if (left !== null && left <= 0) {
+      stopTracks();
       return fail('Session expired',
         'Reload the page and enter the passcode before recording. Starting now would lose the conversation at the transcription step.');
     }
@@ -709,12 +817,9 @@ button:disabled { opacity: .45; cursor: default; }
       var mins = Math.max(1, Math.round(left / 60));
       if (!confirm('This session ends in about ' + mins + ' minute' + (mins === 1 ? '' : 's') +
                    '. If it lapses before the transcript returns, the recording is lost.\n\nLock and sign in again first?\n\nOK = carry on anyway, Cancel = go and sign in.')) {
+        stopTracks();
         return;
       }
-    }
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      return fail('No microphone access', 'This browser will not expose a microphone to the page. Use Chrome or Safari over https.');
     }
 
     try {
@@ -727,62 +832,47 @@ button:disabled { opacity: .45; cursor: default; }
         }
       });
     } catch (err) {
+      stopTracks();
       return fail('Microphone blocked',
         'The browser refused access to the microphone. Check the padlock in the address bar and allow it for this site, then try again.');
     }
 
-    var picked = pickMimeType();
-    if (picked && !picked.ok) {
-      stopTracks();
-      return fail('This browser cannot record a supported format',
-        'The only format available here is WebM, which the transcription service explicitly does not accept. ' +
-        'Use Safari, or Firefox, which can produce MP4 or Ogg. Better to know now than after a full consultation.');
-    }
-    var mime = picked ? picked.type : '';
-    var options = { audioBitsPerSecond: CFG.AUDIO_BPS };
-    if (mime) options.mimeType = mime;
-
-    try {
-      S.recorder = new MediaRecorder(S.stream, options);
-    } catch (err) {
-      try { S.recorder = new MediaRecorder(S.stream); }
-      catch (err2) { stopTracks(); return fail('Cannot record', 'MediaRecorder is unavailable in this browser.'); }
-    }
-
-    S.chunks = [];
-    S.bytes = 0;
-    S.audioType = S.recorder.mimeType || mime || 'audio/webm';
-
     var gen = S.gen;   // this recording's identity, for the async handlers below
 
-    S.recorder.addEventListener('dataavailable', function (e) {
-      if (gen !== S.gen) return;                 // discarded mid-flight
-      if (!e.data || e.data.size === 0) return;
-      S.chunks.push(e.data);
-      S.bytes += e.data.size;
+    try {
+      if (S.audioCtx.state === 'suspended') await S.audioCtx.resume();
+      S.source = S.audioCtx.createMediaStreamSource(S.stream);
+      S.recorder = createRecorder(S.audioCtx, S.source, {
+        encoderPath: CFG.ENCODER_PATH,
+        bps: CFG.OPUS_BPS,
+        rate: CFG.OPUS_RATE,
+        readyMs: CFG.ENCODER_READY_MS,
+        doneMs: CFG.ENCODER_DONE_MS
+      });
+      S.recorder.onstop = function () { onRecorderStop(gen); };
+      await S.recorder.start();
+    } catch (err) {
+      // Fail before the consultation, never during it. Nothing has been said
+      // yet, so a refusal here costs a retry and not a conversation.
+      S.recorder = null;
+      stopTracks();
+      return fail('Cannot start the encoder',
+        'The audio encoder did not load, so nothing was recorded. ' + String(err && err.message || err) +
+        '. Check the connection and try again. If it keeps happening, the encoder file at ' + CFG.ENCODER_PATH +
+        ' may be missing or blocked.');
+    }
 
-      // Watch the real size rather than trusting the bitrate. Safari has been
-      // known to ignore audioBitsPerSecond, and discovering at minute fifteen
-      // that the file is too large to send loses the whole conversation.
-    });
-    S.recorder.addEventListener('stop', function () { onRecorderStop(gen); });
-
-    // start() with NO timeslice, deliberately.
-    //
-    // A timeslice makes the recorder emit periodic chunks. On Safari that
-    // produces fragmented MP4: an init segment followed by media fragments.
-    // Concatenating those does not reliably give a file a decoder can inspect,
-    // and Speechmatics only accepts files "where the type can be determined by
-    // data inspection". Without a timeslice the recorder emits one complete,
-    // well-formed container at stop.
-    //
-    // The cost is that accumulated size cannot be watched live, so the size
-    // guard in tick() estimates from elapsed time and bitrate instead. The real
-    // size is still checked against the limit after stop.
-    S.recorder.start();
+    if (gen !== S.gen) {      // cleared or locked while the encoder was loading
+      try { S.recorder.stop(); } catch (e) {}
+      S.recorder = null;
+      stopTracks();
+      return;
+    }
 
     S.startedAt = Date.now();
     S.lastSoundAt = Date.now();
+    S.sizeNote = '';
+    S.captureNote = null;
     startMeter();
     startTicking();
     show('recording');
@@ -794,12 +884,16 @@ button:disabled { opacity: .45; cursor: default; }
     S.tickId = setInterval(tick, 250);
   }
 
-  function tick() {
-    var elapsed = Date.now() - S.startedAt;
-    var total = Math.floor(elapsed / 1000);
+  function fmtTime(seconds) {
+    var total = Math.max(0, Math.floor(seconds));
     var mins = Math.floor(total / 60);
     var secs = total % 60;
-    $('timer').textContent = mins + ':' + (secs < 10 ? '0' : '') + secs;
+    return mins + ':' + (secs < 10 ? '0' : '') + secs;
+  }
+
+  function tick() {
+    var elapsed = Date.now() - S.startedAt;
+    $('timer').textContent = fmtTime(elapsed / 1000);
     $('timer').classList.toggle('over', elapsed >= CFG.WARN_MS);
 
     if (elapsed >= CFG.WARN_MS && elapsed < CFG.MAX_MS) {
@@ -808,35 +902,45 @@ button:disabled { opacity: .45; cursor: default; }
     }
 
     if (elapsed >= CFG.MAX_MS) {
-      $('timer-note').textContent = 'Reached the 15 minute limit.';
+      $('timer-note').textContent = 'Reached the ' + Math.round(CFG.MAX_MS / 60000) + ' minute limit.';
       stopRecording();
       return;
     }
 
-    // Size is estimated rather than measured: without a timeslice there are no
-    // chunks to count until stop. Bitrate times elapsed is close enough for a
-    // safety net, and the real size is checked before upload.
-    var estimated = (elapsed / 1000) * (CFG.AUDIO_BPS / 8);
-    if (estimated >= CFG.MAX_BYTES * CFG.SIZE_STOP) {
-      $('timer-note').textContent = 'Stopped: approaching the upload size limit.';
+    var rec = S.recorder;
+    if (!rec) return;
+
+    // Measured, not estimated: every encoded page has already been counted.
+    var bytes = rec.bytes;
+    if (bytes >= CFG.MAX_BYTES * CFG.SIZE_STOP) {
+      $('timer-note').textContent = 'Stopped at ' + fmtTime(elapsed / 1000) + ': the recording reached the upload size limit.';
       stopRecording();
-    } else if (estimated >= CFG.MAX_BYTES * CFG.SIZE_WARN) {
-      var note = $('level-note');
-      if (!note.textContent) {
-        note.textContent = 'Approaching the size limit \u2014 wrap up shortly.';
-        note.classList.add('alert');
-      }
+      return;
+    }
+
+    var perSec = elapsed > 30000 ? bytes / (elapsed / 1000) : 0;
+    var minutesLeft = perSec > 0 ? Math.floor((CFG.MAX_BYTES * CFG.SIZE_STOP - bytes) / perSec / 60) : null;
+
+    if (bytes >= CFG.MAX_BYTES * CFG.SIZE_WARN) {
+      S.sizeNote = 'Approaching the size limit' +
+        (minutesLeft !== null ? ' \u2014 about ' + minutesLeft + ' minute' + (minutesLeft === 1 ? '' : 's') + ' left' : '') +
+        '. Wrap up shortly.';
+    } else if (rec.lastPageAt && Date.now() - rec.lastPageAt > CFG.STALL_MS) {
+      // The encoder has gone quiet. Do not stop — this happens when the tab is
+      // backgrounded and recovers when it returns — but say so, because any
+      // audio in the gap is not being captured.
+      S.sizeNote = 'The encoder has produced nothing for ' + Math.round((Date.now() - rec.lastPageAt) / 1000) +
+        's. Keep this tab in front while recording.';
+    } else {
+      S.sizeNote = '';
     }
   }
 
   function startMeter() {
     try {
-      var Ctx = window.AudioContext || window.webkitAudioContext;
-      S.audioCtx = new Ctx();
-      var source = S.audioCtx.createMediaStreamSource(S.stream);
       S.analyser = S.audioCtx.createAnalyser();
       S.analyser.fftSize = 512;
-      source.connect(S.analyser);
+      S.source.connect(S.analyser);
       meterFrame();
     } catch (err) {
       // A missing level meter is cosmetic. Recording continues.
@@ -858,13 +962,16 @@ button:disabled { opacity: .45; cursor: default; }
 
     if (peak > 4) S.lastSoundAt = Date.now();
     var silentFor = Date.now() - S.lastSoundAt;
+
+    // One status line, three claims on it. Silence first: a muted microphone is
+    // the failure that loses the whole conversation.
     var note = $('level-note');
-    if (silentFor > CFG.SILENCE_MS) {
-      note.textContent = 'No sound detected — check the microphone is not muted.';
-      note.classList.add('alert');
-    } else if (note.textContent) {
-      note.textContent = '';
-      note.classList.remove('alert');
+    var text = silentFor > CFG.SILENCE_MS
+      ? 'No sound detected \u2014 check the microphone is not muted.'
+      : S.sizeNote;
+    if (note.textContent !== text) {
+      note.textContent = text;
+      note.classList.toggle('alert', !!text);
     }
 
     S.rafId = requestAnimationFrame(meterFrame);
@@ -874,12 +981,13 @@ button:disabled { opacity: .45; cursor: default; }
 
   $('discard').addEventListener('click', function () {
     if (!confirm('Discard this recording? Nothing will be kept.')) return;
-    // wipe() first, so the generation is bumped BEFORE the recorder's final
-    // dataavailable and stop events fire. Previously wipe() ran after
-    // stopRecording() and reset the S.discarding flag that onRecorderStop was
-    // about to check; the recorder's last chunk then repopulated S.chunks and
-    // the discarded audio was sent for transcription anyway. If a patient
-    // withdraws consent, that is the one thing that must not happen.
+    // wipe() first, so the generation is bumped BEFORE the encoder's final
+    // flush lands. An earlier version ran wipe() after stopRecording() and
+    // reset a flag that onRecorderStop was about to check; the recorder's last
+    // chunk then repopulated the buffer and the discarded audio was sent for
+    // transcription anyway. onRecorderStop now drops the pages whenever the
+    // generation has moved. If a patient withdraws consent, that is the one
+    // thing that must not happen.
     wipe();
     stopRecording();
     show('setup');
@@ -890,6 +998,9 @@ button:disabled { opacity: .45; cursor: default; }
     if (S.tickId) { clearInterval(S.tickId); S.tickId = null; }
     if (S.rafId) { cancelAnimationFrame(S.rafId); S.rafId = null; }
     if (S.recorder && S.recorder.state !== 'inactive') {
+      // Stop the microphone at once: nothing more is captured from this moment.
+      // The context stays open until the encoder has flushed its last page.
+      if (S.stream) { S.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} }); }
       try { S.recorder.stop(); } catch (err) { /* already stopped */ }
     } else {
       stopTracks();
@@ -905,27 +1016,45 @@ button:disabled { opacity: .45; cursor: default; }
     if (S.audioCtx) {
       try { S.audioCtx.close(); } catch (e) {}
       S.audioCtx = null;
+      S.source = null;
       S.analyser = null;
     }
   }
 
   async function onRecorderStop(gen) {
+    var rec = S.recorder;
+    S.recorder = null;
     stopTracks();
-    // Discarded, cleared or timed out while the recorder was shutting down.
-    if (gen !== S.gen) { S.chunks = []; S.bytes = 0; return; }
 
-    var blob = new Blob(S.chunks, { type: S.audioType });
-    S.chunks = [];
-    S.bytes = 0;
+    // Discarded, cleared or timed out while the recorder was shutting down.
+    if (gen !== S.gen || !rec) { if (rec) rec.pages = []; return; }
+
+    var blob = rec.blob();
+    var encodedS = rec.samplePosition / 48000;
+    var wallS = (Date.now() - S.startedAt) / 1000;
+    rec.pages = [];
 
     if (blob.size < 2000) {
       show('setup');
       return fail('Nothing recorded', 'The recording was empty. Check the microphone and try again.');
     }
     if (blob.size > CFG.MAX_BYTES) {
+      // The live guard should have stopped it first; this is the backstop.
       show('setup');
       return fail('Recording too long to send',
-        'The file is ' + (blob.size / 1048576).toFixed(1) + ' MB, over the upload limit. Record shorter conversations, or lower AUDIO_BPS.');
+        'The file is ' + (blob.size / 1048576).toFixed(1) + ' MB after ' + fmtTime(wallS) +
+        ', over the ' + (CFG.MAX_BYTES / 1048576).toFixed(1) + ' MB upload limit. That is ' +
+        Math.round(blob.size / wallS) + ' bytes per second; at that rate the ceiling is about ' +
+        fmtTime(CFG.MAX_BYTES / (blob.size / wallS)) + '.');
+    }
+
+    // The encoder reports how much audio it actually encoded. If that is well
+    // short of the wall clock — the tab was backgrounded, the device slept —
+    // the note must say so, because a consent discussion with a hole in it is
+    // worse than one you know is incomplete.
+    if (wallS > 30 && encodedS > 0 && encodedS < wallS * 0.9) {
+      S.captureNote = 'Only ' + fmtTime(encodedS) + ' of the ' + fmtTime(wallS) +
+        ' recording was captured. Part of the conversation may be missing from every field below.';
     }
 
     await process(blob);
@@ -1063,7 +1192,8 @@ button:disabled { opacity: .45; cursor: default; }
      model produces is ever parsed as HTML.
      ================================================================== */
   function render(note) {
-    var gaps = Array.isArray(note.gaps) ? note.gaps : [];
+    var gaps = Array.isArray(note.gaps) ? note.gaps.slice() : [];
+    if (S.captureNote) gaps.unshift(S.captureNote);
     var box = $('gaps');
     var list = $('gaps-list');
     list.textContent = '';
@@ -1202,6 +1332,7 @@ button:disabled { opacity: .45; cursor: default; }
     if (S.idleId) { clearTimeout(S.idleId); S.idleId = null; }
 
     if (S.recorder && S.recorder.state !== 'inactive') {
+      // gen is already bumped, so onRecorderStop will drop the pages.
       try { S.recorder.stop(); } catch (e) {}
     }
     S.recorder = null;
@@ -1219,11 +1350,11 @@ button:disabled { opacity: .45; cursor: default; }
       S.jobId = null;
     }
 
-    S.chunks = [];
     S.turns = null;
     S.note = null;
     S.busy = false;
-    S.discarding = false;
+    S.sizeNote = '';
+    S.captureNote = null;
 
     $('fields').textContent = '';
     $('gaps-list').textContent = '';
@@ -1231,7 +1362,7 @@ button:disabled { opacity: .45; cursor: default; }
     if (map) map.remove();
     $('timer').textContent = '0:00';
     $('timer').classList.remove('over');
-    $('timer-note').textContent = 'Stops automatically at 15:00';
+    $('timer-note').textContent = 'Stops automatically at 25:00';
     $('level').style.width = '0';
     $('level-note').textContent = '';
     $('level-note').classList.remove('alert');
@@ -1264,7 +1395,7 @@ button:disabled { opacity: .45; cursor: default; }
       var hadSomething = !!(S.note || S.turns);
       wipe();
       show('setup');
-      if (hadSomething) fail('Cleared after 10 minutes idle', 'The draft was destroyed. Nothing was saved.');
+      if (hadSomething) fail('Cleared after ' + Math.round(CFG.IDLE_WIPE_MS / 60000) + ' minutes idle', 'The draft was destroyed. Nothing was saved.');
     }, CFG.IDLE_WIPE_MS);
   }
 
