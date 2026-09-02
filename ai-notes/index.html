@@ -245,6 +245,13 @@ button:disabled { opacity: .45; cursor: default; }
 .timer.paused { opacity: .55; }
 .btn-pause { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
 .btn-pause.resuming { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.btn-pause[disabled] { opacity: .5; }
+.dictated-heading { margin-top: 22px; padding-top: 14px; border-top: 1px dashed var(--line); font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
+table.implant-log { width: 100%; border-collapse: collapse; font-size: .85rem; margin: 6px 0 14px; }
+table.implant-log th, table.implant-log td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+.derived pre { white-space: pre-wrap; font: inherit; font-size: .92rem; line-height: 1.5; margin: 10px 0 0; }
+.derived .actions { margin-top: 12px; }
 
 /* ---- working ---- */
 .working { display: flex; align-items: center; gap: 12px; font-size: .9375rem; }
@@ -409,6 +416,7 @@ button:disabled { opacity: .45; cursor: default; }
       <p class="level-note" id="level-note" role="status"></p>
       <div class="record-row">
         <button class="btn-pause" id="pause">Pause</button>
+        <button class="btn-pause" id="dictate" title="Everything after this is dictated to the record, not conversation">Dictate</button>
         <button class="btn-stop" id="stop">Stop and draft note</button>
         <button class="btn-discard" id="discard">Discard</button>
       </div>
@@ -437,6 +445,27 @@ button:disabled { opacity: .45; cursor: default; }
     <div class="card">
       <h2 id="draft-heading">Draft note</h2>
       <div id="fields"></div>
+    </div>
+
+    <div class="card derived" id="derived">
+      <h2>For the patient</h2>
+      <p class="timer-note" style="margin:0 0 10px">
+        Two documents built from the same recording. Neither adds anything that was not said.
+      </p>
+      <div class="actions">
+        <button id="make-summary">Patient summary</button>
+        <button id="make-consent">Consent form text</button>
+      </div>
+      <div id="summary-box" class="hidden">
+        <h3 style="margin:16px 0 0">Patient summary</h3>
+        <pre id="summary-text"></pre>
+        <div class="actions"><button id="copy-summary">Copy summary</button></div>
+      </div>
+      <div id="consent-box" class="hidden">
+        <h3 style="margin:16px 0 0">Consent form text</h3>
+        <pre id="consent-text"></pre>
+        <div class="actions"><button id="copy-consent">Copy consent text</button></div>
+      </div>
     </div>
 
     <div class="card">
@@ -519,6 +548,9 @@ button:disabled { opacity: .45; cursor: default; }
     ['perio',              'Perio'],
     ['endo',               'Endo'],
     ['extraction-surgery', 'Extraction / surgery'],
+    ['third-molar',        'Third molar surgery'],
+    ['implant-consult',    'Implant consult'],
+    ['implant-surgery',    'Implant surgery'],
     ['emergency',          'Emergency'],
     ['treatment-plan',     'Treatment plan consult'],
     ['sedation',           'Sedation']
@@ -539,6 +571,14 @@ button:disabled { opacity: .45; cursor: default; }
     ['decision',            'Decision',                         false],
     ['nextStep',            'Next step',                        false]
   ];
+  // Filled only from dictation after the patient has left. Rendered under
+  // their own heading so they can never be mistaken for the conversation.
+  var DICTATED_FIELDS = [
+    ['examination',          'Examination findings'],
+    ['radiographicFindings', 'Radiographic findings'],
+    ['plan',                 'Treatment plan']
+  ];
+  var IMPLANT_COLS = [['site','Site'],['system','System'],['diameter','\u00d8'],['length','Length'],['lot','Lot'],['torque','Torque'],['isq','ISQ'],['graft','Graft'],['notes','Notes']];
 
   var CONSENT_SCRIPT =
     'Before we start — I use a tool that listens to our conversation so my notes ' +
@@ -568,6 +608,8 @@ button:disabled { opacity: .45; cursor: default; }
     pausedAt: 0,      // when the current pause began
     pausedMs: 0,      // total time paused across the whole recording
     pauses: [],       // [{ atRecordedMs, forMs }] — where in the RECORDING each gap falls
+    dictationFromMs: null, // recorded-time point where Dictate was pressed
+    summary: null,    // the patient summary, once requested
     jobId: null,
     turns: null,      // held ONLY between a failed draft and a retry
     note: null,
@@ -905,6 +947,12 @@ button:disabled { opacity: .45; cursor: default; }
     S.pausedMs = 0;
     S.pauses = [];
     S.pausesForDraft = null;
+    S.dictationFromMs = null;
+    S.summary = null;
+    $('summary-box').classList.add('hidden');
+    $('consent-box').classList.add('hidden');
+    $('summary-text').textContent = '';
+    $('consent-text').textContent = '';
     startMeter();
     startTicking();
     show('recording');
@@ -1059,6 +1107,31 @@ button:disabled { opacity: .45; cursor: default; }
     tick();
   });
 
+  // Dictate: the patient has gone; everything from here is the clinician
+  // speaking to the record. If paused, this resumes. The point is recorded in
+  // RECORDED time, which is the transcript's own timeline, and sent with the
+  // draft so the model can split conversation from dictation exactly.
+  $('dictate').addEventListener('click', function () {
+    resetIdle();
+    var rec = S.recorder;
+    if (!rec || S.dictationFromMs !== null) return;
+    if (S.paused) {
+      if (!rec.resume()) return;
+      var last = S.pauses[S.pauses.length - 1];
+      if (last && !last.forMs) last.forMs = Date.now() - S.pausedAt;
+      S.pausedMs += Date.now() - S.pausedAt;
+      S.paused = false;
+      S.pausedAt = 0;
+      $('pause').textContent = 'Pause';
+      $('pause').classList.remove('resuming');
+    }
+    S.dictationFromMs = recordedMs();
+    $('dictate').textContent = 'Dictating';
+    $('dictate').disabled = true;
+    $('recbar').textContent = 'Dictating';
+    tick();
+  });
+
   $('stop').addEventListener('click', function () { resetIdle(); stopRecording(); });
 
   $('discard').addEventListener('click', function () {
@@ -1206,7 +1279,8 @@ button:disabled { opacity: .45; cursor: default; }
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [] })
+        body: JSON.stringify({ turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [],
+                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
       });
       var data = await res.json().catch(function () { return {}; });
       if (!live()) return;
@@ -1228,7 +1302,12 @@ button:disabled { opacity: .45; cursor: default; }
     }
 
     if (!live()) { S.note = null; return; }
-    S.turns = null;      // drafted successfully; no longer needed
+    // HELD, not discarded. The patient summary is drafted from this same
+    // transcript on demand, so it has to outlive the note request. Its lifetime
+    // is now exactly the draft's: Clear, Lock, tab close and the idle timer all
+    // destroy it, and wipe() nulls it below. This REVERSES the earlier
+    // behaviour of dropping the transcript the moment the note came back, and
+    // is a deliberate change — see the deployment note before shipping.
     S.busy = false;
     render(S.note);
     show('draft');
@@ -1381,19 +1460,213 @@ button:disabled { opacity: .45; cursor: default; }
       wrap.appendChild(pre);
       host.appendChild(wrap);
     });
+
+    renderDictated(note, host);
+  }
+
+  function hasText(v) { return !(v === null || v === undefined || String(v).trim() === ''); }
+
+  // Dictated fields and the implant log. Shown only when there is something,
+  // under a heading that says what it is: a dictation is the clinician's own
+  // record, and must never read as part of the conversation with the patient.
+  function renderDictated(note, host) {
+    var any = DICTATED_FIELDS.some(function (spec) { return hasText(note[spec[0]]); }) ||
+              (Array.isArray(note.implantLog) && note.implantLog.length > 0);
+    if (!any) return;
+
+    var hd = document.createElement('h3');
+    hd.className = 'dictated-heading';
+    hd.textContent = 'Dictated after the consultation';
+    host.appendChild(hd);
+
+    DICTATED_FIELDS.forEach(function (spec) {
+      var key = spec[0], heading = spec[1], value = note[key];
+      if (!hasText(value)) return;
+      var wrap = document.createElement('div');
+      wrap.className = 'field';
+      var head = document.createElement('div');
+      head.className = 'field-head';
+      var h3 = document.createElement('h3');
+      h3.textContent = heading;
+      head.appendChild(h3);
+      var copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'copy';
+      copy.textContent = 'Copy';
+      copy.addEventListener('click', function () { writeClipboard(heading + '\n' + String(value).trim(), copy); });
+      head.appendChild(copy);
+      var pre = document.createElement('pre');
+      pre.textContent = String(value).trim();
+      wrap.appendChild(head);
+      wrap.appendChild(pre);
+      host.appendChild(wrap);
+    });
+
+    if (Array.isArray(note.implantLog) && note.implantLog.length) {
+      var wrap2 = document.createElement('div');
+      wrap2.className = 'field';
+      var head2 = document.createElement('div');
+      head2.className = 'field-head';
+      var h32 = document.createElement('h3');
+      h32.textContent = 'Implant log';
+      head2.appendChild(h32);
+      var copy2 = document.createElement('button');
+      copy2.type = 'button';
+      copy2.className = 'copy';
+      copy2.textContent = 'Copy';
+      copy2.addEventListener('click', function () { writeClipboard(implantLogAsText(note.implantLog), copy2); });
+      head2.appendChild(copy2);
+      wrap2.appendChild(head2);
+
+      var table = document.createElement('table');
+      table.className = 'implant-log';
+      var thead = document.createElement('tr');
+      IMPLANT_COLS.forEach(function (c) { var th = document.createElement('th'); th.textContent = c[1]; thead.appendChild(th); });
+      table.appendChild(thead);
+      note.implantLog.forEach(function (row) {
+        var tr = document.createElement('tr');
+        IMPLANT_COLS.forEach(function (c) { var td = document.createElement('td'); td.textContent = hasText(row[c[0]]) ? String(row[c[0]]) : '\u2014'; tr.appendChild(td); });
+        table.appendChild(tr);
+      });
+      wrap2.appendChild(table);
+      host.appendChild(wrap2);
+    }
+  }
+
+  function implantLogAsText(log) {
+    return log.map(function (row, i) {
+      return 'Implant ' + (i + 1) + ': ' + IMPLANT_COLS.map(function (c) {
+        return hasText(row[c[0]]) ? c[1].replace('\u00d8', 'Diameter') + ' ' + String(row[c[0]]) : null;
+      }).filter(Boolean).join(', ');
+    }).join('\n');
   }
 
   function noteAsText(note) {
     var lines = [];
     FIELDS.forEach(function (spec) {
       var value = note[spec[0]];
-      if (value === null || value === undefined || String(value).trim() === '') return;
+      if (!hasText(value)) return;
       lines.push(spec[1]);
       lines.push(String(value).trim());
       lines.push('');
     });
+    var dict = [];
+    DICTATED_FIELDS.forEach(function (spec) {
+      var value = note[spec[0]];
+      if (!hasText(value)) return;
+      dict.push(spec[1]);
+      dict.push(String(value).trim());
+      dict.push('');
+    });
+    if (Array.isArray(note.implantLog) && note.implantLog.length) {
+      dict.push('Implant log');
+      dict.push(implantLogAsText(note.implantLog));
+      dict.push('');
+    }
+    if (dict.length) {
+      lines.push('--- Dictated after the consultation ---');
+      lines.push('');
+      lines = lines.concat(dict);
+    }
     return lines.join('\n').trim();
   }
+
+  /* ---- derived documents: patient summary, consent form text ---- */
+
+  var SUMMARY_FIELDS = [
+    ['whatWeDiscussed', 'What we discussed'],
+    ['whatYouDecided',  'What you decided'],
+    ['whatHappensNext', 'What happens next'],
+    ['whatToExpect',    'What to expect afterwards'],
+    ['yourQuestions',   'Questions you asked, and what was said']
+  ];
+
+  function summaryAsText(sm) {
+    var out = [];
+    SUMMARY_FIELDS.forEach(function (spec) {
+      if (!hasText(sm[spec[0]])) return;
+      out.push(spec[1]);
+      out.push(String(sm[spec[0]]).trim());
+      out.push('');
+    });
+    return out.length ? out.join('\n').trim() : 'Nothing in the recording could be summarised for the patient.';
+  }
+
+  $('make-summary').addEventListener('click', async function () {
+    resetIdle();
+    if (!S.turns || S.busy) return;
+    if (S.summary) { $('summary-box').classList.remove('hidden'); return; }
+    var btn = $('make-summary');
+    btn.disabled = true;
+    btn.textContent = 'Drafting\u2026';
+    var gen = S.gen;
+    try {
+      var res = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'summary', turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [],
+                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (gen !== S.gen) return;
+      if (!res.ok || !data.summary) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+      S.summary = data.summary;
+      $('summary-text').textContent = summaryAsText(S.summary);
+      $('summary-box').classList.remove('hidden');
+    } catch (err) {
+      if (gen !== S.gen) return;
+      $('summary-text').textContent = 'Could not draft the summary: ' + String(err && err.message || err);
+      $('summary-box').classList.remove('hidden');
+    } finally {
+      if (gen === S.gen) { btn.disabled = false; btn.textContent = 'Patient summary'; }
+    }
+  });
+
+  $('copy-summary').addEventListener('click', function () {
+    if (!S.summary) return;
+    writeClipboard(summaryAsText(S.summary), $('copy-summary'));
+  });
+
+  // Consent form text is assembled from the note itself, with no model call:
+  // it can only ever contain what the draft already says. Blanks stay blank.
+  function consentFormText(note) {
+    var line = function (label, v) { return label + ': ' + (hasText(v) ? String(v).trim() : '[not recorded in the consultation]'); };
+    var typeLabel = '';
+    CONSULT_TYPES.forEach(function (t) { if (t[0] === S.consultType) typeLabel = t[1]; });
+    return [
+      'CONSENT \u2014 record of the discussion' + (typeLabel ? ' (' + typeLabel + ')' : ''),
+      '',
+      line('Treatment proposed', note.proposed),
+      line('Alternatives discussed, including no treatment', note.alternatives),
+      line('Material risks explained', note.risks),
+      line('Benefits and realistic expectations', note.benefits),
+      line('Patient-specific factors considered', note.patientFactors),
+      line('Costs discussed', note.costs),
+      line('Questions raised by the patient and answers given', note.patientQuestions),
+      line('Information provided', note.informationGiven),
+      line('Decision', note.decision),
+      '',
+      'I confirm that the above was discussed with me, that I had the opportunity to ask questions, and that I consent to the treatment proposed.',
+      '',
+      'Patient signature: ______________________   Date: ____________',
+      '',
+      'Clinician signature: ____________________   Date: ____________',
+      '',
+      '[Add patient name, date of birth and the tooth or site in the record. This text carries no identifiers by design.]'
+    ].join('\n');
+  }
+
+  $('make-consent').addEventListener('click', function () {
+    resetIdle();
+    if (!S.note) return;
+    $('consent-text').textContent = consentFormText(S.note);
+    $('consent-box').classList.remove('hidden');
+  });
+
+  $('copy-consent').addEventListener('click', function () {
+    if (!S.note) return;
+    writeClipboard(consentFormText(S.note), $('copy-consent'));
+  });
 
   $('copy-all').addEventListener('click', function () {
     if (!S.note) return;
@@ -1462,7 +1735,15 @@ button:disabled { opacity: .45; cursor: default; }
     S.pausedMs = 0;
     S.pauses = [];
     S.pausesForDraft = null;
+    S.dictationFromMs = null;
+    S.summary = null;
 
+    $('summary-box').classList.add('hidden');
+    $('consent-box').classList.add('hidden');
+    $('summary-text').textContent = '';
+    $('consent-text').textContent = '';
+    $('make-summary').disabled = false;
+    $('make-summary').textContent = 'Patient summary';
     $('fields').textContent = '';
     $('gaps-list').textContent = '';
     var map = document.getElementById('speaker-map');

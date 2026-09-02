@@ -348,7 +348,69 @@ async function testExtract() {
   let res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'extraction-surgery' } }), res);
   ok('valid note returned', res.statusCode === 200 && res.body?.note?.reasonForAttendance === 'Recorded.', `got ${res.statusCode} ${JSON.stringify(res.body).slice(0,90)}`);
-  ok('gap preserved, not filled in', res.body?.note?.risks === null && res.body?.note?.gaps?.length === 1);
+  ok('gap preserved, not filled in', res.body?.note?.risks === null && res.body?.note?.gaps?.[0] === 'No risks named by the clinician.', JSON.stringify(res.body?.note?.gaps));
+  ok('with no checklist report, every extraction checklist item becomes a gap in the clinician\'s wording',
+    res.body?.note?.gaps?.some((g) => g === 'Not mentioned: bleeding.') && res.body?.note?.gaps?.some((g) => g.startsWith('Not asked about:')),
+    JSON.stringify(res.body?.note?.gaps));
+  ok('the raw checklist report is not passed to the client', !('checklist' in (res.body?.note || {})));
+
+  // --- checklist: found items produce no gap; nulls do; unknown keys are ignored ---
+  const withChecklist = { ...goodNote, checklist: { bleeding: 'you may bleed a little tonight', infection: null, 'made-up-key': 'x' } };
+  bedrockReturning(JSON.stringify(withChecklist));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'extraction-surgery' } }), res);
+  ok('a checklist item with evidence is not a gap', !res.body?.note?.gaps?.includes('Not mentioned: bleeding.'), JSON.stringify(res.body?.note?.gaps));
+  ok('a checklist item reported null is a gap', res.body?.note?.gaps?.includes('Not mentioned: infection or dry socket.'));
+  ok('a key the checklist does not know cannot create a gap', !res.body?.note?.gaps?.some((g) => /made-up/.test(g)));
+  bedrockReturning(JSON.stringify(withChecklist));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'restorative' } }), res);
+  ok('a consult type with no checklist adds no checklist gaps', res.body?.note?.gaps?.length === 1, JSON.stringify(res.body?.note?.gaps));
+
+  // --- dictation: the marker lands before the first turn at or after the timestamp ---
+  let sentBody2 = null;
+  stubFetch(async (c, opts) => { sentBody2 = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  const timedTurns = [
+    { speaker: 'S1', text: 'We discussed taking the tooth out today.', start: 0.5 },
+    { speaker: 'S2', text: 'Will it hurt afterwards?', start: 12.0 },
+    { speaker: 'S1', text: 'Examination: lower left eight partially erupted, mesioangular.', start: 400.2 },
+  ];
+  await handler(mockReq({ body: { turns: timedTurns, consultType: 'third-molar', dictationFromS: 380 } }), res);
+  let um = sentBody2?.messages?.[0]?.content || '';
+  const idxMarker = um.indexOf('[DICTATION');
+  const idxExam = um.indexOf('Examination: lower left');
+  const idxQ = um.indexOf('Will it hurt');
+  ok('the dictation marker is placed before the dictated turn', idxMarker > -1 && idxMarker < idxExam, `${idxMarker} ${idxExam}`);
+  ok('and after the conversation', idxQ > -1 && idxQ < idxMarker);
+  ok('the system prompt tells the model dictation cannot fill consent fields', /come ONLY from the[\s\S]{0,40}conversation with the patient/.test(sentBody2?.system || ''));
+
+  stubFetch(async (c, opts) => { sentBody2 = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns: timedTurns, consultType: 'third-molar' } }), res);
+  ok('no marker without Dictate', !/\[DICTATION/.test(sentBody2?.messages?.[0]?.content || ''));
+
+  // --- dictated fields and implant log survive the shape check ---
+  const dictated = { ...goodNote, examination: 'LL8 partially erupted', radiographicFindings: null, plan: 'Surgical removal under LA',
+    implantLog: [{ site: '36', system: 'Straumann BLT', diameter: '4.1', length: '10', lot: 'X123', torque: '35', isq: '72', graft: null, notes: null }] };
+  bedrockReturning(JSON.stringify(dictated));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'implant-surgery' } }), res);
+  ok('dictated fields are returned', res.body?.note?.examination === 'LL8 partially erupted' && res.body?.note?.plan === 'Surgical removal under LA');
+  ok('the implant log is returned as structured rows', res.body?.note?.implantLog?.[0]?.lot === 'X123', JSON.stringify(res.body?.note?.implantLog));
+  bedrockReturning(JSON.stringify({ ...goodNote, implantLog: 'Straumann 4.1x10' }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'implant-surgery' } }), res);
+  ok('an implant log that is not an array fails loudly', res.statusCode === 502 && /implantLog/.test(res.body?.detail || ''), `${res.statusCode} ${res.body?.detail}`);
+
+  // --- patient summary: second product, same transcript, own prompt ---
+  stubFetch(async (c, opts) => { sentBody2 = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ whatWeDiscussed: 'Your lower wisdom tooth.', whatYouDecided: null, whatHappensNext: 'A review in two weeks.', whatToExpect: null, yourQuestions: null }) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', kind: 'summary' } }), res);
+  ok('a summary request returns a summary, not a note', res.statusCode === 200 && res.body?.summary?.whatWeDiscussed === 'Your lower wisdom tooth.' && !res.body?.note, JSON.stringify(res.body).slice(0, 120));
+  ok('using the patient-facing prompt', /FOR THE PATIENT to take home/.test(sentBody2?.system || ''));
+  ok('which forbids invention as firmly as the note does', /include only what was actually said/.test(sentBody2?.system || ''));
+  ok('absent summary sections come back null, not filled', res.body?.summary?.whatToExpect === null);
 
   // --- pauses reach the model, sanitised ---
   let sentBody = null;

@@ -158,7 +158,7 @@ async function testConsentGate() {
   const types = $(doc, 'types');
 
   ok('Start is disabled on load', start.disabled);
-  ok('eight consult types offered', types.children.length === 8, String(types.children.length));
+  ok('eleven consult types offered, three of them oral surgery', types.children.length === 11, String(types.children.length));
   ok('no consult type preselected',
     ![...types.children].some((b) => b.getAttribute('aria-pressed') === 'true'));
 
@@ -607,6 +607,98 @@ async function testDraftRetry() {
 /* ================================================================
    8. Recording format and size guard
    ================================================================ */
+async function testDerivedAndDictation() {
+  section('Dictation, the implant log, and the two patient documents');
+  const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
+  ok('the three oral surgery types are offered', /'third-molar'/.test(src) && /'implant-consult'/.test(src) && /'implant-surgery'/.test(src));
+
+  // Full run: pause, then Dictate (which resumes), then stop. The dictation
+  // point must reach the API in recorded seconds, and the draft must render
+  // the dictated section separately with the implant table.
+  let noteBody = null, summaryBody = null;
+  const note = { reasonForAttendance: 'Missing lower left six.', medicalHistory: null, proposed: 'Single implant at LL6.',
+    alternatives: 'Bridge, denture, or leave the space.', risks: 'Failure to integrate, nerve injury, infection.', benefits: null,
+    costs: null, patientQuestions: 'How long does it last?', patientFactors: null, informationGiven: null, decision: 'Proceed.',
+    nextStep: 'Surgery booked.', examination: 'Adequate ridge width clinically.', radiographicFindings: 'CBCT: 11 mm to the canal.',
+    plan: 'Straumann BLT 4.1 x 10 at LL6, delayed loading.',
+    implantLog: [{ site: 'LL6', system: 'Straumann BLT', diameter: '4.1', length: '10', lot: 'LOT9', torque: '35 Ncm', isq: '71', graft: null, notes: null }],
+    gaps: ['Costs not mentioned'] };
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind === 'summary') { summaryBody = b; return { ok: true, status: 200, json: async () => ({ status: 'done', summary: { whatWeDiscussed: 'Replacing your lower left back tooth with an implant.', whatYouDecided: 'To go ahead.', whatHappensNext: null, whatToExpect: null, yourQuestions: 'You asked how long it lasts.' } }) }; }
+        noteBody = b;
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  const implantSurgery = [...$(doc, 'types').children].find((b) => /Implant surgery/.test(b.textContent));
+  ok('Implant surgery is a selectable type', !!implantSurgery);
+  click(implantSurgery);
+  await tick();
+  click($(doc, 'start'));
+  await tick(80);
+
+  const realNow = win.Date.now.bind(win.Date);
+  let offset = 0;
+  win.Date.now = () => realNow() + offset;
+  offset += 90 * 1000;                 // 90 s of conversation
+  click($(doc, 'pause'));
+  await tick(30);
+  offset += 40 * 60 * 1000;            // 40 min of surgery, paused
+  click($(doc, 'dictate'));
+  await tick(30);
+  ok('Dictate resumes a paused recording', $(doc, 'pause').textContent === 'Pause');
+  ok('and locks itself: there is one dictation point', $(doc, 'dictate').disabled && $(doc, 'dictate').textContent === 'Dictating');
+  ok('the bar says so', $(doc, 'recbar').textContent === 'Dictating');
+  offset += 60 * 1000;                 // a minute of dictation
+  click($(doc, 'stop'));
+  await tick(300);
+
+  ok('the draft arrives', !$(doc, 'draft').classList.contains('hidden'));
+  ok('the dictation point reaches the API in RECORDED seconds, not wall clock',
+    noteBody && Math.abs(noteBody.dictationFromS - 90) < 2, String(noteBody?.dictationFromS));
+  ok('the pause is still reported alongside it', noteBody?.pauses?.length === 1 && noteBody.pauses[0].forMs >= 40 * 60 * 1000);
+
+  const text = $(doc, 'fields').textContent;
+  ok('the dictated section is rendered under its own heading', /Dictated after the consultation/.test(text));
+  ok('with the dictated fields', /Adequate ridge width/.test(text) && /11 mm to the canal/.test(text));
+  ok('and the implant log as a table', doc.querySelector('table.implant-log') && /LOT9/.test(doc.querySelector('table.implant-log').textContent));
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  click($(doc, 'copy-all'));
+  await tick(40);
+  ok('the whole-note copy includes the dictated section, labelled', /--- Dictated after the consultation ---/.test(copied) && /Implant 1: Site LL6, System Straumann BLT, Diameter 4.1/.test(copied), copied.slice(-300));
+
+  // Consent form text: assembled, not generated; blanks stay blank.
+  click($(doc, 'make-consent'));
+  await tick(20);
+  const consent = $(doc, 'consent-text').textContent;
+  ok('consent text is built from the note', /Treatment proposed: Single implant at LL6\./.test(consent));
+  ok('a field the note did not capture is shown as blank, not filled', /Costs discussed: \[not recorded in the consultation\]/.test(consent));
+  ok('and it carries no identifiers by design', /carries no identifiers by design/.test(consent));
+  ok('dictated content stays out of the consent text', !/Straumann/.test(consent));
+
+  // Patient summary: a second call, same transcript, same dictation point.
+  click($(doc, 'make-summary'));
+  await tick(120);
+  ok('the summary request is a summary request', summaryBody?.kind === 'summary');
+  ok('over the same turns and pauses', summaryBody?.turns?.length === DEFAULT_TURNS.length && summaryBody?.pauses?.length === 1);
+  const sm = $(doc, 'summary-text').textContent;
+  ok('the summary renders the sections that came back', /What we discussed/.test(sm) && /Replacing your lower left/.test(sm));
+  ok('and omits the ones that were null', !/What happens next/.test(sm), sm);
+
+  // Everything derived dies with the draft.
+  click($(doc, 'clear'));
+  await tick(30);
+  ok('Clear removes the summary and consent text too', $(doc, 'summary-box').classList.contains('hidden') && $(doc, 'summary-text').textContent === '' && $(doc, 'consent-text').textContent === '');
+}
+
 async function testPauseResume() {
   section('Pause and resume — the examination is not recorded, and the note knows it');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -803,6 +895,7 @@ await testDiscardAndCancellation();
 await testDraftRetry();
 await testFormatAndSize();
 await testPauseResume();
+await testDerivedAndDictation();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);

@@ -26,7 +26,9 @@
 // Fails closed: an unrecognised combination is rejected before any request is
 // signed, not after.
 
-import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS } from './_prompt.mjs';
+import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS,
+         buildSummarySystemPrompt, parseSummary } from './_prompt.mjs';
+import { checklistGaps } from './_checklists.mjs';
 
 export const config = { maxDuration: 120 };
 
@@ -118,12 +120,48 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'empty_transcript' });
     }
 
-    const transcript = turns
-      .map((t) => `[${t.speaker || 'UU'}] ${String(t.text || '').trim()}`)
-      .filter((line) => line.trim().length > 5)
-      .join('\n');
+    // Where the clinician pressed Dictate, in seconds into the RECORDING. The
+    // file's timeline is recorded time (paused time does not exist in it), and
+    // Speechmatics gives each turn a start time on that same timeline, so the
+    // marker goes in front of the first turn that starts at or after it.
+    const dictationFromS = Number.isFinite(body?.dictationFromS) && body.dictationFromS >= 0
+      ? Number(body.dictationFromS) : null;
+    const MARKER = '[DICTATION \u2014 the clinician alone, after the patient left. Everything below is dictated to the record, not conversation.]';
+    let markerPlaced = false;
 
-    if (!transcript) return res.status(400).json({ error: 'empty_transcript' });
+    const lines = [];
+    for (const t of turns) {
+      const text = String(t.text || '').trim();
+      if (text.length <= 5) continue;
+      if (dictationFromS !== null && !markerPlaced && Number.isFinite(t.start) && t.start >= dictationFromS) {
+        lines.push(MARKER);
+        markerPlaced = true;
+      }
+      lines.push(`[${t.speaker || 'UU'}] ${text}`);
+    }
+    // Dictate pressed but every turn started before it (e.g. no speech after):
+    // still say so, so the model does not look for dictation that is not there.
+    if (dictationFromS !== null && !markerPlaced) lines.push(MARKER);
+    const transcript = lines.join('\n');
+
+    if (!transcript || lines.every((l) => l === MARKER)) return res.status(400).json({ error: 'empty_transcript' });
+
+    // A second product from the same transcript: the take-home summary for the
+    // patient. Same processor, same rules; no new data goes anywhere.
+    if (body?.kind === 'summary') {
+      const raw = await invokeModel({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 2048,
+        temperature: 0,
+        system: buildSummarySystemPrompt(consultType),
+        messages: [{ role: 'user', content: buildUserMessage(transcript, pauses) }]
+      }, creds);
+      if (raw?.stop_reason === 'max_tokens') {
+        return res.status(502).json({ error: 'response_truncated', detail: 'The summary was cut off. Try again.' });
+      }
+      const text = (raw?.content || []).filter((b) => b && b.type === 'text').map((b) => b.text).join('');
+      return res.status(200).json({ status: 'done', summary: parseSummary(text) });
+    }
 
     const payload = {
       anthropic_version: 'bedrock-2023-05-31',
@@ -149,6 +187,14 @@ export default async function handler(req, res) {
 
     const note = parseNote(text); // throws on malformed output
     assertShape(note);            // and on output of the wrong shape
+
+    // The procedure checklist. The model reported what it FOUND; the wording
+    // of what it did not find is the clinician's, from _checklists.mjs, so no
+    // gap text is ever the model's invention. Appended after the model's own
+    // gaps, deduplicated.
+    const extra = checklistGaps(consultType, note.checklist);
+    for (const g of extra) if (!note.gaps.includes(g)) note.gaps.push(g);
+    delete note.checklist;        // internal; the gaps are the product
 
     return res.status(200).json({ status: 'done', note });
   } catch (err) {
@@ -176,7 +222,7 @@ export default async function handler(req, res) {
  * one thing this tool must not do. A visible failure is the correct outcome.
  */
 function assertShape(note) {
-  for (const [key, label] of FIELDS) {
+  for (const [key, label] of [...FIELDS, ...DICTATED_FIELDS]) {
     const v = note[key];
     if (v === null || v === undefined) continue;
     if (typeof v !== 'string') {
