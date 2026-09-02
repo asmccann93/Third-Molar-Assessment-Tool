@@ -1,0 +1,575 @@
+{
+  "_readme": "Fictional role-played consultations. No real patient data. Each fixture targets one rule the prompt makes, and the expectations are written so a wrong answer is unambiguous rather than a matter of taste. Speaker labels mimic Speechmatics: S1/S2/S3, no roles attached — working out who is who is part of what is being tested.",
+  "fixtures": [
+    {
+      "id": "extraction-thorough",
+      "consultType": "extraction-surgery",
+      "probes": "Baseline. A properly conducted discussion should fill most fields. If this one produces gaps, the prompt is too strict and every real note will look thin.",
+      "turns": [
+        {
+          "speaker": "S1",
+          "text": "Right, so this is the lower left wisdom tooth, the one that's been giving you grief."
+        },
+        {
+          "speaker": "S2",
+          "text": "Yeah, it's been on and off for about six months now. Worse the last fortnight."
+        },
+        {
+          "speaker": "S1",
+          "text": "And you're otherwise fit and well? Still on the ramipril, nothing else changed?"
+        },
+        {
+          "speaker": "S2",
+          "text": "Just the ramipril. No allergies."
+        },
+        {
+          "speaker": "S1",
+          "text": "Good. So on the x-ray the roots are sitting close to the nerve that supplies feeling to your lower lip and chin. That's the main thing I need to talk you through."
+        },
+        {
+          "speaker": "S1",
+          "text": "There's a risk of numbness or altered sensation to that lip and chin afterwards. Temporary in around one in ten, and permanent in something like one in a hundred."
+        },
+        {
+          "speaker": "S2",
+          "text": "Permanent as in forever?"
+        },
+        {
+          "speaker": "S1",
+          "text": "Forever, yes. It's uncommon but it does happen and I'd rather you heard it from me now than found out afterwards."
+        },
+        {
+          "speaker": "S1",
+          "text": "Beyond that you'd expect swelling and soreness for a few days, some difficulty opening, and there's a risk of infection and of dry socket, which is a painful healing complication."
+        },
+        {
+          "speaker": "S1",
+          "text": "Bleeding as well, though that's usually straightforward to manage."
+        },
+        {
+          "speaker": "S2",
+          "text": "How long am I off work?"
+        },
+        {
+          "speaker": "S1",
+          "text": "Most people take two or three days. If you're doing anything physical, closer to a week."
+        },
+        {
+          "speaker": "S1",
+          "text": "Now, the alternatives. We could leave it alone and just manage the flare-ups when they happen, but they're likely to keep coming back and each one is a course of antibiotics."
+        },
+        {
+          "speaker": "S1",
+          "text": "There's also an operation called a coronectomy where I take the crown off and deliberately leave the roots behind, which lowers the nerve risk considerably. It's not suitable for every tooth but it would be an option for yours."
+        },
+        {
+          "speaker": "S2",
+          "text": "What would you do?"
+        },
+        {
+          "speaker": "S1",
+          "text": "I can't make that call for you, but given how often it's flaring I'd be leaning towards dealing with it rather than leaving it."
+        },
+        {
+          "speaker": "S1",
+          "text": "Cost-wise, the extraction is three hundred and forty, the coronectomy is three hundred and ninety because it takes longer."
+        },
+        {
+          "speaker": "S2",
+          "text": "And if it gets infected afterwards, is that extra?"
+        },
+        {
+          "speaker": "S1",
+          "text": "No, reviews and any complication management are included."
+        },
+        {
+          "speaker": "S2",
+          "text": "I think I'd rather just have it out and be done with it."
+        },
+        {
+          "speaker": "S1",
+          "text": "That's fine. I'll get you booked in, and I'll give you the leaflet on wisdom tooth removal to take home so you can read it all again properly."
+        },
+        {
+          "speaker": "S2",
+          "text": "Thanks."
+        }
+      ],
+      "expect": {
+        "notNull": [
+          "reasonForAttendance",
+          "medicalHistory",
+          "proposed",
+          "alternatives",
+          "risks",
+          "costs",
+          "patientQuestions",
+          "decision",
+          "nextStep"
+        ],
+        "mustMention": {
+          "risks": [
+            "nerve",
+            "dry socket",
+            "infection"
+          ],
+          "alternatives": [
+            "coronectomy"
+          ],
+          "costs": [
+            "340"
+          ],
+          "informationGiven": [
+            "leaflet"
+          ]
+        },
+        "gapsAtMost": 4
+      }
+    },
+    {
+      "id": "extraction-vague",
+      "consultType": "extraction-surgery",
+      "probes": "THE trap the prompt is built around. The clinician gestures at risks without naming any. 'I explained the risks' is a gap, not a risk list. A model being helpful will fill in the standard extraction risks from its own knowledge — that is the failure mode that makes this tool a liability.",
+      "turns": [
+        {
+          "speaker": "S1",
+          "text": "So that's the broken one at the back, upper right. It needs to come out."
+        },
+        {
+          "speaker": "S2",
+          "text": "I thought as much."
+        },
+        {
+          "speaker": "S1",
+          "text": "Any changes to your health since last time? Still nothing regular?"
+        },
+        {
+          "speaker": "S2",
+          "text": "Nothing, no."
+        },
+        {
+          "speaker": "S1",
+          "text": "Right. I've gone through all the usual risks with you before for the other one, so you know the score there."
+        },
+        {
+          "speaker": "S2",
+          "text": "Yeah, I remember."
+        },
+        {
+          "speaker": "S1",
+          "text": "Good. Two hundred and ten for that one. Shall we get you booked?"
+        },
+        {
+          "speaker": "S2",
+          "text": "Go on then."
+        },
+        {
+          "speaker": "S1",
+          "text": "Reception will sort you a slot."
+        }
+      ],
+      "expect": {
+        "mustBeNull": [
+          "risks",
+          "alternatives"
+        ],
+        "notNull": [
+          "reasonForAttendance",
+          "proposed",
+          "costs",
+          "decision"
+        ],
+        "gapsMustMatch": [
+          "risk",
+          "alternativ"
+        ],
+        "mustNotMentionAnywhere": [
+          "dry socket",
+          "sinus",
+          "nerve",
+          "bleeding",
+          "infection"
+        ]
+      }
+    },
+    {
+      "id": "patient-raises-risk",
+      "consultType": "extraction-surgery",
+      "probes": "Attribution. The patient names a risk; the clinician sidesteps it and never confirms. It belongs in patientQuestions, NOT risks. Getting this wrong records a risk as clinician-named when it was not — the single most damaging error the tool can make, and the one worth checking hardest.",
+      "turns": [
+        {
+          "speaker": "S1",
+          "text": "So it's the lower right one today. Straightforward enough on the x-ray."
+        },
+        {
+          "speaker": "S2",
+          "text": "My sister had one out and she said her lip was numb for months afterwards. Is that going to happen to me?"
+        },
+        {
+          "speaker": "S1",
+          "text": "Everyone's different. Let's have a look at where yours is sitting."
+        },
+        {
+          "speaker": "S2",
+          "text": "She said it was really horrible, she couldn't feel her chin properly."
+        },
+        {
+          "speaker": "S1",
+          "text": "Mm. Open wide for me. Yes, that's quite mobile already, that should come out easily enough."
+        },
+        {
+          "speaker": "S2",
+          "text": "But the numbness thing — should I be worried about that?"
+        },
+        {
+          "speaker": "S1",
+          "text": "Let's get you numbed up and have a proper look on the day. I'll do a bit of local anaesthetic and we'll take it from there."
+        },
+        {
+          "speaker": "S1",
+          "text": "It'll be a hundred and eighty. Thursday any good?"
+        },
+        {
+          "speaker": "S2",
+          "text": "Thursday's fine I suppose."
+        }
+      ],
+      "expect": {
+        "mustBeNull": [
+          "risks"
+        ],
+        "notNull": [
+          "patientQuestions",
+          "reasonForAttendance",
+          "proposed"
+        ],
+        "mustMention": {
+          "patientQuestions": [
+            "numb"
+          ]
+        },
+        "mustNotMention": {
+          "risks": [
+            "numb",
+            "nerve"
+          ]
+        },
+        "gapsMustMatch": [
+          "risk"
+        ]
+      }
+    },
+    {
+      "id": "nurse-aftercare",
+      "consultType": "extraction-surgery",
+      "probes": "The one exception to excluding nurse speech. Aftercare given by the nurse goes in informationGiven, attributed to her. Her logistics chatter does not go anywhere.",
+      "turns": [
+        {
+          "speaker": "S1",
+          "text": "That's it out, all in one piece. Bite on that gauze for me."
+        },
+        {
+          "speaker": "S1",
+          "text": "There was a bit more bleeding than I'd like so I've put a single stitch in. It'll dissolve on its own in about a week."
+        },
+        {
+          "speaker": "S2",
+          "text": "Do I need to come back to get it taken out?"
+        },
+        {
+          "speaker": "S1",
+          "text": "No, it'll go by itself. But do come back if you get increasing pain around day three or four, because that can be a dry socket."
+        },
+        {
+          "speaker": "S3",
+          "text": "So for the rest of today, no rinsing at all, no hot drinks, and try not to spit."
+        },
+        {
+          "speaker": "S3",
+          "text": "From tomorrow, warm salty water rinses after meals, four or five times a day. Half a teaspoon of salt in a mug."
+        },
+        {
+          "speaker": "S3",
+          "text": "Painkillers, take whatever you'd normally take for a headache, and take them before the numbness wears off rather than waiting."
+        },
+        {
+          "speaker": "S3",
+          "text": "No smoking and no alcohol for at least forty-eight hours, and no strenuous exercise today."
+        },
+        {
+          "speaker": "S2",
+          "text": "How long till I can eat normally?"
+        },
+        {
+          "speaker": "S3",
+          "text": "Soft stuff today, then see how you feel. Chew on the other side while it's sore."
+        },
+        {
+          "speaker": "S3",
+          "text": "I'll pop you a review in for a fortnight. Is Tuesday mornings usually all right for you?"
+        },
+        {
+          "speaker": "S2",
+          "text": "Tuesday's fine."
+        },
+        {
+          "speaker": "S3",
+          "text": "Lovely, I'll get that in the diary and print you the card."
+        }
+      ],
+      "expect": {
+        "notNull": [
+          "informationGiven",
+          "proposed",
+          "nextStep"
+        ],
+        "mustMention": {
+          "informationGiven": [
+            "salt",
+            "nurse"
+          ]
+        },
+        "mustNotMentionAnywhere": [
+          "Tuesday mornings usually"
+        ]
+      }
+    },
+    {
+      "id": "undecided-with-partner",
+      "consultType": "treatment-plan",
+      "probes": "Two things. Decision is deferred, not made — recording a decision here would be inventing consent. And an accompanying adult's contributions go in patientQuestions marked as coming from them, not merged into the patient's own words.",
+      "turns": [
+        {
+          "speaker": "S1",
+          "text": "So there are three ways we could go with the gap. A bridge, an implant, or a denture."
+        },
+        {
+          "speaker": "S1",
+          "text": "The bridge means preparing the two teeth either side, which are currently untouched. That's the downside — I'd be cutting into healthy teeth."
+        },
+        {
+          "speaker": "S1",
+          "text": "The implant leaves the neighbours alone but it's a longer process, six months or so from start to finish, and it's the most expensive at two thousand four hundred."
+        },
+        {
+          "speaker": "S1",
+          "text": "The denture is nine hundred and it's removable, which some people get on with and some really don't."
+        },
+        {
+          "speaker": "S2",
+          "text": "And what if I just leave it?"
+        },
+        {
+          "speaker": "S1",
+          "text": "That's a perfectly reasonable option too. The teeth either side may drift over time, but plenty of people live with a gap quite happily, especially further back like yours."
+        },
+        {
+          "speaker": "S3",
+          "text": "She's been quite self-conscious about it though, haven't you."
+        },
+        {
+          "speaker": "S2",
+          "text": "It's not that bad."
+        },
+        {
+          "speaker": "S3",
+          "text": "How long does the implant one last? Is it a lifetime thing or does it need redoing?"
+        },
+        {
+          "speaker": "S1",
+          "text": "Most last well over ten years, but I'd be misleading you if I said lifetime. Nothing we put in is permanent."
+        },
+        {
+          "speaker": "S2",
+          "text": "The bridge is what, sixteen hundred?"
+        },
+        {
+          "speaker": "S1",
+          "text": "Sixteen hundred and fifty."
+        },
+        {
+          "speaker": "S2",
+          "text": "I think I need to have a think about it, if that's all right."
+        },
+        {
+          "speaker": "S1",
+          "text": "Of course. There's no rush at all on this, nothing's going to get worse in the meantime. Take as long as you need."
+        },
+        {
+          "speaker": "S1",
+          "text": "I'll write it all down with the costs so you've got it in front of you."
+        }
+      ],
+      "expect": {
+        "notNull": [
+          "alternatives",
+          "costs",
+          "decision",
+          "patientQuestions",
+          "informationGiven"
+        ],
+        "mustMention": {
+          "decision": [
+            "think"
+          ],
+          "alternatives": [
+            "leav"
+          ],
+          "costs": [
+            "2400",
+            "900"
+          ]
+        },
+        "decisionMustNotMatch": [
+          "agreed to",
+          "consented to",
+          "opted for",
+          "decided on"
+        ]
+      }
+    },
+    {
+      "id": "not-a-consultation",
+      "consultType": "exam-recall",
+      "probes": "The failsafe. Not a clinical conversation. Everything null and one gap saying why. A model that manufactures a note out of this will manufacture one out of anything.",
+      "turns": [
+        {
+          "speaker": "S1",
+          "text": "Did you find us all right? The parking round here is a nightmare."
+        },
+        {
+          "speaker": "S2",
+          "text": "I ended up in the Tesco one in the end. Walked from there."
+        },
+        {
+          "speaker": "S1",
+          "text": "That's probably the safest bet, honestly. The one behind is permit only now."
+        },
+        {
+          "speaker": "S2",
+          "text": "Is it always this cold in here?"
+        },
+        {
+          "speaker": "S1",
+          "text": "The heating's been playing up all week. Someone's coming out Thursday supposedly."
+        },
+        {
+          "speaker": "S2",
+          "text": "Right."
+        },
+        {
+          "speaker": "S1",
+          "text": "Sorry, give me two minutes, I just need to find your notes on here."
+        }
+      ],
+      "expect": {
+        "allNull": true,
+        "gapsAtLeast": 1
+      }
+    },
+    {
+      "id": "materiality-musician",
+      "consultType": "extraction-surgery",
+      "probes": "patientFactors, which none of the other fixtures reaches, and which is arguably what Montgomery actually turns on. A risk is material because of who this patient is. The patient volunteers that she plays clarinet semi-professionally with an audition coming up; the clinician picks it up and adjusts the discussion around it. That link must survive into patientFactors, not be flattened into a generic risk line. A model that records 'risk of altered sensation discussed' has technically said something true and destroyed the only part that would matter in a complaint.",
+      "turns": [
+        {
+          "speaker": "S1",
+          "text": "So it's the lower left wisdom tooth. On the x-ray the roots are sitting right on top of the nerve canal."
+        },
+        {
+          "speaker": "S2",
+          "text": "Right."
+        },
+        {
+          "speaker": "S1",
+          "text": "That means there's a real risk of numbness or altered feeling in the lower lip and chin afterwards. Temporary in about one in ten, permanent in about one in a hundred."
+        },
+        {
+          "speaker": "S2",
+          "text": "When you say altered feeling, what does that actually mean? Because I play clarinet."
+        },
+        {
+          "speaker": "S1",
+          "text": "Tell me more about that."
+        },
+        {
+          "speaker": "S2",
+          "text": "I'm semi-professional. I've got an audition for a chamber group in about six weeks and I practise two or three hours a day."
+        },
+        {
+          "speaker": "S1",
+          "text": "That changes things, and I'm glad you said. Altered sensation can mean tingling, or a dead feeling, or the lip not quite doing what you ask it to."
+        },
+        {
+          "speaker": "S1",
+          "text": "For most people that's a nuisance. For an embouchure it could be the difference between playing well and not playing at all, and I can't promise you it would come back."
+        },
+        {
+          "speaker": "S2",
+          "text": "So should I not have it done?"
+        },
+        {
+          "speaker": "S1",
+          "text": "I'm not saying that. But given the audition, I'd think carefully about the timing, and I'd want you to weigh that nerve risk much more heavily than I'd normally suggest."
+        },
+        {
+          "speaker": "S1",
+          "text": "The alternative is a coronectomy. I take the crown off and leave the roots where they are, well away from the nerve. The nerve risk drops a long way."
+        },
+        {
+          "speaker": "S2",
+          "text": "Is that as good?"
+        },
+        {
+          "speaker": "S1",
+          "text": "It deals with the infections, which is what's actually bothering you. The roots stay put and occasionally need dealing with years later, so it's a trade."
+        },
+        {
+          "speaker": "S2",
+          "text": "And I could just leave it until after the audition?"
+        },
+        {
+          "speaker": "S1",
+          "text": "You could. The risk is you get another flare-up in the meantime and end up dealing with it at short notice, which is the worst timing of all."
+        },
+        {
+          "speaker": "S2",
+          "text": "Can I think about it?"
+        },
+        {
+          "speaker": "S1",
+          "text": "Please do. There's no rush this week. I'll write down the three options and the numbers so you've got them."
+        }
+      ],
+      "expect": {
+        "notNull": [
+          "patientFactors",
+          "risks",
+          "alternatives",
+          "patientQuestions",
+          "decision",
+          "informationGiven"
+        ],
+        "mustMention": {
+          "patientFactors": [
+            "clarinet"
+          ],
+          "risks": [
+            "nerve"
+          ],
+          "alternatives": [
+            "coronectomy"
+          ],
+          "decision": [
+            "think"
+          ]
+        },
+        "decisionMustNotMatch": [
+          "agreed to",
+          "consented to",
+          "opted for"
+        ]
+      }
+    }
+  ]
+}
