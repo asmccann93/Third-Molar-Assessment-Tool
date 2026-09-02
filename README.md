@@ -151,12 +151,33 @@ adding it there would fail every time the page is edited.
 ### Testing
 
 ```
-node tests/integration.mjs
+node tests/integration.mjs      # 94 assertions — API handlers
+node tests/page.mjs             # 88 assertions — the page (needs: npm i jsdom)
+node tests/build-eval.mjs       # 13 assertions — rebuilds the prompt evaluator
 ```
 
-Stubs Speechmatics and Bedrock, no network and no credentials. Covers the
-behaviours that are expensive or dangerous to get wrong: that the Speechmatics
-job is deleted on every path, that a malformed model response fails loudly rather
-than producing a partial note, and that a forged cookie does not pass the gate.
+No network, no credentials, safe to run anywhere. Speechmatics and Bedrock are
+stubbed.
+
+`integration.mjs` covers what is expensive or dangerous to get wrong server-side:
+the Speechmatics job being deleted on every path, a malformed model response
+failing loudly rather than yielding a partial note, a forged or expired cookie
+being refused, and the residency guard rejecting a widening model id before any
+request is signed.
+
+`page.mjs` drives the real page in jsdom through its own controls — consent,
+record, stop, draft, clear — with no test hooks in the production file. Three of
+its assertions are DPIA claims rather than conveniences:
+
+- recording is impossible before consent is ticked **and** a consult type chosen
+- after Clear, no patient text survives anywhere in the DOM, consent is reset,
+  and an abandoned transcription job is deleted server-side
+- model output is rendered as text and never as markup — hostile content
+  returned by the API creates no elements and executes nothing
+
+Note that `S` and the other internals are not reachable from outside the page's
+IIFE, deliberately. Tests must go through observable behaviour, which is the
+right constraint: it means they exercise what actually happens rather than what
+the code looks like.
 
 No real patient audio until every box in DPIA Step 7 is ticked.
