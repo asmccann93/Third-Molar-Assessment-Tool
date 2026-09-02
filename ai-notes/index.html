@@ -1099,7 +1099,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       S.pausedAt = 0;
       $('pause').textContent = 'Pause';
       $('pause').classList.remove('resuming');
-      $('recbar-label').textContent = 'Recording \u2014 conversation only';
+      $('recbar-label').textContent = S.dictationFromMs === null
+        ? 'Recording \u2014 conversation only'
+        : 'Dictating \u2014 the patient has left';
     } else {
       if (!rec.pause()) return;
       S.paused = true;

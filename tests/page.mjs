@@ -659,6 +659,14 @@ async function testDerivedAndDictation() {
   // container it destroys these children, and the test must report that as a
   // failure rather than crashing the run.
   ok('the bar says so', /Dictating/.test($(doc, 'recbar-label')?.textContent || ''), $(doc, 'recbar-label')?.textContent ?? '#recbar-label was destroyed');
+  // Pausing and resuming mid-dictation must not put "conversation only" back
+  // on the red bar: the patient has left and that would be a false statement.
+  click($(doc, 'pause'));
+  await tick(30);
+  click($(doc, 'pause'));
+  await tick(30);
+  ok('resuming after Dictate does not claim the patient is still there',
+    /Dictating/.test($(doc, 'recbar-label')?.textContent || ''), $(doc, 'recbar-label')?.textContent);
   ok('and the recording bar keeps its pulsing dot and its label', !!doc.querySelector('#recbar .dot') && !!doc.querySelector('#recbar-label'));
   offset += 60 * 1000;                 // a minute of dictation
   click($(doc, 'stop'));

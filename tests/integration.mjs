@@ -392,6 +392,20 @@ async function testExtract() {
   await handler(mockReq({ body: { turns: timedTurns, consultType: 'third-molar' } }), res);
   ok('no marker without Dictate', !/\[DICTATION/.test(sentBody2?.messages?.[0]?.content || ''));
 
+  // A transcript with no timings cannot be split. The worst outcome would be
+  // dictated findings silently presented as things said to the patient.
+  const untimed = [
+    { speaker: 'S1', text: 'We discussed taking the tooth out today.' },
+    { speaker: 'S1', text: 'Examination: lower left eight partially erupted.' }
+  ];
+  stubFetch(async (c, opts) => { sentBody2 = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns: untimed, consultType: 'third-molar', dictationFromS: 30 } }), res);
+  ok('an untimed transcript places no misleading dictation marker', !/\[DICTATION/.test(sentBody2?.messages?.[0]?.content || ''));
+  ok('and the failure is reported at the top of the gap list, not hidden',
+    /pressed Dictate/.test(res.body?.note?.gaps?.[0] || ''), JSON.stringify(res.body?.note?.gaps?.[0]));
+  ok('the note is still returned rather than lost', res.statusCode === 200);
+
   // --- dictated fields and implant log survive the shape check ---
   const dictated = { ...goodNote, examination: 'LL8 partially erupted', radiographicFindings: null, plan: 'Surgical removal under LA',
     implantLog: [{ site: '36', system: 'Straumann BLT', diameter: '4.1', length: '10', lot: 'X123', torque: '35', isq: '72', graft: null, notes: null }] };

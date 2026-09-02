@@ -130,9 +130,11 @@ export default async function handler(req, res) {
     let markerPlaced = false;
 
     const lines = [];
+    let sawTimes = false;
     for (const t of turns) {
       const text = String(t.text || '').trim();
       if (text.length <= 5) continue;
+      if (Number.isFinite(t.start)) sawTimes = true;
       if (dictationFromS !== null && !markerPlaced && Number.isFinite(t.start) && t.start >= dictationFromS) {
         lines.push(MARKER);
         markerPlaced = true;
@@ -141,7 +143,8 @@ export default async function handler(req, res) {
     }
     // Dictate pressed but every turn started before it (e.g. no speech after):
     // still say so, so the model does not look for dictation that is not there.
-    if (dictationFromS !== null && !markerPlaced) lines.push(MARKER);
+    if (dictationFromS !== null && !markerPlaced && sawTimes) lines.push(MARKER);
+    const dictationLocated = dictationFromS === null || markerPlaced || sawTimes;
     const transcript = lines.join('\n');
 
     if (!transcript || lines.every((l) => l === MARKER)) return res.status(400).json({ error: 'empty_transcript' });
@@ -201,6 +204,16 @@ export default async function handler(req, res) {
     // instruction to the wrong kind of gap — see the two leads on the page.
     note.notSaid = checklistGaps(consultType, note.checklist);
     delete note.checklist;        // internal; the gaps are the product
+
+    // Dictation was requested but the transcript carried no timings, so the
+    // split between conversation and dictation could not be made. Say so
+    // loudly: the alternative is a note that presents dictated findings as
+    // things said to the patient.
+    if (dictationFromS !== null && !dictationLocated) {
+      note.gaps.unshift('You pressed Dictate, but the transcript came back without timings, so the ' +
+        'dictated part could not be separated from the conversation. Check that nothing you dictated ' +
+        'has been recorded as if it were said to the patient.');
+    }
 
     return res.status(200).json({ status: 'done', note });
   } catch (err) {
