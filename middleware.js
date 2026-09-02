@@ -16,9 +16,12 @@ export const config = { matcher: ['/ai-notes/:path*', '/api/:path*'] };
 
 // Paths that must stay reachable without a session.
 const OPEN_PATHS = new Set([
-  '/api/auth',        // otherwise there is no way to ever log in
-  '/ai-notes/sw.js'   // service worker script; contains nothing, but registration
-                      // must not depend on cookie freshness
+  '/api/auth',            // otherwise there is no way to ever log in
+  '/ai-notes/sw.js',      // service worker script; contains nothing, but registration
+                          // must not depend on cookie freshness
+  '/ai-notes/encoder.js'  // the Opus encoder (opus-recorder, MIT). A public
+                          // library with nothing of ours in it; the AudioWorklet
+                          // module fetch must not depend on cookie handling.
 ]);
 
 export default async function middleware(request) {
