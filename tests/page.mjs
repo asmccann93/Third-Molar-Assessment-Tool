@@ -681,6 +681,13 @@ async function testDerivedAndDictation() {
   await tick(300);
 
   ok('the draft arrives', !$(doc, 'draft').classList.contains('hidden'));
+  const rate = $(doc, 'fields').querySelector('.rate-note');
+  ok('the draft reports what this recording actually cost',
+    !!rate && /KB\/s/.test(rate.textContent), rate ? rate.textContent : 'absent');
+  ok('and projects the length ceiling from that measured rate, not a fixed number',
+    !!rate && /upload limit falls at about \d+ minutes/.test(rate.textContent), rate ? rate.textContent : 'absent');
+  ok('the readout excludes paused time, so a long pause does not deflate the rate',
+    !!rate && /^2:30 recorded/.test(rate.textContent), rate ? rate.textContent : 'absent');
   ok('the dictation point reaches the API in RECORDED seconds, not wall clock',
     noteBody && Math.abs(noteBody.dictationFromS - 90) < 2, String(noteBody?.dictationFromS));
   ok('the pause is still reported alongside it', noteBody?.pauses?.length === 1 && noteBody.pauses[0].forMs >= 40 * 60 * 1000);
@@ -871,8 +878,13 @@ async function testFormatAndSize() {
     /ENCODER_PATH:\s*'\/ai-notes\/encoder\.js'/.test(src));
   ok('encodes at 24 kbps, 16 kHz mono, voice application',
     /OPUS_BPS:\s*24000/.test(src) && /OPUS_RATE:\s*16000/.test(src) && /encoderApplication:\s*2048/.test(src));
-  ok('the cap is now 25 minutes', /MAX_MS:\s*25 \* 60 \* 1000/.test(src));
-  ok('the recording view says so', /Stops automatically at 25:00/.test(src));
+  ok('the cap is 30 minutes', /MAX_MS:\s*30 \* 60 \* 1000/.test(src));
+  ok('the recording view says so', /Stops automatically at 30:00/.test(src));
+  ok('and the cap stays inside the real upload ceiling of ~31 min at 2.2 KB/s',
+    (30 * 60) * 2256 < 4.2 * 1024 * 1024 * 0.95,
+    `${((30 * 60) * 2256 / 1048576).toFixed(2)} MB projected vs ${(4.2 * 0.95).toFixed(2)} MB allowed`);
+  ok('the reset message reads the constant rather than a hard-coded number',
+    /'Stops automatically at ' \+ Math\.round\(CFG\.MAX_MS \/ 60000\)/.test(src));
   ok('size is measured from encoded pages, not estimated from a bitrate',
     /var bytes = rec\.bytes;/.test(src) && !/var estimated = \(elapsed/.test(src));
   ok('and still warns before stopping', /SIZE_WARN/.test(src));

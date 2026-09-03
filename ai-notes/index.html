@@ -246,6 +246,7 @@ button:disabled { opacity: .45; cursor: default; }
 .btn-pause { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
 .btn-pause.resuming { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .btn-pause[disabled] { opacity: .5; }
+.rate-note { margin: 0 0 14px; font-size: .78rem; color: var(--ink-faint); }
 .section-heading {
   margin: 26px 0 10px; padding-bottom: 6px;
   border-bottom: 1px solid var(--line);
@@ -425,7 +426,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     <div class="card">
       <h2>Recording</h2>
       <p class="timer" id="timer">0:00</p>
-      <p class="timer-note" id="timer-note">Stops automatically at 25:00</p>
+      <p class="timer-note" id="timer-note">Stops automatically at 30:00</p>
       <div class="level" aria-hidden="true"><i id="level"></i></div>
       <p class="level-note" id="level-note" role="status"></p>
       <div class="record-row">
@@ -523,9 +524,17 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      and are flagged as such.
      ================================================================== */
   var CFG = {
-    MAX_MS:        25 * 60 * 1000,   // hard cap; auto-stops. The measured size
-                                     // guard below usually rules before this.
-    WARN_MS:       22 * 60 * 1000,   // timer turns red
+    MAX_MS:        30 * 60 * 1000,   // hard cap; auto-stops. Raised from 25 on
+                                     // 3 Sep 2026 after real consultations up to
+                                     // 23 minutes ran clean. The true ceiling is
+                                     // the UPLOAD limit, not the clock: 4.2 MB at
+                                     // the measured ~2.2 KB/s is about 31 minutes,
+                                     // and the size guard below halts at 95% of
+                                     // it. Going past 30 means either a lower
+                                     // bitrate (which costs recognition of dental
+                                     // terms) or streaming to Speechmatics
+                                     // directly (which is a DPIA change).
+    WARN_MS:       27 * 60 * 1000,   // timer turns red
     IDLE_WIPE_MS:  60 * 60 * 1000,   // no interaction -> destroy everything.
                                      // Raised from 10 minutes on 2 Sep 2026 by
                                      // the clinician's decision. The idle timer
@@ -666,6 +675,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     lastSoundAt: 0,
     sizeNote: '',     // size / stall warning; the meter merges it with its own silence note
     captureNote: null,// set when the encoder captured less than the recorded clock; rendered as a gap
+    rateNote: '',     // measured size of the last recording, shown under the draft
     paused: false,
     pausedAt: 0,      // when the current pause began
     pausedMs: 0,      // total time paused across the whole recording
@@ -1257,6 +1267,17 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
     S.pausesForDraft = S.pauses.filter(function (p) { return p.forMs > 1000; });
 
+    // What this recording actually cost, for tuning the length ceiling later.
+    var recS = recordedMs() / 1000;
+    if (recS > 60 && rec.bytes > 0) {
+      var perSec = rec.bytes / recS;
+      S.rateNote = fmtTime(recS) + ' recorded, ' + (rec.bytes / 1048576).toFixed(2) + ' MB, ' +
+        (perSec / 1024).toFixed(2) + ' KB/s \u2014 at this rate the upload limit falls at about ' +
+        Math.floor(CFG.MAX_BYTES * CFG.SIZE_STOP / perSec / 60) + ' minutes.';
+    } else {
+      S.rateNote = '';
+    }
+
     var blob = rec.blob();
     var encodedS = rec.samplePosition / 48000;
     var wallS = recordedMs() / 1000;      // excludes deliberate pauses
@@ -1483,6 +1504,13 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
     var host = $('fields');
     host.textContent = '';
+
+    if (S.rateNote) {
+      var rn = document.createElement('p');
+      rn.className = 'rate-note';
+      rn.textContent = S.rateNote;
+      host.appendChild(rn);
+    }
 
     SECTIONS.forEach(function (section) {
       var title = section[0], keys = section[1];
@@ -1829,6 +1857,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.pausesForDraft = null;
     S.dictationFromMs = null;
     S.summary = null;
+    S.rateNote = '';
 
     $('summary-box').classList.add('hidden');
     $('consent-box').classList.add('hidden');
@@ -1850,7 +1879,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     if (map) map.remove();
     $('timer').textContent = '0:00';
     $('timer').classList.remove('over');
-    $('timer-note').textContent = 'Stops automatically at 25:00';
+    $('timer-note').textContent = 'Stops automatically at ' + Math.round(CFG.MAX_MS / 60000) + ':00';
     $('level').style.width = '0';
     $('level-note').textContent = '';
     $('level-note').classList.remove('alert');
