@@ -37,12 +37,32 @@ jobs:
           node-version: '20'
 
       # Switcher completeness, aria-current placement and manifest icons.
-      # Also, since AI Notes: that the private tool is absent from every public
-      # switcher, that its worker caches nothing, and that its page persists
+      # Also, since AI Notes: that the gated tool IS linked from every public
+      # switcher (that assertion was inverted on 2 September 2026 when the tab
+      # was made visible; the passcode gate, not the link's absence, is the
+      # control), that its worker caches nothing, and that its page persists
       # nothing. The stored fingerprint baseline goes stale the moment anything
       # is committed, so the cache comparison is done from git history instead.
       - name: Structure
         run: node site-check.js . --skip-cache
+
+      # The suites used to run only on someone's laptop, so a green tick here
+      # said nothing about them. Every one of these is offline: no network, no
+      # credentials, nothing to configure.
+      - name: API handlers
+        run: node tests/integration.mjs
+
+      # Note: tests/prompt-eval.paste.js is generated, not committed. This step
+      # proves the template and fixtures still produce a valid evaluator; it
+      # cannot check a file in the repo, because there isn't one. Regenerate
+      # locally before pasting it into the console.
+      - name: Prompt evaluator builds and self-tests
+        run: node tests/build-eval.mjs
+
+      - name: The page, in jsdom
+        run: |
+          npm install jsdom --no-save --silent
+          node tests/page.mjs
 
       - name: Cache names must move when a tool changes
         run: |
