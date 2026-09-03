@@ -246,6 +246,20 @@ button:disabled { opacity: .45; cursor: default; }
 .btn-pause { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
 .btn-pause.resuming { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .btn-pause[disabled] { opacity: .5; }
+.section-heading {
+  margin: 26px 0 10px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: .78rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+#fields > .section-heading:first-child { margin-top: 4px; }
+.dictated-tag {
+  margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+  background: var(--paper); border: 1px solid var(--line);
+  font-size: .68rem; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.field.is-dictated pre { border-left: 2px dashed var(--line); padding-left: 10px; }
 .dictated-heading { margin-top: 22px; padding-top: 14px; border-top: 1px dashed var(--line); font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
 table.implant-log { width: 100%; border-collapse: collapse; font-size: .85rem; margin: 6px 0 14px; }
 table.implant-log th, table.implant-log td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -589,6 +603,43 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     ['radiographicFindings', 'Radiographic findings'],
     ['plan',                 'Treatment plan']
   ];
+  // How the note READS, which is not the order the fields are extracted in.
+  // A clinical note is read chronologically: what brought them in, what was
+  // found, what was discussed, what was decided. The consent fields keep their
+  // Montgomery tags wherever they sit.
+  //   [key, dictated?]
+  var SECTIONS = [
+    ['Presentation', [
+      ['reasonForAttendance', false],
+      ['medicalHistory',      false]
+    ]],
+    ['Findings', [
+      ['examination',          true],
+      ['radiographicFindings', true]
+    ]],
+    ['Discussion', [
+      ['proposed',         false],
+      ['alternatives',     false],
+      ['patientFactors',   false],
+      ['risks',            false],
+      ['benefits',         false],
+      ['costs',            false],
+      ['patientQuestions', false]
+    ]],
+    ['Outcome', [
+      ['decision',         false],
+      ['informationGiven', false],
+      ['nextStep',         false],
+      ['plan',             true]
+    ]]
+  ];
+
+  function fieldSpec(key) {
+    for (var i = 0; i < FIELDS.length; i++) if (FIELDS[i][0] === key) return { label: FIELDS[i][1], core: FIELDS[i][2], dictated: false };
+    for (var j = 0; j < DICTATED_FIELDS.length; j++) if (DICTATED_FIELDS[j][0] === key) return { label: DICTATED_FIELDS[j][1], core: false, dictated: true };
+    return null;
+  }
+
   var IMPLANT_COLS = [['site','Site'],['system','System'],['diameter','\u00d8'],['length','Length'],['lot','Lot'],['torque','Torque'],['isq','ISQ'],['graft','Graft'],['notes','Notes']];
 
   var CONSENT_SCRIPT =
@@ -1433,49 +1484,81 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     var host = $('fields');
     host.textContent = '';
 
-    FIELDS.forEach(function (spec) {
-      var key = spec[0], heading = spec[1], isCore = spec[2];
-      var value = note[key];
-      var isGap = value === null || value === undefined || String(value).trim() === '';
+    SECTIONS.forEach(function (section) {
+      var title = section[0], keys = section[1];
 
-      var wrap = document.createElement('div');
-      wrap.className = 'field' + (isGap ? ' is-gap' : '') + (isCore ? ' is-core' : '');
+      // A section with nothing in it is omitted entirely. Most consultations
+      // have no dictation, so Findings usually does not appear at all.
+      var visible = keys.filter(function (k) {
+        var spec = fieldSpec(k[0]);
+        if (!spec) return false;
+        if (k[1]) return hasText(note[k[0]]);   // dictated: show only if dictated
+        return true;                            // consent fields always show, gap or not
+      });
+      if (!visible.length) return;
 
-      var head = document.createElement('div');
-      head.className = 'field-head';
+      var hd = document.createElement('h3');
+      hd.className = 'section-heading';
+      hd.textContent = title;
+      host.appendChild(hd);
 
-      var h3 = document.createElement('h3');
-      h3.textContent = heading;
-      head.appendChild(h3);
+      visible.forEach(function (k) {
+        var key = k[0], isDictated = k[1], spec = fieldSpec(key);
+        var heading = spec.label, isCore = spec.core;
+        var value = note[key];
+        var isGap = !hasText(value);
 
-      if (isCore) {
-        var tag = document.createElement('span');
-        tag.className = 'core-tag';
-        tag.textContent = 'Montgomery';
-        tag.title = 'One of the four fields a consent claim turns on';
-        head.appendChild(tag);
-      }
+        var wrap = document.createElement('div');
+        wrap.className = 'field' + (isGap ? ' is-gap' : '') + (isCore ? ' is-core' : '') +
+                         (isDictated ? ' is-dictated' : '');
 
-      if (!isGap) {
-        var copy = document.createElement('button');
-        copy.type = 'button';
-        copy.className = 'copy';
-        copy.textContent = 'Copy';
-        copy.addEventListener('click', function () {
-          writeClipboard(heading + '\n' + String(value).trim(), copy);
-        });
-        head.appendChild(copy);
-      }
+        var head = document.createElement('div');
+        head.className = 'field-head';
 
-      var pre = document.createElement('pre');
-      pre.textContent = isGap ? 'Not captured' : String(value).trim();
+        var h3 = document.createElement('h3');
+        h3.textContent = heading;
+        head.appendChild(h3);
 
-      wrap.appendChild(head);
-      wrap.appendChild(pre);
-      host.appendChild(wrap);
+        if (isCore) {
+          var tag = document.createElement('span');
+          tag.className = 'core-tag';
+          tag.textContent = 'Montgomery';
+          tag.title = 'One of the four fields a consent claim turns on';
+          head.appendChild(tag);
+        }
+
+        // The one thing that must survive the reordering: dictated content is
+        // the clinician talking to the record, not to the patient, and must
+        // never read as part of the consultation.
+        if (isDictated) {
+          var dtag = document.createElement('span');
+          dtag.className = 'dictated-tag';
+          dtag.textContent = 'Dictated';
+          dtag.title = 'Said by you after the patient left, not to the patient';
+          head.appendChild(dtag);
+        }
+
+        if (!isGap) {
+          var copy = document.createElement('button');
+          copy.type = 'button';
+          copy.className = 'copy';
+          copy.textContent = 'Copy';
+          copy.addEventListener('click', function () {
+            writeClipboard(heading + (isDictated ? ' (dictated)' : '') + '\n' + String(value).trim(), copy);
+          });
+          head.appendChild(copy);
+        }
+
+        var pre = document.createElement('pre');
+        pre.textContent = isGap ? 'Not captured' : String(value).trim();
+
+        wrap.appendChild(head);
+        wrap.appendChild(pre);
+        host.appendChild(wrap);
+      });
     });
 
-    renderDictated(note, host);
+    renderImplantLog(note, host);
   }
 
   function hasText(v) { return !(v === null || v === undefined || String(v).trim() === ''); }
@@ -1499,71 +1582,47 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     });
   }
 
-  // Dictated fields and the implant log. Shown only when there is something,
-  // under a heading that says what it is: a dictation is the clinician's own
-  // record, and must never read as part of the conversation with the patient.
-  function renderDictated(note, host) {
-    var any = DICTATED_FIELDS.some(function (spec) { return hasText(note[spec[0]]); }) ||
-              (Array.isArray(note.implantLog) && note.implantLog.length > 0);
-    if (!any) return;
+  // The implant log stays a block of its own: it is a table, not prose, and it
+  // belongs at the end of the record rather than inside the discussion.
+  function renderImplantLog(note, host) {
+    if (!Array.isArray(note.implantLog) || !note.implantLog.length) return;
 
     var hd = document.createElement('h3');
-    hd.className = 'dictated-heading';
-    hd.textContent = 'Dictated after the consultation';
+    hd.className = 'section-heading';
+    hd.textContent = 'Implant log';
     host.appendChild(hd);
 
-    DICTATED_FIELDS.forEach(function (spec) {
-      var key = spec[0], heading = spec[1], value = note[key];
-      if (!hasText(value)) return;
-      var wrap = document.createElement('div');
-      wrap.className = 'field';
-      var head = document.createElement('div');
-      head.className = 'field-head';
-      var h3 = document.createElement('h3');
-      h3.textContent = heading;
-      head.appendChild(h3);
-      var copy = document.createElement('button');
-      copy.type = 'button';
-      copy.className = 'copy';
-      copy.textContent = 'Copy';
-      copy.addEventListener('click', function () { writeClipboard(heading + '\n' + String(value).trim(), copy); });
-      head.appendChild(copy);
-      var pre = document.createElement('pre');
-      pre.textContent = String(value).trim();
-      wrap.appendChild(head);
-      wrap.appendChild(pre);
-      host.appendChild(wrap);
+    var wrap = document.createElement('div');
+    wrap.className = 'field is-dictated';
+    var head = document.createElement('div');
+    head.className = 'field-head';
+    var h3 = document.createElement('h3');
+    h3.textContent = 'Implants placed';
+    head.appendChild(h3);
+    var dtag = document.createElement('span');
+    dtag.className = 'dictated-tag';
+    dtag.textContent = 'Dictated';
+    head.appendChild(dtag);
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', function () { writeClipboard(implantLogAsText(note.implantLog), copy); });
+    head.appendChild(copy);
+    wrap.appendChild(head);
+
+    var table = document.createElement('table');
+    table.className = 'implant-log';
+    var thead = document.createElement('tr');
+    IMPLANT_COLS.forEach(function (c) { var th = document.createElement('th'); th.textContent = c[1]; thead.appendChild(th); });
+    table.appendChild(thead);
+    note.implantLog.forEach(function (row) {
+      var tr = document.createElement('tr');
+      IMPLANT_COLS.forEach(function (c) { var td = document.createElement('td'); td.textContent = hasText(row[c[0]]) ? String(row[c[0]]) : '\u2014'; tr.appendChild(td); });
+      table.appendChild(tr);
     });
-
-    if (Array.isArray(note.implantLog) && note.implantLog.length) {
-      var wrap2 = document.createElement('div');
-      wrap2.className = 'field';
-      var head2 = document.createElement('div');
-      head2.className = 'field-head';
-      var h32 = document.createElement('h3');
-      h32.textContent = 'Implant log';
-      head2.appendChild(h32);
-      var copy2 = document.createElement('button');
-      copy2.type = 'button';
-      copy2.className = 'copy';
-      copy2.textContent = 'Copy';
-      copy2.addEventListener('click', function () { writeClipboard(implantLogAsText(note.implantLog), copy2); });
-      head2.appendChild(copy2);
-      wrap2.appendChild(head2);
-
-      var table = document.createElement('table');
-      table.className = 'implant-log';
-      var thead = document.createElement('tr');
-      IMPLANT_COLS.forEach(function (c) { var th = document.createElement('th'); th.textContent = c[1]; thead.appendChild(th); });
-      table.appendChild(thead);
-      note.implantLog.forEach(function (row) {
-        var tr = document.createElement('tr');
-        IMPLANT_COLS.forEach(function (c) { var td = document.createElement('td'); td.textContent = hasText(row[c[0]]) ? String(row[c[0]]) : '\u2014'; tr.appendChild(td); });
-        table.appendChild(tr);
-      });
-      wrap2.appendChild(table);
-      host.appendChild(wrap2);
-    }
+    wrap.appendChild(table);
+    host.appendChild(wrap);
   }
 
   function implantLogAsText(log) {
@@ -1575,33 +1634,29 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   }
 
   function noteAsText(note) {
-    var lines = [];
-    FIELDS.forEach(function (spec) {
-      var value = note[spec[0]];
-      if (!hasText(value)) return;
-      lines.push(spec[1]);
-      lines.push(String(value).trim());
-      lines.push('');
-    });
-    var dict = [];
-    DICTATED_FIELDS.forEach(function (spec) {
-      var value = note[spec[0]];
-      if (!hasText(value)) return;
-      dict.push(spec[1]);
-      dict.push(String(value).trim());
-      dict.push('');
+    var out = [];
+    SECTIONS.forEach(function (section) {
+      var title = section[0], keys = section[1];
+      var lines = [];
+      keys.forEach(function (k) {
+        var key = k[0], isDictated = k[1], spec = fieldSpec(key);
+        if (!spec || !hasText(note[key])) return;
+        lines.push(spec.label + (isDictated ? ' (dictated)' : ''));
+        lines.push(String(note[key]).trim());
+        lines.push('');
+      });
+      if (!lines.length) return;
+      out.push(title.toUpperCase());
+      out.push('');
+      out = out.concat(lines);
     });
     if (Array.isArray(note.implantLog) && note.implantLog.length) {
-      dict.push('Implant log');
-      dict.push(implantLogAsText(note.implantLog));
-      dict.push('');
+      out.push('IMPLANT LOG');
+      out.push('');
+      out.push(implantLogAsText(note.implantLog));
+      out.push('');
     }
-    if (dict.length) {
-      lines.push('--- Dictated after the consultation ---');
-      lines.push('');
-      lines = lines.concat(dict);
-    }
-    return lines.join('\n').trim();
+    return out.join('\n').trim();
   }
 
   /* ---- derived documents: patient summary, consent form text ---- */

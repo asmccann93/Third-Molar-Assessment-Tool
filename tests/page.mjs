@@ -257,7 +257,15 @@ async function testWipe() {
   ok('a full consultation reaches the draft view', !$(doc, 'draft').classList.contains('hidden'));
   ok('audio was sent for transcription', calls.some((c) => c.url.includes('/api/transcribe') && c.method === 'POST'));
   ok('transcript was sent for drafting', calls.some((c) => c.url.includes('/api/extract')));
-  ok('all twelve fields render', $(doc, 'fields').children.length === 12, String($(doc, 'fields').children.length));
+  // Twelve consent fields plus the section headings they sit under. Dictated
+  // fields are absent because this consultation had no dictation.
+  ok('all twelve consent fields render',
+    [...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length === 12,
+    String([...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length));
+  ok('under chronological section headings, Findings omitted when nothing was dictated',
+    [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent)
+      .join('|') === 'Presentation|Discussion|Outcome',
+    [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent).join('|'));
   ok('gap list is populated', $(doc, 'gaps-list').children.length >= 1);
   ok('patient words survive verbatim', $(doc, 'fields').textContent.includes('Will I be numb forever?'));
   ok('Montgomery fields are marked',
@@ -579,7 +587,7 @@ async function testDraftRetry() {
     calls.filter((c) => c.url.includes('/api/transcribe') && c.method === 'POST').length === 1);
   ok('the draft now renders', !$(doc, 'draft').classList.contains('hidden'));
   ok('and the error is cleared', $(doc, 'error').classList.contains('hidden'));
-  ok('twelve fields present', $(doc, 'fields').children.length === 12);
+  ok('twelve fields present', [...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length === 12);
 
   // The held transcript must still be destroyed by every normal route.
   const ctx2 = await boot({
@@ -681,14 +689,35 @@ async function testDerivedAndDictation() {
   ok('the not-said panel is hidden when there is nothing to report', $(doc, 'notsaid').classList.contains('hidden'));
 
   const text = $(doc, 'fields').textContent;
-  ok('the dictated section is rendered under its own heading', /Dictated after the consultation/.test(text));
+  // Dictated findings now sit where they belong clinically — before the
+  // discussion, not after the outcome — but must still be unmistakably marked.
+  const headings = [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent);
+  ok('findings appear under their own heading, before the discussion',
+    headings.join('|') === 'Presentation|Findings|Discussion|Outcome|Implant log', headings.join('|'));
+  const order = [...$(doc, 'fields').querySelectorAll('.field h3')].map((h) => h.textContent);
+  ok('examination is read before the treatment proposed, not after next step',
+    order.indexOf('Examination findings') < order.indexOf('Treatment proposed'), JSON.stringify(order));
+  ok('and every dictated field carries the Dictated tag, wherever it sits',
+    [...$(doc, 'fields').querySelectorAll('.field')].every((f) => {
+      const label = f.querySelector('h3').textContent;
+      const isDict = ['Examination findings', 'Radiographic findings', 'Treatment plan', 'Implants placed'].includes(label);
+      return isDict === !!f.querySelector('.dictated-tag');
+    }));
+  ok('a consent field is never tagged as dictated',
+    ![...$(doc, 'fields').querySelectorAll('.field')].some((f) =>
+      f.querySelector('.dictated-tag') && f.querySelector('h3').textContent === 'Treatment proposed'));
   ok('with the dictated fields', /Adequate ridge width/.test(text) && /11 mm to the canal/.test(text));
   ok('and the implant log as a table', doc.querySelector('table.implant-log') && /LOT9/.test(doc.querySelector('table.implant-log').textContent));
   let copied = '';
   win.navigator.clipboard.writeText = async (t) => { copied = t; };
   click($(doc, 'copy-all'));
   await tick(40);
-  ok('the whole-note copy includes the dictated section, labelled', /--- Dictated after the consultation ---/.test(copied) && /Implant 1: Site LL6, System Straumann BLT, Diameter 4.1/.test(copied), copied.slice(-300));
+  ok('the pasted note carries the same section headings', /PRESENTATION[\s\S]*FINDINGS[\s\S]*DISCUSSION[\s\S]*OUTCOME/.test(copied), copied.slice(0, 200));
+  ok('and marks dictated fields inline so the record cannot mislead',
+    /Examination findings \(dictated\)/.test(copied) && /Treatment plan \(dictated\)/.test(copied), copied.slice(0, 300));
+  ok('a consent field is not marked dictated in the paste', !/Treatment proposed \(dictated\)/.test(copied));
+  ok('the implant log is still included', /IMPLANT LOG/.test(copied) && /Implant 1: Site LL6, System Straumann BLT, Diameter 4.1/.test(copied), copied.slice(-300));
+  ok('findings are pasted before the discussion', copied.indexOf('FINDINGS') < copied.indexOf('DISCUSSION'));
 
   // Consent form text: assembled, not generated; blanks stay blank.
   click($(doc, 'make-consent'));
