@@ -246,6 +246,26 @@ button:disabled { opacity: .45; cursor: default; }
 .btn-pause { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
 .btn-pause.resuming { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .btn-pause[disabled] { opacity: .5; }
+.draft-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.length-picker { display: flex; gap: 4px; }
+.length-picker button {
+  padding: 4px 11px; border: 1px solid var(--line); background: var(--paper);
+  border-radius: 999px; font-size: .8rem; color: var(--ink-faint); cursor: pointer;
+}
+.length-picker button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.length-picker button[disabled] { opacity: .5; cursor: default; }
+#edit-hint { margin: 2px 0 14px; }
+.field pre.is-empty::before {
+  content: attr(data-placeholder); color: var(--ink-faint); font-style: italic;
+}
+.field pre[contenteditable="true"]:focus {
+  outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px;
+}
+.field.edited > .field-head h3::after {
+  content: 'edited'; margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+  background: var(--wash, #EEF1F6); font-size: .62rem; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink-faint); font-weight: 600;
+}
 .rate-note { margin: 0 0 14px; font-size: .78rem; color: var(--ink-faint); }
 .section-heading {
   margin: 26px 0 10px; padding-bottom: 6px;
@@ -468,7 +488,15 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     </div>
 
     <div class="card">
-      <h2 id="draft-heading">Draft note</h2>
+      <div class="draft-head">
+        <h2 id="draft-heading">Draft note</h2>
+        <div class="length-picker" role="group" aria-label="Level of detail">
+          <button type="button" data-length="brief">Brief</button>
+          <button type="button" data-length="standard" class="on">Standard</button>
+          <button type="button" data-length="full">Full</button>
+        </div>
+      </div>
+      <p class="timer-note" id="edit-hint">Every field can be edited here before you copy it.</p>
       <div id="fields"></div>
     </div>
 
@@ -676,6 +704,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     sizeNote: '',     // size / stall warning; the meter merges it with its own silence note
     captureNote: null,// set when the encoder captured less than the recorded clock; rendered as a gap
     rateNote: '',     // measured size of the last recording, shown under the draft
+    noteLength: 'standard',  // brief | standard | full
+    edited: false,    // the clinician has changed the draft in place
     paused: false,
     pausedAt: 0,      // when the current pause began
     pausedMs: 0,      // total time paused across the whole recording
@@ -1276,6 +1306,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         Math.floor(CFG.MAX_BYTES * CFG.SIZE_STOP / perSec / 60) + ' minutes.';
     } else {
       S.rateNote = '';
+    S.noteLength = 'standard';
+    S.edited = false;
+    setLengthButtons(false);
     }
 
     var blob = rec.blob();
@@ -1365,6 +1398,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [],
+                               length: S.noteLength,
                                dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
       });
       var data = await res.json().catch(function () { return {}; });
@@ -1577,8 +1611,27 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
           head.appendChild(copy);
         }
 
+        // Editable in place. The clinician has to correct the draft before it
+        // enters the record anyway; making them do it after pasting means the
+        // correction happens outside the tool, where the gap list and the
+        // "not said" panel are no longer in front of them.
         var pre = document.createElement('pre');
-        pre.textContent = isGap ? 'Not captured' : String(value).trim();
+        pre.textContent = isGap ? '' : String(value).trim();
+        pre.setAttribute('contenteditable', 'true');
+        pre.setAttribute('role', 'textbox');
+        pre.setAttribute('aria-multiline', 'true');
+        pre.setAttribute('aria-label', heading);
+        pre.dataset.placeholder = 'Not captured';
+        if (isGap) pre.classList.add('is-empty');
+        pre.addEventListener('input', function () {
+          var text = pre.textContent.trim();
+          S.note[key] = text === '' ? null : text;
+          S.edited = true;
+          wrap.classList.toggle('edited', true);
+          wrap.classList.toggle('is-gap', text === '');
+          pre.classList.toggle('is-empty', text === '');
+          resetIdle();
+        });
 
         wrap.appendChild(head);
         wrap.appendChild(pre);
@@ -1706,6 +1759,36 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       out.push('');
     });
     return out.length ? out.join('\n').trim() : 'Nothing in the recording could be summarised for the patient.';
+  }
+
+  [].forEach.call(document.querySelectorAll('.length-picker button'), function (btn) {
+    btn.addEventListener('click', async function () {
+      resetIdle();
+      var want = btn.dataset.length;
+      if (want === S.noteLength || S.busy) return;
+      if (!S.turns) {
+        return fail('Cannot redraft', 'The transcript is no longer held, so the note cannot be rewritten. The draft on screen is unchanged.');
+      }
+      if (S.edited && !confirm('Redrafting replaces the note, including your edits. Continue?')) return;
+
+      var prev = S.noteLength;
+      S.noteLength = want;
+      setLengthButtons(true);
+      try {
+        S.edited = false;       // the redraft supersedes any edits
+        await draft(S.gen);     // same path as the first draft; transcript unchanged
+      } catch (err) {
+        S.noteLength = prev;
+      }
+      setLengthButtons(false);
+    });
+  });
+
+  function setLengthButtons(busy) {
+    [].forEach.call(document.querySelectorAll('.length-picker button'), function (b) {
+      b.classList.toggle('on', b.dataset.length === S.noteLength);
+      b.disabled = !!busy;
+    });
   }
 
   $('make-summary').addEventListener('click', async function () {

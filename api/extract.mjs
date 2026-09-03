@@ -107,6 +107,9 @@ export default async function handler(req, res) {
     const body = await readJson(req);
     const turns = Array.isArray(body?.turns) ? body.turns.slice(0, MAX_TURNS) : null;
     const consultType = typeof body?.consultType === 'string' ? body.consultType : null;
+    // How much to write. Anything unrecognised falls back to standard in the
+    // prompt builder, so a bad value cannot fail a draft.
+    const length = typeof body?.length === 'string' ? body.length : 'standard';
     // Where the clinician paused. Shapes the prompt so the note cannot assert a
     // sequence across unrecorded time. Bounded and sanitised like everything else.
     const pauses = Array.isArray(body?.pauses)
@@ -173,7 +176,7 @@ export default async function handler(req, res) {
       // whole, so the headroom is worth more than the tokens.
       max_tokens: 8192,
       temperature: 0,
-      system: buildSystemPrompt(consultType),
+      system: buildSystemPrompt(consultType, length),
       messages: [{ role: 'user', content: buildUserMessage(transcript, pauses) }]
     };
 

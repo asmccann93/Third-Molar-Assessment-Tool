@@ -31,6 +31,14 @@ export const config = {
 const API_BASE = process.env.SPEECHMATICS_API_BASE || 'https://eu1.asr.api.speechmatics.com/v2';
 const EU_HOSTS = ['eu1.asr.api.speechmatics.com', 'eu2.asr.api.speechmatics.com'];
 
+// Speechmatics publish a domain-tuned model alongside the general one. Medical
+// is the closest fit to a dental consultation and should help on exactly the
+// vocabulary the custom dictionary below is compensating for. It is unset-able
+// via the environment, and — more importantly — a job rejected for the domain
+// is retried once WITHOUT it, so an account that cannot use the medical model
+// degrades to the general one rather than failing the consultation.
+const DOMAIN = process.env.SPEECHMATICS_DOMAIN === '' ? null : (process.env.SPEECHMATICS_DOMAIN || 'medical');
+
 const POST_BUDGET_MS = 35_000;  // short recordings finish inside this; long ones go to GET
 const MAX_BYTES = 4.4 * 1024 * 1024;
 const MIN_BYTES = 2000;        // matches the client-side floor; below this there
@@ -199,11 +207,12 @@ export default async function handler(req, res) {
 
 /* ---------- Speechmatics ---------- */
 
-async function submitJob(key, audio, contentType, via) {
+async function submitJob(key, audio, contentType, via, domain = DOMAIN) {
   const config = {
     type: 'transcription',
     transcription_config: {
       language: 'en',
+      ...(domain ? { domain } : {}),
 
       // "model", not "operating_point". The latter was the old field name and
       // appears nowhere in current documentation. An unrecognised field is not
@@ -255,9 +264,19 @@ async function submitJob(key, audio, contentType, via) {
   });
 
   if (!r.ok) {
+    const body = await shortText(r);
+
+    // The account may not have the domain-tuned model. Losing a consultation
+    // over an optional accuracy setting would be absurd, so drop it and try
+    // once more on the general model.
+    if (domain && r.status >= 400 && r.status < 500 && /domain|medical|not.*(enabled|available|permitted)/i.test(body)) {
+      console.warn(`transcribe: domain "${domain}" rejected (${r.status}: ${body}); retrying on the general model`);
+      return await submitJob(key, audio, contentType, via, null);
+    }
+
     // Say what was actually sent. A bare "invalid audio" leaves nothing to act on.
     throw new Error(
-      `submit ${r.status}: ${await shortText(r)} ` +
+      `submit ${r.status}: ${body} ` +
       `[sent ${audio.length} bytes, container ${sniffContainer(audio)}, ` +
       `type ${contentType}, filename consult${extensionFor(contentType)}, read via ${via}]`
     );

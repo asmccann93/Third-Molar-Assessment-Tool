@@ -129,9 +129,16 @@ function consultType(key) {
   return CONSULT_TYPES[key];
 }
 
-export function buildSystemPrompt(consultTypeKey) {
+export const NOTE_LENGTHS = {
+  brief:    'BRIEF. One or two sentences per field, and only what is clinically necessary. Do not pad a field to fill it; null is better than filler.',
+  standard: 'STANDARD. Enough detail that a colleague reading it later understands what was discussed and decided.',
+  full:     'FULL. Capture the discussion thoroughly, including the patient\'s own phrasing where it matters. Still never add anything that was not said.'
+};
+
+export function buildSystemPrompt(consultTypeKey, length) {
   const type = consultType(consultTypeKey);
   const checklist = checklistSection(consultTypeKey);
+  const lengthRule = NOTE_LENGTHS[length] || NOTE_LENGTHS.standard;
 
   return `You extract a draft clinical note from a transcript of a dental consultation. A UK dentist will read your draft, correct it, and paste it into the patient's record.
 
@@ -162,6 +169,28 @@ The transcript is diarised. Work out from context who is the clinician, who is t
 - A risk counts as named only if the CLINICIAN named it. If the patient raises a risk and the clinician does not respond to it, that belongs in patientQuestions, not risks.
 - NURSE speech is excluded from the note, with one exception: where the nurse gives post-operative or aftercare instructions, record that under informationGiven and attribute it to her.
 - Where an accompanying adult speaks (parent, partner, carer), their contributions go in patientQuestions, marked as coming from the accompanying person.
+
+## WHO IS WHO
+
+The transcript labels speakers S1, S2 and so on. You work out which is the
+clinician and which is the patient from what they say. Report that mapping so
+the clinician can check it, because a swap is otherwise invisible and would put
+the patient's words in the clinician's mouth.
+
+- "speakers": an object mapping each label that appears to "clinician",
+  "patient", or "other" (a nurse, relative, or interpreter).
+- "speakerConfidence": "high", "medium" or "low". Say low when the roles are
+  genuinely unclear — a short recording, or a transcript where both parties ask
+  and answer in similar proportion. Do not be polite about this.
+- If you are unsure, still map them, but say low. Never leave a label out.
+
+## LENGTH
+
+Write at this level of detail: ${lengthRule}
+
+Length changes how much you write, never what you are allowed to write. Every
+rule above still holds at every length: nothing invented, nothing implied, gaps
+reported honestly.
 
 ## CHECKLIST
 ${checklist}
@@ -263,6 +292,8 @@ Return a single JSON object and nothing else. No markdown fences, no explanation
   "plan": string | null,
   "implantLog": object[],
   "checklist": { "<key>": string | null, ... },
+  "speakers": { "S1": "clinician" | "patient" | "other", ... },
+  "speakerConfidence": "high" | "medium" | "low",
   "gaps": string[]
 }`;
 }
@@ -338,6 +369,19 @@ export function parseNote(raw) {
     }
     return out;
   });
+  // Speaker mapping is advisory: a model that omits it must not cost the note.
+  if (!parsed.speakers || typeof parsed.speakers !== 'object' || Array.isArray(parsed.speakers)) {
+    parsed.speakers = null;
+  } else {
+    const clean = {};
+    for (const [k, v] of Object.entries(parsed.speakers)) {
+      if (typeof k === 'string' && typeof v === 'string' && /^(clinician|patient|other)$/i.test(v)) clean[k] = v.toLowerCase();
+    }
+    parsed.speakers = Object.keys(clean).length ? clean : null;
+  }
+  parsed.speakerConfidence = /^(high|medium|low)$/i.test(parsed.speakerConfidence || '')
+    ? String(parsed.speakerConfidence).toLowerCase() : null;
+
   if (!('checklist' in parsed) || parsed.checklist === null) parsed.checklist = {};
   if (typeof parsed.checklist !== 'object' || Array.isArray(parsed.checklist)) throw new Error('checklist is not an object');
   if (!Array.isArray(parsed.gaps)) throw new Error('Missing or invalid gaps array');

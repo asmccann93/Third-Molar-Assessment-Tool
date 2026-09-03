@@ -314,6 +314,59 @@ async function testTranscribe() {
   const sys = buildSystemPrompt(null);
   ok('the system prompt forbids asserting sequence across a gap', /Never assert or imply a sequence across a gap/.test(sys));
 
+  // --- the medical model, and what happens when an account cannot use it ---
+  let sentCfgs = [];
+  calls = stubFetch(async (c, opts) => {
+    if (c.method === 'POST' && c.url.endsWith('/jobs')) {
+      const cfg = JSON.parse(opts.body.get('config'));
+      sentCfgs.push(cfg.transcription_config);
+      return { status: 201, body: { id: 'jobD' } };
+    }
+    if (c.method === 'GET' && c.url.endsWith('/jobs/jobD')) return { status: 200, body: { job: { status: 'done' } } };
+    if (c.method === 'GET' && c.url.includes('/transcript')) return { status: 200, body: TURNS_PAYLOAD };
+    if (c.method === 'DELETE') return { status: 200, body: {} };
+    return { status: 404, body: {} };
+  });
+  res = mockRes();
+  await handler(mockReq({ headers: { 'content-type': 'audio/ogg' }, body: OGG(5000) }), res);
+  ok('the medical domain model is requested', sentCfgs[0]?.domain === 'medical', JSON.stringify(sentCfgs[0]?.domain));
+  ok('alongside the enhanced model and the dental dictionary',
+    sentCfgs[0]?.model === 'enhanced' && Array.isArray(sentCfgs[0]?.additional_vocab) && sentCfgs[0].additional_vocab.length > 20,
+    `${sentCfgs[0]?.model} / ${sentCfgs[0]?.additional_vocab?.length} terms`);
+
+  sentCfgs = [];
+  let attempt = 0;
+  calls = stubFetch(async (c, opts) => {
+    if (c.method === 'POST' && c.url.endsWith('/jobs')) {
+      const cfg = JSON.parse(opts.body.get('config'));
+      sentCfgs.push(cfg.transcription_config);
+      attempt += 1;
+      if (attempt === 1) return { status: 400, body: { error: 'domain medical is not enabled for this account' } };
+      return { status: 201, body: { id: 'jobE' } };
+    }
+    if (c.method === 'GET' && c.url.endsWith('/jobs/jobE')) return { status: 200, body: { job: { status: 'done' } } };
+    if (c.method === 'GET' && c.url.includes('/transcript')) return { status: 200, body: TURNS_PAYLOAD };
+    if (c.method === 'DELETE') return { status: 200, body: {} };
+    return { status: 404, body: {} };
+  });
+  res = mockRes();
+  await handler(mockReq({ headers: { 'content-type': 'audio/ogg' }, body: OGG(5000) }), res);
+  ok('an account without the medical model does NOT lose the consultation', res.statusCode === 200, `${res.statusCode} ${res.body?.detail || ''}`);
+  ok('it retries once on the general model', sentCfgs.length === 2 && sentCfgs[0].domain === 'medical' && sentCfgs[1].domain === undefined,
+    JSON.stringify(sentCfgs.map((c) => c.domain)));
+  ok('keeping the dictionary and diarisation on the retry',
+    sentCfgs[1].additional_vocab?.length > 20 && sentCfgs[1].diarization === 'speaker');
+
+  // A failure that is nothing to do with the domain must not be retried away.
+  sentCfgs = [];
+  calls = stubFetch(async (c, opts) => {
+    if (c.method === 'POST' && c.url.endsWith('/jobs')) { sentCfgs.push(1); return { status: 400, body: { error: 'invalid audio file' } }; }
+    return { status: 404, body: {} };
+  });
+  res = mockRes();
+  await handler(mockReq({ headers: { 'content-type': 'audio/ogg' }, body: OGG(5000) }), res);
+  ok('an unrelated rejection is reported, not retried', sentCfgs.length === 1 && res.statusCode >= 400, `${sentCfgs.length} attempts, ${res.statusCode}`);
+
   const { config: fnConfig } = await import('../api/transcribe.mjs');
   ok('maxDuration fits the Hobby plan cap, so no invocation can be killed mid-poll', fnConfig?.maxDuration <= 60, String(fnConfig?.maxDuration));
 }
@@ -448,6 +501,32 @@ async function testExtract() {
   res = mockRes();
   await handler(mockReq({ body: { turns, pauses: 'not an array' } }), res);
   ok('a malformed pauses field is ignored, not fatal', res.statusCode === 200, `got ${res.statusCode}`);
+
+  // --- who is who: advisory, sanitised, and never fatal ---
+  const { parseNote: pn } = await import('../api/_prompt.mjs');
+  const bare = { ...goodNote };
+  ok('a clean speaker mapping survives',
+    JSON.stringify(pn(JSON.stringify({ ...bare, speakers: { S1: 'clinician', S2: 'PATIENT' }, speakerConfidence: 'HIGH' })).speakers)
+      === '{"S1":"clinician","S2":"patient"}');
+  ok('confidence is normalised', pn(JSON.stringify({ ...bare, speakerConfidence: 'HIGH' })).speakerConfidence === 'high');
+  ok('an invented role is discarded rather than shown to the clinician',
+    pn(JSON.stringify({ ...bare, speakers: { S1: 'dentist' } })).speakers === null);
+  ok('a mapping of the wrong shape is discarded', pn(JSON.stringify({ ...bare, speakers: ['S1'] })).speakers === null);
+  ok('and a model that omits it entirely still yields a note',
+    pn(JSON.stringify(bare)).speakers === null && pn(JSON.stringify(bare)).speakerConfidence === null);
+
+  // --- length reaches the prompt ---
+  let sysSent = null;
+  stubFetch(async (c, opts) => { sysSent = JSON.parse(opts.body).system; return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', length: 'brief' } }), res);
+  ok('a brief note is asked for briefly', /BRIEF\./.test(sysSent || ''), (sysSent || '').slice(0, 80));
+  stubFetch(async (c, opts) => { sysSent = JSON.parse(opts.body).system; return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', length: 'nonsense' } }), res);
+  ok('an unrecognised length falls back to standard rather than failing',
+    res.statusCode === 200 && /STANDARD\./.test(sysSent || ''));
+  ok('and length never relaxes the rules', /Length changes how much you write, never what you are allowed to write/.test(sysSent || ''));
 
   // consultType comes from the client. An inherited property name used to reach
   // Object.prototype and throw before the model was called, losing the note.

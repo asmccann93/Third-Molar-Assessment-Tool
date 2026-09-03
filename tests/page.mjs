@@ -750,6 +750,74 @@ async function testDerivedAndDictation() {
   ok('Clear removes the summary and consent text too', $(doc, 'summary-box').classList.contains('hidden') && $(doc, 'summary-text').textContent === '' && $(doc, 'consent-text').textContent === '');
 }
 
+async function testEditingAndLength() {
+  section('Editing the draft in place, and choosing how much is written');
+  let sent = [];
+  const note = () => ({
+    reasonForAttendance: 'Pain from LL8.', medicalHistory: null, proposed: 'Surgical removal.',
+    alternatives: null, risks: 'Numbness of lip and chin.', benefits: null, costs: null,
+    patientQuestions: null, patientFactors: null, informationGiven: null,
+    decision: 'Proceed.', nextStep: 'Book 40 minutes.', gaps: ['Costs not discussed'], notSaid: [],
+    speakers: { S1: 'clinician', S2: 'patient' }, speakerConfidence: 'low'
+  });
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) { sent.push(JSON.parse(opts.body)); return { ok: true, status: 200, json: async () => ({ status: 'done', note: note() }) }; }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+
+  ok('the first draft asks for standard detail', sent[0]?.length === 'standard', JSON.stringify(sent[0]?.length));
+
+  // --- 5. speaker mapping is surfaced, and low confidence is not hidden ---
+  const banner = doc.getElementById('speaker-map');
+  ok('the speaker mapping is shown so a swap is visible', !!banner && /S1 = clinician/.test(banner.textContent), banner && banner.textContent);
+  ok('and low confidence is stated plainly', !!banner && /low/.test(banner.textContent), banner && banner.textContent);
+
+  // --- 2. editing in place writes back to the note that gets copied ---
+  const pres = [...$(doc, 'fields').querySelectorAll('.field pre')];
+  const risks = pres.find((p) => p.getAttribute('aria-label') === 'Material risks named, per option');
+  ok('fields are editable in the app', !!risks && risks.getAttribute('contenteditable') === 'true');
+  risks.textContent = 'Numbness of lip and chin, temporary or permanent. Lingual nerve.';
+  risks.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(30);
+  ok('the edit is marked', risks.closest('.field').classList.contains('edited'));
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  click($(doc, 'copy-all'));
+  await tick(40);
+  ok('and the copied note carries the edit, not the model output', /Lingual nerve\./.test(copied), copied.slice(0, 300));
+
+  // Emptying a field turns it back into a gap rather than pasting blank text.
+  const costs = pres.find((p) => p.getAttribute('aria-label') === 'Costs discussed');
+  ok('an uncaptured field starts empty with a placeholder', costs.textContent === '' && costs.dataset.placeholder === 'Not captured');
+  costs.textContent = '£280 quoted.';
+  costs.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(20);
+  click($(doc, 'copy-all'));
+  await tick(40);
+  ok('filling a gap in the app puts it in the record', /Costs discussed[\s\S]*£280 quoted\./.test(copied), copied.slice(0, 400));
+
+  // --- 4. length control redrafts from the transcript already held ---
+  const full = [...doc.querySelectorAll('.length-picker button')].find((b) => b.dataset.length === 'full');
+  win.confirm = () => true;   // edits exist, so it asks first
+  click(full);
+  await tick(300);
+  ok('choosing Full redrafts', sent.length === 2 && sent[1].length === 'full', JSON.stringify(sent.map((x) => x.length)));
+  ok('from the transcript already held, with no new recording', sent[1].turns.length === DEFAULT_TURNS.length);
+  ok('and the button reflects the choice', full.classList.contains('on'));
+  ok('the draft is shown again', !$(doc, 'draft').classList.contains('hidden'));
+}
+
 async function testNotSaidPanel() {
   section('Checklist findings are kept apart from model gaps');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -1003,6 +1071,7 @@ await testFormatAndSize();
 await testPauseResume();
 await testDerivedAndDictation();
 await testNotSaidPanel();
+await testEditingAndLength();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
