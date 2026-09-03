@@ -148,10 +148,16 @@ export const CHECKLISTS = {
   },
 };
 
-/** Keys the model must report against for a given consult type; [] if none. */
+/** Keys the model must report against for a given consult type; [] if none.
+ *  Own-property lookup only: consultType arrives from the client, and a value
+ *  like "constructor" or "__proto__" would otherwise return something off
+ *  Object.prototype, whose .items is undefined — which threw and lost the
+ *  whole consultation before the model was ever called. */
 export function checklistFor(consultTypeKey) {
+  if (typeof consultTypeKey !== 'string') return [];
+  if (!Object.prototype.hasOwnProperty.call(CHECKLISTS, consultTypeKey)) return [];
   const c = CHECKLISTS[consultTypeKey];
-  return c ? c.items : [];
+  return Array.isArray(c?.items) ? c.items : [];
 }
 
 /**

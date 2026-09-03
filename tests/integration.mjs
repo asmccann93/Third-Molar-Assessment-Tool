@@ -448,6 +448,21 @@ async function testExtract() {
   res = mockRes();
   await handler(mockReq({ body: { turns, pauses: 'not an array' } }), res);
   ok('a malformed pauses field is ignored, not fatal', res.statusCode === 200, `got ${res.statusCode}`);
+
+  // consultType comes from the client. An inherited property name used to reach
+  // Object.prototype and throw before the model was called, losing the note.
+  for (const bad of ['constructor', '__proto__', 'toString']) {
+    bedrockReturning(JSON.stringify(goodNote));
+    res = mockRes();
+    await handler(mockReq({ body: { turns, consultType: bad } }), res);
+    ok(`consultType "${bad}" does not destroy the draft`, res.statusCode === 200, `got ${res.statusCode} ${res.body?.detail || ''}`);
+  }
+  bedrockReturning(JSON.stringify(goodNote));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'not-a-real-type' } }), res);
+  ok('an unknown consult type is simply treated as having no checklist',
+    res.statusCode === 200 && res.body?.note?.notSaid?.length === 0, `${res.statusCode} ${JSON.stringify(res.body?.note?.notSaid)}`);
+
   ok('signed request went to eu-west-2 bedrock', calls[0]?.url.includes('bedrock-runtime.eu-west-2.amazonaws.com'), calls[0]?.url);
 
   // The path must carry the model id verbatim. Percent-encoding the colon signs

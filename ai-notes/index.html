@@ -532,6 +532,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     ENCODER_READY_MS: 8000,          // wasm compile + worklet load, before refusing to start
     ENCODER_DONE_MS:  15000,         // final flush at stop; pages so far are kept if it lapses
     STALL_MS:      8000,             // no encoded page for this long -> warn
+    SUMMARY_TIMEOUT_MS: 60000,       // patient summary request; frees the button
 
     MAX_BYTES:     4.2 * 1024 * 1024,
     SILENCE_MS:    6000,             // no sound for this long -> warn
@@ -1632,10 +1633,13 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     btn.disabled = true;
     btn.textContent = 'Drafting\u2026';
     var gen = S.gen;
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, CFG.SUMMARY_TIMEOUT_MS);
     try {
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: ctrl ? ctrl.signal : undefined,
         body: JSON.stringify({ kind: 'summary', turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [],
                                dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
       });
@@ -1650,6 +1654,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       $('summary-text').textContent = 'Could not draft the summary: ' + String(err && err.message || err);
       $('summary-box').classList.remove('hidden');
     } finally {
+      clearTimeout(timer);
       if (gen === S.gen) { btn.disabled = false; btn.textContent = 'Patient summary'; }
     }
   });
@@ -1857,7 +1862,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       e.returnValue = '';
       return '';
     }
-    if (S.note || S.busy) {
+    if (S.note || S.busy || S.turns) {
       e.preventDefault();
       e.returnValue = '';
       return '';

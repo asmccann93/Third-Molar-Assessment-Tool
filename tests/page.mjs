@@ -750,6 +750,15 @@ async function testNotSaidPanel() {
   ok('the model gap is still shown', gaps.includes('Costs were not discussed'));
   ok('the panel is visible', !$(doc, 'notsaid').classList.contains('hidden'));
 
+  // A transcribed consultation must not be closable without a warning, whether
+  // or not a note was drafted from it. The retry path holds a transcript with
+  // no note, and that was silently closable.
+  const src2 = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
+  ok('closing the tab warns while a transcript is held, note or no note',
+    /if \(S\.note \|\| S\.busy \|\| S\.turns\) \{/.test(src2));
+  ok('and the patient-summary request cannot hang the button for ever',
+    /SUMMARY_TIMEOUT_MS/.test(src2) && /ctrl\.abort\(\)/.test(src2));
+
   click($(doc, 'clear'));
   await tick(30);
   ok('Clear empties the not-said panel too', $(doc, 'notsaid-list').children.length === 0 && $(doc, 'notsaid').classList.contains('hidden'));

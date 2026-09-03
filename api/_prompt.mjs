@@ -123,8 +123,14 @@ export const IMPLANT_LOG_FIELDS = ['site', 'system', 'diameter', 'length', 'lot'
  * System prompt
  * ------------------------------------------------------------------ */
 
+function consultType(key) {
+  if (typeof key !== 'string') return null;
+  if (!Object.prototype.hasOwnProperty.call(CONSULT_TYPES, key)) return null;
+  return CONSULT_TYPES[key];
+}
+
 export function buildSystemPrompt(consultTypeKey) {
-  const type = CONSULT_TYPES[consultTypeKey];
+  const type = consultType(consultTypeKey);
   const checklist = checklistSection(consultTypeKey);
 
   return `You extract a draft clinical note from a transcript of a dental consultation. A UK dentist will read your draft, correct it, and paste it into the patient's record.
@@ -360,7 +366,7 @@ export const SUMMARY_FIELDS = [
 ];
 
 export function buildSummarySystemPrompt(consultTypeKey) {
-  const type = CONSULT_TYPES[consultTypeKey];
+  const type = consultType(consultTypeKey);
   return `You write a short plain-English summary of a dental consultation FOR THE PATIENT to take home. A UK dentist will read it, correct it, and give or send it to the patient.
 
 Write in the second person, to the patient ("you", "your tooth"). Warm, plain, no jargon: if a clinical term was used in the room and explained, use the explanation; if it was not explained, keep the term and do not explain it yourself.
