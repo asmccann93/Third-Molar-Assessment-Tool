@@ -50,6 +50,10 @@ function assess(note, expect) {
   const g = (note.gaps || []).length;
   if (expect.gapsAtMost != null && g > expect.gapsAtMost) bad.push('too many gaps');
   if (expect.gapsAtLeast != null && g < expect.gapsAtLeast) bad.push('too few gaps');
+  const notSaid = (note.notSaid || []).map(norm).join(' \n ');
+  for (const n of expect.notSaidMustMatch || []) if (!notSaid.includes(n.toLowerCase())) bad.push(`nothing in notSaid mentions "${n}"`);
+  for (const n of expect.notSaidMustNotMatch || []) if (notSaid.includes(n.toLowerCase())) bad.push(`notSaid wrongly flags "${n}"`);
+  if (expect.checklistMustApply && (note.notSaid || []).some((t) => /could not be applied/i.test(t))) bad.push('checklist not applied');
   return bad;
 }
 
@@ -108,6 +112,24 @@ const undecided = fixtures.find((f) => f.id === 'undecided-with-partner');
 t('a fabricated decision is caught',
   assess({ ...empty(), decision: 'Patient consented to the implant.', gaps: [] }, undecided.expect)
     .some((f) => f.includes('consented to')));
+
+/* ---------- checklist assertions ---------- */
+// The checklist is the most safety-relevant thing the prompt does, and until
+// now the only harness that runs against the real model ignored it entirely.
+
+t('a checklist finding that is present satisfies notSaidMustMatch',
+  assess({ ...empty(), gaps: [], notSaid: ['Not mentioned: bleeding.'] }, { notSaidMustMatch: ['bleeding'] }).length === 0);
+t('a missing checklist finding is caught',
+  assess({ ...empty(), gaps: [], notSaid: [] }, { notSaidMustMatch: ['bleeding'] }).length === 1);
+t('a risk wrongly flagged as unsaid is caught',
+  assess({ ...empty(), gaps: [], notSaid: ['Not mentioned: bleeding.'] }, { notSaidMustNotMatch: ['bleeding'] }).length === 1);
+t('a model that ignored the checklist is caught',
+  assess({ ...empty(), gaps: [], notSaid: ['The procedure checklist could not be applied to this transcript.'] },
+    { checklistMustApply: true }).length === 1);
+t('and a model that applied it passes',
+  assess({ ...empty(), gaps: [], notSaid: ['Not mentioned: bleeding.'] }, { checklistMustApply: true }).length === 0);
+t('the pasteable evaluator carries the same checklist logic',
+  readFileSync(join(here, 'prompt-eval.template.js'), 'utf8').includes('notSaidMustMatch'));
 
 /* ---------- generated file sanity ---------- */
 console.log('\ngenerated paste file\n--------------------');

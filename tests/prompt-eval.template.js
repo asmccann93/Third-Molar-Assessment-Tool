@@ -38,6 +38,19 @@
       }
     }
 
+    // Checklist findings arrive separately from model gaps and mean the
+    // opposite thing: "you did not say this", not "I could not find it".
+    const notSaid = (note.notSaid || []).map(norm).join(' \n ');
+    for (const n of expect.notSaidMustMatch || []) {
+      if (!notSaid.includes(n.toLowerCase())) bad.push(`nothing in notSaid mentions "${n}"`);
+    }
+    for (const n of expect.notSaidMustNotMatch || []) {
+      if (notSaid.includes(n.toLowerCase())) bad.push(`notSaid wrongly flags "${n}" as unsaid`);
+    }
+    if (expect.checklistMustApply && (note.notSaid || []).some((t) => /could not be applied/i.test(t))) {
+      bad.push('the model did not report against the checklist at all');
+    }
+
     for (const [field, needles] of Object.entries(expect.mustMention || {})) {
       for (const n of needles) {
         if (!norm(note[field]).includes(n.toLowerCase())) bad.push(`${field} does not mention "${n}"`);
