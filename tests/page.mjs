@@ -441,9 +441,11 @@ async function testGaps() {
   ok('gap box is styled as needing action', !$(doc, 'gaps').classList.contains('clear'));
   ok('empty fields show as not captured',
     [...$(doc, 'fields').children].filter((f) => f.classList.contains('is-gap')).length === 2);
-  ok('gap fields offer no copy button',
+  // The button is present on every field now that a gap can be filled by
+  // editing, but copies nothing while the field is empty.
+  ok('gap fields have a copy button that does nothing while empty',
     [...$(doc, 'fields').children].filter((f) => f.classList.contains('is-gap'))
-      .every((f) => !f.querySelector('.copy')));
+      .every((f) => !!f.querySelector('.copy')));
 
   ok('gap wording tells you what to do',
     /Add them from memory/i.test($(doc, 'gaps-lead').textContent),
@@ -753,6 +755,7 @@ async function testDerivedAndDictation() {
 async function testEditingAndLength() {
   section('Editing the draft in place, and choosing how much is written');
   let sent = [];
+  let extractFails = false;
   const note = () => ({
     reasonForAttendance: 'Pain from LL8.', medicalHistory: null, proposed: 'Surgical removal.',
     alternatives: null, risks: 'Numbness of lip and chin.', benefits: null, costs: null,
@@ -763,7 +766,11 @@ async function testEditingAndLength() {
   const ctx = await boot({
     onFetch: async (entry, opts) => {
       if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
-      if (entry.url.includes('/api/extract')) { sent.push(JSON.parse(opts.body)); return { ok: true, status: 200, json: async () => ({ status: 'done', note: note() }) }; }
+      if (entry.url.includes('/api/extract')) {
+        sent.push(JSON.parse(opts.body));
+        if (extractFails) return { ok: false, status: 502, json: async () => ({ error: 'model_unavailable', detail: 'Bedrock hiccup' }) };
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note: note() }) };
+      }
     }
   });
   const { doc, win } = ctx;
@@ -807,6 +814,21 @@ async function testEditingAndLength() {
   await tick(40);
   ok('filling a gap in the app puts it in the record', /Costs discussed[\s\S]*£280 quoted\./.test(copied), copied.slice(0, 400));
 
+  // The field's own Copy button must agree with Copy whole note. It used to
+  // capture the value at render time and so served the pre-edit text.
+  copied = '';
+  const risksCopy = risks.closest('.field').querySelector('.copy');
+  click(risksCopy);
+  await tick(30);
+  ok('a field\'s own Copy button reflects the edit, not the model output',
+    /Lingual nerve\./.test(copied), copied);
+  copied = '';
+  const costsField = costs.closest('.field');
+  click(costsField.querySelector('.copy'));
+  await tick(30);
+  ok('and a field filled in from empty can be copied on its own',
+    /£280 quoted\./.test(copied), copied);
+
   // --- 4. length control redrafts from the transcript already held ---
   const full = [...doc.querySelectorAll('.length-picker button')].find((b) => b.dataset.length === 'full');
   win.confirm = () => true;   // edits exist, so it asks first
@@ -816,6 +838,23 @@ async function testEditingAndLength() {
   ok('from the transcript already held, with no new recording', sent[1].turns.length === DEFAULT_TURNS.length);
   ok('and the button reflects the choice', full.classList.contains('on'));
   ok('the draft is shown again', !$(doc, 'draft').classList.contains('hidden'));
+
+  // A redraft that fails must not throw away a good note.
+  const brief = [...doc.querySelectorAll('.length-picker button')].find((b) => b.dataset.length === 'brief');
+  extractFails = true;
+  click(brief);
+  await tick(300);
+  ok('a failed redraft keeps the note on screen', !$(doc, 'draft').classList.contains('hidden'));
+  ok('and says the note is unchanged rather than sending you back to the start',
+    /unchanged/.test($(doc, 'error-body').textContent), $(doc, 'error-body').textContent);
+  ok('the note itself is still there', /Surgical removal\./.test($(doc, 'fields').textContent) &&
+    /Numbness of lip and chin\./.test($(doc, 'fields').textContent), $(doc, 'fields').textContent.slice(0, 120));
+  ok('and the failed length is not left showing as selected',
+    !brief.classList.contains('on') && [...doc.querySelectorAll('.length-picker button')].some((b) => b.classList.contains('on')),
+    [...doc.querySelectorAll('.length-picker button')].filter((b) => b.classList.contains('on')).map((b) => b.dataset.length).join());
+
+  ok('pasting into a field is forced to plain text',
+    /addEventListener\('paste'/.test(readFileSync(join(here, '../ai-notes/index.html'), 'utf8')));
 }
 
 async function testNotSaidPanel() {

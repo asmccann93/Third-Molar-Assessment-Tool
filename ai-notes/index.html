@@ -1411,16 +1411,26 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       }
       S.note = data.note;
     } catch (err) {
-      if (!live()) return;
+      if (!live()) return false;
       S.busy = false;
+      if (S.note) {
+        // A redraft failed. The previous note is still on screen and still
+        // correct; keep it rather than sending them back to the start.
+        show('draft');
+        fail('Could not rewrite the note',
+          String(err.message || err) +
+          '  \u2014  The note below is unchanged. Try a different length, or carry on with this one.');
+        return false;
+      }
       show('setup');
-      return fail('Could not draft the note',
+      fail('Could not draft the note',
         String(err.message || err) +
         '  \u2014  The recording has been transcribed and is still held in memory, so this can be retried without recording again.',
         true);
+      return false;
     }
 
-    if (!live()) { S.note = null; return; }
+    if (!live()) { S.note = null; return false; }
     // HELD, not discarded. The patient summary is drafted from this same
     // transcript on demand, so it has to outlive the note request. Its lifetime
     // is now exactly the draft's: Clear, Lock, tab close and the idle timer all
@@ -1431,6 +1441,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     render(S.note);
     show('draft');
     resetIdle();
+    return true;
   }
 
   $('retry').addEventListener('click', function () {
@@ -1600,16 +1611,19 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
           head.appendChild(dtag);
         }
 
-        if (!isGap) {
-          var copy = document.createElement('button');
-          copy.type = 'button';
-          copy.className = 'copy';
-          copy.textContent = 'Copy';
-          copy.addEventListener('click', function () {
-            writeClipboard(heading + (isDictated ? ' (dictated)' : '') + '\n' + String(value).trim(), copy);
-          });
-          head.appendChild(copy);
-        }
+        // Always present, and always reading the CURRENT value. It used to be
+        // added only for non-empty fields and to capture the value at render
+        // time, so a field you had just edited copied its pre-edit text while
+        // "Copy whole note" copied the edit. Two buttons, two different answers.
+        var copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'copy';
+        copy.textContent = 'Copy';
+        copy.addEventListener('click', function () {
+          if (!hasText(S.note[key])) return;
+          writeClipboard(heading + (isDictated ? ' (dictated)' : '') + '\n' + String(S.note[key]).trim(), copy);
+        });
+        head.appendChild(copy);
 
         // Editable in place. The clinician has to correct the draft before it
         // enters the record anyway; making them do it after pasting means the
@@ -1623,6 +1637,13 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         pre.setAttribute('aria-label', heading);
         pre.dataset.placeholder = 'Not captured';
         if (isGap) pre.classList.add('is-empty');
+        pre.addEventListener('paste', function (e) {
+          // Plain text only. Pasting from a PMS or a browser otherwise drops
+          // markup into a clinical field.
+          e.preventDefault();
+          var text = (e.clipboardData || window.clipboardData).getData('text/plain');
+          document.execCommand('insertText', false, text);
+        });
         pre.addEventListener('input', function () {
           var text = pre.textContent.trim();
           S.note[key] = text === '' ? null : text;
@@ -1772,13 +1793,21 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       if (S.edited && !confirm('Redrafting replaces the note, including your edits. Continue?')) return;
 
       var prev = S.noteLength;
+      var prevEdited = S.edited;
       S.noteLength = want;
       setLengthButtons(true);
+      var ok = false;
       try {
-        S.edited = false;       // the redraft supersedes any edits
-        await draft(S.gen);     // same path as the first draft; transcript unchanged
+        S.edited = false;       // a successful redraft supersedes any edits
+        ok = await draft(S.gen);  // same path as the first draft; transcript unchanged
       } catch (err) {
+        ok = false;
+      }
+      if (!ok) {
+        // Nothing was replaced, so the note on screen is still the old one.
+        // Leaving the button on the new length would misdescribe it.
         S.noteLength = prev;
+        S.edited = prevEdited;
       }
       setLengthButtons(false);
     });
