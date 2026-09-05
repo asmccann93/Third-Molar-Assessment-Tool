@@ -1241,6 +1241,66 @@ async function testNewRecordingDropsThePreviousPatient() {
     `referral=${referralCalls} summary=${summaryCalls}`);
 }
 
+/**
+ * The worst failure this tool has available: showing one patient's note during
+ * another patient's appointment. The redraft branch in draft() treats a
+ * surviving S.note as "the current note, unchanged" and invites the clinician
+ * to carry on with it. That is right for a redraft and catastrophic if S.note
+ * belongs to the previous patient.
+ */
+async function testFailedDraftNeverShowsThePreviousPatientsNote() {
+  section("A failed draft never shows the previous patient's note");
+  const noteA = { reasonForAttendance: 'PATIENT A: pain from lower left eight.', medicalHistory: null,
+    proposed: 'Surgical removal of LL8.', alternatives: null, risks: null, benefits: null, costs: null,
+    patientQuestions: null, patientFactors: null, informationGiven: null, decision: 'Proceed.', nextStep: null,
+    examination: null, radiographicFindings: null, plan: null, gaps: [] };
+  let extractCalls = 0;
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        extractCalls++;
+        if (extractCalls === 1) return { ok: true, status: 200, json: async () => ({ status: 'done', note: noteA }) };
+        return { ok: false, status: 502, json: async () => ({ error: 'Bedrock unavailable' }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  const record = async () => {
+    click($(doc, 'start'));
+    await tick(60);
+    click($(doc, 'stop'));
+    await tick(300);
+  };
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+
+  await record();
+  ok('patient A gets a note', /PATIENT A/.test($(doc, 'fields').textContent));
+
+  // Patient B. Their draft fails.
+  await record();
+  await tick(200);
+  const onScreen = $(doc, 'fields').textContent;
+  const draftShown = !$(doc, 'draft').classList.contains('hidden');
+  ok("patient A's note is NOT on screen after patient B's draft fails",
+    !/PATIENT A/.test(onScreen), onScreen.slice(0, 160));
+  ok('and the draft view is not presented as if it were theirs',
+    !(draftShown && /PATIENT A/.test(onScreen)));
+
+  // Clearing the rendered DOM alone would satisfy the two above, so this is the
+  // assertion that pins S.note itself: draft() picks its branch on S.note, and
+  // the two branches say different things. "rewrite" means it thought this was a
+  // redraft of a note that is still valid — i.e. the previous patient's.
+  const title = $(doc, 'error-title').textContent;
+  ok('the failure is reported as a first draft, not as a failed rewrite',
+    /Could not draft the note/.test(title) && !/rewrite/i.test(title), title);
+  ok('and it offers a retry rather than inviting them to carry on with what is on screen',
+    !$(doc, 'error-actions').classList.contains('hidden'));
+}
+
 async function testPauseResume() {
   section('Pause and resume — the examination is not recorded, and the note knows it');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -1446,6 +1506,7 @@ await testDerivedAndDictation();
 await testSummaryFailureIsNotCopyable();
 await testReferral();
 await testNewRecordingDropsThePreviousPatient();
+await testFailedDraftNeverShowsThePreviousPatientsNote();
 await testNotSaidPanel();
 await testEditingAndLength();
 await testStyles();

@@ -688,7 +688,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-06.2';
+  var BUILD = '2026-09-06.3';
 
   var CFG = {
     MAX_MS:        30 * 60 * 1000,   // hard cap; auto-stops. Raised from 25 on
@@ -1239,6 +1239,21 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     // summary object. Clearing the boxes on screen is not enough: whatever is
     // left in S survives into the next consultation, and the "already drafted"
     // guards then refuse to draft for the new patient and show an empty panel.
+    //
+    // The note and the transcript go too, and they matter more. draft() treats a
+    // surviving S.note as "a redraft failed, the note below is unchanged, carry
+    // on with it" — which is right for a redraft and catastrophic when S.note
+    // belongs to the PREVIOUS patient. Same for S.turns and the retry button.
+    // A new recording means the last consultation is over.
+    S.note = null;
+    S.turns = null;
+    // And the rendered note itself. Nulling S.note stops the logic reaching for
+    // it; this stops the previous patient's text sitting in the DOM through the
+    // next consultation, hidden but present.
+    $('fields').textContent = '';
+    $('gaps-list').textContent = '';
+    $('notsaid-list').textContent = '';
+    $('notsaid').classList.add('hidden');
     S.summary = null;
     S.summaryText = null;
     S.summaryEdited = false;
