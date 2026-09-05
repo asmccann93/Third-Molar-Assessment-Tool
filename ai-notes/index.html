@@ -647,7 +647,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-03.4';
+  var BUILD = '2026-09-05.1';
 
   var CFG = {
     MAX_MS:        30 * 60 * 1000,   // hard cap; auto-stops. Raised from 25 on
@@ -2083,9 +2083,12 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   $('copy-summary').addEventListener('click', function () {
     // Copy what is on screen, which may have been corrected, not what the
-    // model first produced.
+    // model first produced. S.summary is the guard: when a draft fails, the
+    // error text is written into this same editable box, and without the check
+    // "Could not draft the summary: ..." would be copied out as if it were the
+    // summary. It is the one document that physically leaves with the patient.
     var text = $('summary-text').textContent.trim();
-    if (!text) return;
+    if (!S.summary || !text) return;
     writeClipboard(text, $('copy-summary'));
   });
 

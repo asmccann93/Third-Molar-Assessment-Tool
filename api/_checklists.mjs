@@ -5,9 +5,15 @@
  * Deploy to: api/_checklists.mjs   (underscore keeps it off Vercel's route table)
  *
  * THIS IS CLINICAL CONTENT. It was drafted by the assistant on 2 September 2026
- * for the clinician to correct, and should be read as a first draft until he
- * has. Nothing here is advice to the patient and nothing here ever reaches the
- * note as a fact. Each item is a question the tool asks of the transcript:
+ * for the clinician to correct.
+ *
+ *   third-molar         reviewed by AM, 5 September 2026
+ *   all other types     STILL A FIRST DRAFT — not yet reviewed
+ *
+ * For an unreviewed type, "no gaps flagged" means "nothing the draft list
+ * looked for was missing", not a clinical all-clear. Nothing here is advice to
+ * the patient and nothing here ever reaches the note as a fact. Each item is a
+ * question the tool asks of the transcript:
  * "was this said?" If it was not, the item becomes a gap in the clinician's
  * own words below — the model never supplies the missing content itself.
  *
@@ -74,6 +80,7 @@ export const CHECKLISTS = {
       { key: 'trismus',        ask: 'The clinician mentioned limited mouth opening (trismus) afterwards.', gap: 'Not mentioned: limited mouth opening afterwards.' },
       { key: 'ian',            ask: 'The clinician named the risk of altered sensation, numbness or tingling of the lip and chin (inferior alveolar nerve), and whether it can be temporary or permanent.', gap: 'Not mentioned: altered sensation of the lip and chin (inferior alveolar nerve), temporary or permanent.' },
       { key: 'lingual',        ask: 'The clinician named the risk of altered sensation or taste on the tongue (lingual nerve).', gap: 'Not mentioned: altered sensation or taste on the tongue (lingual nerve).' },
+      { key: 'sinus',          ask: 'For an UPPER third molar, the clinician mentioned the maxillary sinus — an opening into it (oro-antral communication), or a root displaced into it. Report this as found if the tooth in question is a lower, where it does not apply.', gap: 'Not mentioned, for an upper tooth: the sinus, an opening into it, or a root displaced into it.' },
       { key: 'adjacent',       ask: 'The clinician mentioned possible damage to the adjacent tooth or its restoration.', gap: 'Not mentioned: damage to the adjacent tooth or filling.' },
       { key: 'root-fragment',  ask: 'The clinician mentioned that a root fragment may fracture and be left, or that removal may be incomplete or need referral.', gap: 'Not mentioned: possible root fracture, retained fragment, or need for referral.' },
       // alternatives the clinician should have OFFERED
@@ -83,7 +90,10 @@ export const CHECKLISTS = {
       // aftercare
       { key: 'aftercare',      ask: 'Post-operative instructions were given or promised in writing, including analgesia and when to seek help.', gap: 'Not mentioned: post-operative instructions, analgesia, or when to seek help.' },
       { key: 'time-off',       ask: 'Time off work or normal activities afterwards was discussed.', gap: 'Not mentioned: time off work or normal activities.' },
-      MH.anticoagulants, MH.antiresorptives, MH.smoking, MH.bleeding, MH.allergies,
+      // No medical-history items here. Reviewed by AM, 5 September 2026: the
+      // history is taken and recorded before the consent discussion begins, so
+      // checking the consent transcript for it flagged omissions that were not
+      // omissions. The other consult types still carry the MH items they need.
     ]
   },
 
@@ -162,10 +172,10 @@ export function checklistFor(consultTypeKey) {
 
 /**
  * Did the model actually report against the checklist at all? An empty or
- * unrecognisable report is a MODEL failure, not evidence that eighteen things
- * went unsaid. Emitting eighteen false "not mentioned" lines would be worse
- * than emitting none: the clinician learns the gap list cries wolf, and stops
- * reading the one that matters.
+ * unrecognisable report is a MODEL failure, not evidence that every item on the
+ * list went unsaid. Emitting a false "not mentioned" line for each of them would
+ * be worse than emitting none: the clinician learns the gap list cries wolf, and
+ * stops reading the one that matters.
  */
 export function checklistReported(consultTypeKey, report) {
   const items = checklistFor(consultTypeKey);

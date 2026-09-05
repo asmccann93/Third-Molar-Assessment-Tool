@@ -1041,6 +1041,56 @@ async function testNotSaidPanel() {
   ok('Clear empties the not-said panel too', $(doc, 'notsaid-list').children.length === 0 && $(doc, 'notsaid').classList.contains('hidden'));
 }
 
+/**
+ * The patient summary is the only document that physically leaves with the
+ * patient. When the draft fails, the error is written into the same editable
+ * box the summary renders into, and the box is un-hidden — so the Copy button
+ * sits there with "Could not draft the summary: ..." in it. Copying that out
+ * and handing it over is the worst single failure this tool has available.
+ */
+async function testSummaryFailureIsNotCopyable() {
+  section('A failed patient summary cannot be copied out as a summary');
+  const note = { reasonForAttendance: 'Pain from lower left eight.', medicalHistory: null, proposed: 'Surgical removal of LL8.',
+    alternatives: null, risks: null, benefits: null, costs: null, patientQuestions: null, patientFactors: null,
+    informationGiven: null, decision: 'Proceed.', nextStep: null, examination: null, radiographicFindings: null,
+    plan: null, gaps: [] };
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind === 'summary') return { ok: false, status: 502, json: async () => ({ error: 'Bedrock unavailable' }) };
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+
+  click($(doc, 'make-summary'));
+  await tick(120);
+  const smEl = $(doc, 'summary-text');
+  ok('a failed summary says so on screen', /Could not draft the summary/.test(smEl.textContent), smEl.textContent.slice(0, 120));
+  ok('and the box is shown, so the Copy button is reachable', !$(doc, 'summary-box').classList.contains('hidden'));
+
+  let copied = null;
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  click($(doc, 'copy-summary'));
+  await tick(40);
+  ok('but copying it copies NOTHING, rather than handing the error to the patient',
+    copied === null, String(copied).slice(0, 120));
+
+  // And the guard must not break the normal path it protects.
+  ok('the failure leaves no summary behind to copy later', !/What we discussed/.test(smEl.textContent));
+}
+
 async function testPauseResume() {
   section('Pause and resume — the examination is not recorded, and the note knows it');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -1243,6 +1293,7 @@ await testDraftRetry();
 await testFormatAndSize();
 await testPauseResume();
 await testDerivedAndDictation();
+await testSummaryFailureIsNotCopyable();
 await testNotSaidPanel();
 await testEditingAndLength();
 await testStyles();
