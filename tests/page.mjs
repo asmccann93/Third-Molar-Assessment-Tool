@@ -884,6 +884,16 @@ async function testStyles() {
 
   // Hover never fires on a touch screen.
   ok('Lock has a pressed state, not only a hover state', /#lock:active/.test(css));
+
+  // show() focuses the panel that just appeared so keyboard and screen-reader
+  // focus follows the view. Because the containers carry tabindex="-1", the
+  // generic focus-visible rule was drawing a 2px box around the whole panel on
+  // every view change. They are not tab stops, so the ring is pure noise — but
+  // the focus MOVE must survive, or the accessibility fix is undone.
+  ok('the view containers do not draw a focus ring around the whole panel',
+    /#setup:focus,\s*#recording:focus,\s*#working:focus,\s*#draft:focus \{ outline: none; \}/.test(css));
+  ok('and the focus move itself is still there',
+    /el\.focus\(\{ preventScroll: true \}\)/.test(src));
 }
 
 async function testEditingAndLength() {

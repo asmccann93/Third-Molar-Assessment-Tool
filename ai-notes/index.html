@@ -110,6 +110,14 @@ button:disabled { opacity: .45; cursor: default; }
   outline-offset: 2px;
 }
 
+/* The four view containers carry tabindex="-1" only so show() can move focus to
+   whichever panel just appeared — keyboard and screen-reader focus follows the
+   view instead of being stranded on a button that is now hidden. They are not
+   tab stops and nobody can reach them by tabbing, so the rule above was drawing
+   a 2px box around a whole panel on every view change for no one's benefit.
+   The focus move stays; only the ring goes. */
+#setup:focus, #recording:focus, #working:focus, #draft:focus { outline: none; }
+
 /* ===================================================================
    PRINT
    The draft and the patient summary are the only things worth putting on
@@ -647,7 +655,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-05.1';
+  var BUILD = '2026-09-05.2';
 
   var CFG = {
     MAX_MS:        30 * 60 * 1000,   // hard cap; auto-stops. Raised from 25 on
