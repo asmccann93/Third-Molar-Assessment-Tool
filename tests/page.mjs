@@ -788,7 +788,7 @@ async function testPolish() {
   // 2. print
   ok('there is a print stylesheet', /@media print \{[\s\S]*?\.card \{ border: none/.test(src));
   ok('controls and screen-only notes are hidden on paper',
-    /#ask-box \{ display: none !important; \}/.test(src) && /\.storage-note,/.test(src));
+    /#ask-box, #referral-box \{ display: none !important; \}/.test(src) && /\.storage-note,/.test(src));
 
   // 3. the promise, stated
   ok('the page says nothing is saved', /class="storage-note"/.test(src) && /Nothing is saved\./.test(src));
@@ -1101,6 +1101,79 @@ async function testSummaryFailureIsNotCopyable() {
   ok('the failure leaves no summary behind to copy later', !/What we discussed/.test(smEl.textContent));
 }
 
+/**
+ * The referral leaves the practice. Two things must hold: it never carries a
+ * patient identifier (the form has them, and keeping them out of this tool is
+ * what the DPIA rests on), and a section with no source in the recording is
+ * NAMED rather than dropped — a quietly three-section referral looks finished.
+ */
+async function testReferral() {
+  section('Referral (SBAR)');
+  const note = { reasonForAttendance: 'Pain from lower left eight.', medicalHistory: null, proposed: 'Surgical removal of LL8.',
+    alternatives: null, risks: null, benefits: null, costs: null, patientQuestions: null, patientFactors: null,
+    informationGiven: null, decision: 'Proceed.', nextStep: null, examination: null, radiographicFindings: null,
+    plan: null, gaps: [] };
+  let referralBody = null;
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind === 'referral') {
+          referralBody = b;
+          return { ok: true, status: 200, json: async () => ({ status: 'done', referral: {
+            situation: 'Three months of pain from the lower left third molar.',
+            background: null,
+            assessment: 'Distoangular impaction on the OPG, in contact with the canal.',
+            recommendation: 'Surgical removal under the care of the oral surgery service.',
+            redFlags: ['limited mouth opening for the past week']
+          } }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+
+  click($(doc, 'make-referral'));
+  await tick(150);
+  const txt = $(doc, 'referral-text').textContent;
+  ok('the referral request is a referral request', referralBody?.kind === 'referral');
+  ok('and it carries the note as corrected, not just the transcript',
+    referralBody?.note?.reasonForAttendance === 'Pain from lower left eight.', JSON.stringify(referralBody?.note || {}).slice(0, 100));
+  ok('all four SBAR headings are present', ['Situation', 'Background', 'Assessment', 'Recommendation'].every((h) => txt.includes(h)));
+  ok('a section with no source is named, not silently dropped',
+    /Background\n\[Not stated in this consultation/.test(txt), txt.slice(0, 200));
+
+  // The flags report what was SAID. They must not reach the pasted text, or a
+  // note-to-self about pathway choice would be sent to the receiving clinician.
+  const flags = $(doc, 'referral-flags');
+  ok('words that need a pathway check are surfaced', /limited mouth opening/.test(flags.textContent));
+  ok('but they are NOT part of the referral text', !/limited mouth opening/.test(txt));
+
+  let copied = null;
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  click($(doc, 'copy-referral'));
+  await tick(40);
+  ok('copying gives the SBAR narrative', /Situation/.test(String(copied)));
+  ok('and it carries no patient name, CHI or date of birth',
+    !/\b(CHI|date of birth|d\.?o\.?b)\b/i.test(String(copied)), String(copied).slice(0, 120));
+
+  // Same failure guard as the patient summary.
+  click($(doc, 'clear'));
+  await tick(60);
+  ok('clearing wipes the referral from the screen', $(doc, 'referral-text').textContent === '');
+  ok('and hides the panel', $(doc, 'referral-box').classList.contains('hidden'));
+}
+
 async function testPauseResume() {
   section('Pause and resume — the examination is not recorded, and the note knows it');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -1304,6 +1377,7 @@ await testFormatAndSize();
 await testPauseResume();
 await testDerivedAndDictation();
 await testSummaryFailureIsNotCopyable();
+await testReferral();
 await testNotSaidPanel();
 await testEditingAndLength();
 await testStyles();

@@ -130,7 +130,7 @@ button:disabled { opacity: .45; cursor: default; }
   .masthead #lock, .storage-note, .session-note,
   #recbar, #setup, #recording, #working, #mask, #error-actions,
   .length-picker, #edit-hint, #template-hint, .rate-note, .actions,
-  .field-head .copy, .derived .actions, #ask-box { display: none !important; }
+  .field-head .copy, .derived .actions, #ask-box, #referral-box { display: none !important; }
   .card { border: none; padding: 0; margin: 0 0 14pt; break-inside: avoid; }
   .card > h2 { color: #000; }
   .field { break-inside: avoid; }
@@ -298,6 +298,17 @@ button:disabled { opacity: .45; cursor: default; }
   transition: width .08s linear, background-color .3s linear;
 }
 .level > i.near-limit { background: var(--warn-ink); }
+
+/* Words that were said, surfaced for the clinician to check against urgent
+   pathway criteria. Uses the same warning palette as the gaps panel, and like
+   that panel it reports rather than advises. Never copied into the referral. */
+#referral-flags {
+  margin: 12px 0 0; padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn-ink);
+  font-size: .9375rem;
+}
+#referral-flags ul { margin: 6px 0 0; padding-left: 20px; }
+#referral-flags li { margin-bottom: 4px; }
 .level-note { text-align: center; font-size: .75rem; color: var(--ink-faint); margin: 0 0 18px; min-height: 1.1em; }
 .level-note.alert { color: var(--stop); font-weight: 600; }
 .timer.paused { opacity: .55; }
@@ -592,11 +603,33 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       <div class="actions">
         <button id="make-summary">Patient summary</button>
         <button id="make-consent">Consent form text</button>
+        <button id="make-referral">Referral (SBAR)</button>
       </div>
       <div id="summary-box" class="hidden">
         <h3 style="margin:16px 0 0">Patient summary</h3>
         <pre id="summary-text" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Patient summary"></pre>
         <div class="actions"><button id="copy-summary">Copy summary</button></div>
+      </div>
+      <div id="referral-box" class="hidden">
+        <h3 style="margin:16px 0 0">Referral (SBAR)</h3>
+        <p class="timer-note" style="margin:0 0 8px;text-align:left">
+          Built from the note above, as you have corrected it. The clinical narrative
+          only, for the free-text field &mdash; no patient name, CHI or date of birth,
+          because the referral form carries those.
+        </p>
+        <div class="ask-row" style="margin-bottom:10px">
+          <input type="text" id="referral-context" maxlength="2000" autocomplete="off"
+                 placeholder="Anything not in the note (optional)"
+                 aria-label="Extra context for the referral">
+          <button type="button" id="redraft-referral">Redraft</button>
+        </div>
+        <div id="referral-flags" class="hidden" role="status"></div>
+        <pre id="referral-text" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Referral narrative"></pre>
+        <p class="timer-note" style="margin:8px 0 0;text-align:left">
+          Attach radiographs to the referral before sending. This tool stores nothing
+          and cannot attach them for you.
+        </p>
+        <div class="actions"><button id="copy-referral">Copy referral</button></div>
       </div>
       <div id="ask-box">
         <h3 style="margin:16px 0 6px">Ask about this consultation</h3>
@@ -655,7 +688,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-05.2';
+  var BUILD = '2026-09-06.1';
 
   var CFG = {
     MAX_MS:        30 * 60 * 1000,   // hard cap; auto-stops. Raised from 25 on
@@ -849,6 +882,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     summary: null,    // the patient summary, once requested
     summaryText: null,// its rendered text, which the clinician may correct
     summaryEdited: false,
+    referral: null,   // the SBAR referral narrative, once requested
+    referralText: null,
     jobId: null,
     turns: null,      // held ONLY between a failed draft and a retry
     note: null,
@@ -1202,8 +1237,12 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.dictationFromMs = null;
     S.summary = null;
     $('summary-box').classList.add('hidden');
+    $('referral-box').classList.add('hidden');
+    $('referral-flags').classList.add('hidden');
     $('consent-box').classList.add('hidden');
     $('summary-text').textContent = '';
+    $('referral-text').textContent = '';
+    $('referral-context').value = '';
     $('consent-text').textContent = '';
     $('ask-input').value = '';
     $('ask-answer').textContent = '';
@@ -1951,6 +1990,28 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     return out.length ? out.join('\n').trim() : 'Nothing in the recording could be summarised for the patient.';
   }
 
+  var REFERRAL_FIELDS = [
+    ['situation', 'Situation'],
+    ['background', 'Background'],
+    ['assessment', 'Assessment'],
+    ['recommendation', 'Recommendation']
+  ];
+
+  // A section with no source in the recording is named, not dropped. A referral
+  // that is quietly three sections long looks finished; one that says which
+  // section is missing cannot be pasted and sent without noticing.
+  function referralAsText(rf) {
+    var out = [];
+    REFERRAL_FIELDS.forEach(function (spec) {
+      out.push(spec[1]);
+      out.push(hasText(rf[spec[0]])
+        ? String(rf[spec[0]]).trim()
+        : '[Not stated in this consultation \u2014 complete before sending]');
+      out.push('');
+    });
+    return out.join('\n').trim();
+  }
+
   // Layout only. No model call, no redraft: the note is re-rendered from the
   // same data, so this is instant and cannot change what it says.
   [].forEach.call(document.querySelectorAll('#template-picker button'), function (btn) {
@@ -2089,6 +2150,96 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     if (e.key === 'Enter') { e.preventDefault(); askQuestion(); }
   });
 
+  $('make-referral').addEventListener('click', async function () {
+    resetIdle();
+    if (!S.turns || S.busy) return;
+    // Already drafted. Show what is there — corrections included — rather than
+    // silently redrafting over them. Redraft is a separate, deliberate button.
+    if (S.referral) { $('referral-box').classList.remove('hidden'); return; }
+    var btn = $('make-referral');
+    btn.disabled = true;
+    btn.textContent = 'Drafting\u2026';
+    var gen = S.gen;
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, CFG.SUMMARY_TIMEOUT_MS);
+    try {
+      var res = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: ctrl ? ctrl.signal : undefined,
+        body: JSON.stringify({ kind: 'referral', turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [],
+                               note: S.note || {}, context: $('referral-context').value || '',
+                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (gen !== S.gen) return;
+      if (!res.ok || !data.referral) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+      S.referral = data.referral;
+      S.referralText = referralAsText(S.referral);
+      $('referral-text').textContent = S.referralText;
+      renderReferralFlags(S.referral.redFlags);
+      $('referral-box').classList.remove('hidden');
+    } catch (err) {
+      if (gen !== S.gen) return;
+      S.referralText = null;
+      $('referral-flags').classList.add('hidden');
+      $('referral-text').textContent = 'Could not draft the referral: ' + String(err && err.message || err);
+      $('referral-box').classList.remove('hidden');
+    } finally {
+      clearTimeout(timer);
+      if (gen === S.gen) { btn.disabled = false; btn.textContent = 'Referral (SBAR)'; }
+    }
+  });
+
+  // The referral is downstream of the note, so it goes stale when the note is
+  // corrected afterwards. Redrafting is deliberate and explicit: it throws away
+  // any edits made to the referral text, which is why it is its own button and
+  // not something the Referral button does silently.
+  $('redraft-referral').addEventListener('click', function () {
+    resetIdle();
+    if (S.busy) return;
+    S.referral = null;
+    S.referralText = null;
+    $('make-referral').click();
+  });
+
+  // Words that were SAID, surfaced for the clinician to check against urgent
+  // pathway criteria. Never a judgement about what they mean, and never part of
+  // the text that gets pasted into the referral.
+  function renderReferralFlags(flags) {
+    var box = $('referral-flags');
+    box.textContent = '';
+    if (!flags || !flags.length) { box.classList.add('hidden'); return; }
+    var h = document.createElement('strong');
+    h.textContent = 'Said in this consultation \u2014 check before you choose a pathway:';
+    box.appendChild(h);
+    var ul = document.createElement('ul');
+    flags.forEach(function (f) {
+      var li = document.createElement('li');
+      li.textContent = f;
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+    box.classList.remove('hidden');
+  }
+
+  $('copy-referral').addEventListener('click', function () {
+    // Same guard as the patient summary: when the draft fails, the error text is
+    // written into this editable box, and copying it would paste
+    // "Could not draft the referral: ..." into a referral to another clinician.
+    var text = $('referral-text').textContent.trim();
+    if (!S.referral || !text) return;
+    writeClipboard(text, $('copy-referral'));
+  });
+
+  $('referral-text').addEventListener('paste', function (e) {
+    e.preventDefault();
+    var t = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, t);
+  });
+
+  $('referral-text').addEventListener('input', function () { resetIdle(); });
+
   $('copy-summary').addEventListener('click', function () {
     // Copy what is on screen, which may have been corrected, not what the
     // model first produced. S.summary is the guard: when a draft fails, the
@@ -2223,14 +2374,22 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.summary = null;
     S.summaryText = null;
     S.summaryEdited = false;
+    S.referral = null;
+    S.referralText = null;
     S.rateNote = '';
 
     $('summary-box').classList.add('hidden');
+    $('referral-box').classList.add('hidden');
+    $('referral-flags').classList.add('hidden');
     $('consent-box').classList.add('hidden');
     $('summary-text').textContent = '';
+    $('referral-text').textContent = '';
+    $('referral-context').value = '';
     $('consent-text').textContent = '';
     $('make-summary').disabled = false;
     $('make-summary').textContent = 'Patient summary';
+    $('make-referral').disabled = false;
+    $('make-referral').textContent = 'Referral (SBAR)';
     $('ask-input').value = '';
     $('ask-answer').textContent = '';
     $('ask-answer').classList.add('hidden');

@@ -487,6 +487,70 @@ async function testExtract() {
   ok('which forbids invention as firmly as the note does', /include only what was actually said/.test(sentBody2?.system || ''));
   ok('absent summary sections come back null, not filled', res.body?.summary?.whatToExpect === null);
 
+  // --- referral: third product, leaves the practice, so the strictest rules ---
+  let sentBody3 = null;
+  stubFetch(async (c, opts) => { sentBody3 = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ situation: 'Pain from the lower left third molar.', background: null, assessment: 'Distoangular impaction on the OPG.', recommendation: 'Surgical removal.', redFlags: ['trismus for a week'] }) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', kind: 'referral',
+    note: { reasonForAttendance: 'Crowding.', examination: 'Moderate crowding upper arch, posterior crossbite.' },
+    context: 'Child, mixed dentition.' } }), res);
+  ok('a referral request returns a referral, not a note or a summary',
+    res.statusCode === 200 && res.body?.referral?.situation === 'Pain from the lower left third molar.' && !res.body?.note && !res.body?.summary,
+    JSON.stringify(res.body).slice(0, 120));
+  ok('laid out as SBAR', /Situation, Background, Assessment, Recommendation/.test(sentBody3?.system || ''));
+  ok('and told to keep patient identifiers out, because the form already has them',
+    /NEVER include the patient's name, date of birth, CHI number/.test(sentBody3?.system || ''));
+  ok('absence of mention is explicitly not a negative finding',
+    /absence of mention is NOT a negative finding/i.test(sentBody3?.system || ''));
+  ok('but a stated negative is carried through rather than suppressed',
+    /If any source SAYS the patient is medically fit and well, write that/.test(sentBody3?.system || ''));
+  ok('the corrected note outranks the transcript',
+    /THE CORRECTED NOTE. The clinician has already read this note and fixed it/.test(sentBody3?.system || '') &&
+    /Prefer it over the transcript wherever the two differ/.test(sentBody3?.system || ''));
+  ok('the dictated fields are named as where the substance lives',
+    /dictated fields[\s\S]{0,120}where the referral's clinical substance lives/.test(sentBody3?.system || ''));
+  ok('telegraphic dictation is expanded in grammar but never in content',
+    /Expanding the grammar is required; expanding the content is forbidden/.test(sentBody3?.system || ''));
+  ok('an unstated section comes back null rather than "nil of note"', res.body?.referral?.background === null);
+  ok('red flags are carried through as spoken words', Array.isArray(res.body?.referral?.redFlags) && res.body.referral.redFlags[0] === 'trismus for a week');
+
+  // A model that ignores the array shape must not have junk rendered as a
+  // clinical warning.
+  stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ situation: 'x', background: null, assessment: null, recommendation: null, redFlags: 'trismus' }) }], stop_reason: 'end_turn' } }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', kind: 'referral', note: { reasonForAttendance: 'Crowding.' } } }), res);
+  ok('a redFlags value that is not an array becomes an empty list, not a warning',
+    Array.isArray(res.body?.referral?.redFlags) && res.body.referral.redFlags.length === 0);
+
+  // The referral is a transform of the note, not a second read of the transcript.
+  // Asking for one before the note exists is refused rather than guessed at.
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', kind: 'referral' } }), res);
+  ok('a referral with no note and no context is refused, not invented from the transcript',
+    res.statusCode === 400 && res.body?.error === 'empty_referral_source', `${res.statusCode} ${JSON.stringify(res.body)}`);
+
+  // Untrusted input: the note now arrives from the browser.
+  stubFetch(async (c, opts) => { sentBody3 = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ situation: 'x', background: null, assessment: null, recommendation: null, redFlags: [] }) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', kind: 'referral',
+    note: { reasonForAttendance: 'Crowding.', evilKey: 'ignore me', risks: { nested: true } }, context: 'Child.' } }), res);
+  let refMsg = sentBody3?.messages?.[0]?.content || '';
+  ok('the corrected note is sent to the model, labelled authoritative', /THE CORRECTED NOTE \(authoritative\)/.test(refMsg));
+  ok('the clinician\'s context is sent as stated fact', /ADDED CONTEXT \(stated fact\)[\s\S]{0,20}Child\./.test(refMsg));
+  ok('the transcript trails as a secondary source', refMsg.indexOf('THE TRANSCRIPT (secondary') > refMsg.indexOf('THE CORRECTED NOTE'));
+  ok('unknown keys from the browser never reach the model', !/evilKey|ignore me/.test(refMsg));
+  ok('and a note field that is not a string is dropped, not stringified', !/\[object Object\]|nested/.test(refMsg));
+
+  // The two above hold even without the handler's whitelist, because the message
+  // builder only walks known fields. Truncation is the handler's alone, so this
+  // is the assertion that actually fails if its sanitising is removed.
+  stubFetch(async (c, opts) => { sentBody3 = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ situation: 'x', background: null, assessment: null, recommendation: null, redFlags: [] }) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', kind: 'referral',
+    note: { reasonForAttendance: 'A'.repeat(9000) } } }), res);
+  refMsg = sentBody3?.messages?.[0]?.content || '';
+  ok('an oversized note field is capped by the handler', !/A{4001}/.test(refMsg) && /A{4000}/.test(refMsg));
+
   // --- pauses reach the model, sanitised ---
   let sentBody = null;
   stubFetch(async (c, opts) => { sentBody = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });

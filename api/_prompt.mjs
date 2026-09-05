@@ -454,6 +454,112 @@ export function parseSummary(raw) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Referral (SBAR)
+ * A third product from the same transcript: the clinical narrative for a
+ * referral, laid out as Situation / Background / Assessment /
+ * Recommendation, for the clinician to paste into the free-text field of
+ * an e-referral form.
+ *
+ * It deliberately carries NO patient identifiers. SCI Gateway already has
+ * the demographics from the practice system, and keeping names, CHI
+ * numbers and dates of birth out of this tool is the property the DPIA
+ * rests on. Never add a header, an address block, or a salutation.
+ *
+ * A referral leaves the practice, so the never-invent rule bites harder
+ * here than anywhere else in the tool. A note with a gap is completed by
+ * the person who wrote it; a referral with an invented negative is a false
+ * clinical statement read by someone who cannot check it.
+ * ------------------------------------------------------------------ */
+
+export const REFERRAL_FIELDS = [
+  ['situation', 'Situation'],
+  ['background', 'Background'],
+  ['assessment', 'Assessment'],
+  ['recommendation', 'Recommendation'],
+];
+
+export function buildReferralSystemPrompt(consultTypeKey) {
+  const type = consultType(consultTypeKey);
+  return `You draft the clinical narrative of a dental referral for a UK clinician to check, correct and paste into an e-referral form. Write it in SBAR: Situation, Background, Assessment, Recommendation.
+
+YOUR SOURCES, IN ORDER OF AUTHORITY:
+
+1. THE CORRECTED NOTE. The clinician has already read this note and fixed it. It is the authoritative account of the consultation. Prefer it over the transcript wherever the two differ — a difference means the clinician corrected something, and the correction wins.
+2. THE CLINICIAN'S ADDED CONTEXT, if present. This is the clinician writing directly to you about this patient. Treat it as stated fact, exactly as if it had been dictated.
+3. THE TRANSCRIPT. Secondary. Use it only for detail the note and context do not carry — a duration, a phrase the patient used, something said but not written up. Never contradict the note with it.
+
+THE RULE THAT MATTERS MOST: absence of mention is NOT a negative finding. If any source SAYS the patient is medically fit and well, write that — a stated negative is a finding and belongs in the referral. If the medical history simply never came up, the Background is null, and you must NOT write "no relevant medical history", "fit and well", "nil of note", "no medications" or any equivalent. The same goes for allergies, smoking, anticoagulants, oral hygiene and previous treatment. The test is always the same: did someone say it? Say nothing rather than say nothing-was-found.
+
+The note's dictated fields — examination, radiographic findings and plan — are usually where the referral's clinical substance lives, because the conversation with the patient rarely contains it. Use them in full.
+
+- situation: why this patient is being referred now — the presenting problem and, if stated, its duration and any urgency. Not a diagnosis unless the clinician gave one.
+- background: relevant history ACTUALLY STATED — medical history, medications, previous treatment or attempts, oral hygiene, social factors affecting the referral. Null if none was stated.
+- assessment: examination and radiographic findings as described, and the working diagnosis ONLY if the clinician gave one. Do not derive a diagnosis from the findings yourself.
+- recommendation: what is being asked of the receiving service, and what the patient has been told to expect, as stated.
+
+REGISTER. Write as one clinician writes to another: third person about the patient, complete sentences, unhurried but not padded. Note fields and dictation are telegraphic and your job is to make them read properly WITHOUT adding anything — "moderate crowding upper arch, posterior crossbite, OH good" becomes "There is moderate crowding in the upper arch and a posterior crossbite. Oral hygiene is good." Expanding the grammar is required; expanding the content is forbidden. Put the ask plainly and courteously, in the form "Please could you see this patient for an orthodontic assessment." Do not use headings inside a section, do not use bullet points, and do not begin every section with "The patient".
+
+Write nothing that is not in one of the three sources. No salutation, no sign-off, no letterhead. NEVER include the patient's name, date of birth, CHI number, address, or the practice's details — the referral form carries those already. If a name appears in any source, write "the patient".
+
+Do not grade urgency yourself and do not choose a destination service or specialty.
+
+redFlags: quote briefly anything in the sources that the clinician should check against urgent-pathway criteria before sending — for example unexplained ulceration, a red or mixed red-and-white patch, a neck lump, or systemic signs of spreading infection such as trismus, difficulty swallowing or breathing, or voice change. Report the words used; do NOT say what they might mean, do not name a pathway, and do not suggest a diagnosis. Empty array if there are none. Never add a red flag that is not in a source.
+
+If the recording was paused, the transcript is spliced: do not imply that things either side of a gap happened in sequence.
+
+Consult type: ${type ? type.label : 'Not specified'}
+
+Return ONLY a JSON object with exactly these keys:
+{
+  "situation": string | null,
+  "background": string | null,
+  "assessment": string | null,
+  "recommendation": string | null,
+  "redFlags": string[]
+}`;
+}
+
+/* The note the clinician corrected leads; their added context follows; the
+   transcript trails as backup. Order on the page is order of authority, and the
+   system prompt says so explicitly. */
+export function buildReferralUserMessage(note, context, transcriptMessage) {
+  const parts = ['THE CORRECTED NOTE (authoritative):'];
+  const all = [...FIELDS, ...DICTATED_FIELDS];
+  let any = false;
+  for (const [key, label] of all) {
+    const v = note && note[key];
+    if (typeof v !== 'string' || !v.trim()) continue;
+    any = true;
+    parts.push(`${label}: ${v.trim()}`);
+  }
+  if (!any) parts.push('(The note is empty. Work from the context and transcript below.)');
+  if (context && context.trim()) {
+    parts.push('', "THE CLINICIAN'S ADDED CONTEXT (stated fact):", context.trim());
+  }
+  parts.push('', 'THE TRANSCRIPT (secondary — for detail the note does not carry):', transcriptMessage);
+  return parts.join('\n');
+}
+
+export function parseReferral(raw) {
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(cleaned); } catch { throw new Error('Model did not return valid JSON'); }
+  const out = {};
+  for (const [key, label] of REFERRAL_FIELDS) {
+    const v = parsed[key];
+    if (v === undefined || v === null) { out[key] = null; continue; }
+    if (typeof v !== 'string') throw new Error(`Referral field "${key}" (${label}) came back as ${typeof v}, not text`);
+    out[key] = v;
+  }
+  // A non-array, or entries that are not strings, means the model ignored the
+  // shape. Drop them rather than render junk as a clinical warning.
+  out.redFlags = Array.isArray(parsed.redFlags)
+    ? parsed.redFlags.filter((f) => typeof f === 'string' && f.trim()).map((f) => f.trim())
+    : [];
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
  * Ask
  * A question about THIS consultation, answered from the transcript and
  * from nothing else. Deliberately not a clinical assistant: it reports

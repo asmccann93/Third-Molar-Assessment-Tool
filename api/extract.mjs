@@ -27,7 +27,8 @@
 // signed, not after.
 
 import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS,
-         buildSummarySystemPrompt, parseSummary, buildAskSystemPrompt } from './_prompt.mjs';
+         buildSummarySystemPrompt, parseSummary, buildAskSystemPrompt,
+         buildReferralSystemPrompt, buildReferralUserMessage, parseReferral } from './_prompt.mjs';
 import { checklistGaps } from './_checklists.mjs';
 
 export const config = { maxDuration: 120 };
@@ -186,6 +187,38 @@ export default async function handler(req, res) {
       }
       const text = (raw?.content || []).filter((b) => b && b.type === 'text').map((b) => b.text).join('');
       return res.status(200).json({ status: 'done', summary: parseSummary(text) });
+    }
+
+    // A third product, and the only one built from the CORRECTED note rather
+    // than from the transcript alone: the clinician has already read and fixed
+    // the note, so the referral inherits checked content instead of re-deriving
+    // it from raw speech. Carries no patient identifiers — the referral form
+    // already has them, and keeping them out of here is what the DPIA rests on.
+    if (body?.kind === 'referral') {
+      // The note arrives from the browser, so it is untrusted input: take only
+      // the known field keys, only as strings, and cap the length.
+      const incoming = body?.note && typeof body.note === 'object' && !Array.isArray(body.note) ? body.note : {};
+      const note = {};
+      for (const [key] of [...FIELDS, ...DICTATED_FIELDS]) {
+        const v = incoming[key];
+        if (typeof v === 'string' && v.trim()) note[key] = v.trim().slice(0, 4000);
+      }
+      const context = typeof body?.context === 'string' ? body.context.trim().slice(0, 2000) : '';
+      if (!Object.keys(note).length && !context) {
+        return res.status(400).json({ error: 'empty_referral_source', detail: 'Draft the note first — the referral is built from it.' });
+      }
+      const raw = await invokeModel({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 2048,
+        temperature: 0,
+        system: buildReferralSystemPrompt(consultType),
+        messages: [{ role: 'user', content: buildReferralUserMessage(note, context, buildUserMessage(transcript, pauses)) }]
+      }, creds);
+      if (raw?.stop_reason === 'max_tokens') {
+        return res.status(502).json({ error: 'response_truncated', detail: 'The referral was cut off. Try again.' });
+      }
+      const text = (raw?.content || []).filter((b) => b && b.type === 'text').map((b) => b.text).join('');
+      return res.status(200).json({ status: 'done', referral: parseReferral(text) });
     }
 
     const payload = {
