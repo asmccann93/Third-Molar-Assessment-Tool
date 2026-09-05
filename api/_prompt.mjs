@@ -243,6 +243,8 @@ The gap list is the most useful part of your output. It tells the dentist what t
 
 If the transcript is too short, too garbled, or clearly not a clinical conversation, return all fields null with a single gap explaining why.
 
+Do not itemise individual missing risks or alternatives here — that is the checklist's job below, and the clinician would otherwise see the same omission twice, once in each list. A gap here should describe a FIELD with nothing usable in it (e.g. "No alternatives discussed", "Costs not mentioned"), not restate a single checklist item (do not write "Bleeding not mentioned as a risk" — the checklist already covers that).
+
 ## PATIENT QUESTIONS
 
 Keep the patient's own words. Lightly tidy false starts and filler, but do not paraphrase into clinical language.

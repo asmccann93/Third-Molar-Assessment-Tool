@@ -367,6 +367,12 @@ async function testTranscribe() {
   await handler(mockReq({ headers: { 'content-type': 'audio/ogg' }, body: OGG(5000) }), res);
   ok('an unrelated rejection is reported, not retried', sentCfgs.length === 1 && res.statusCode >= 400, `${sentCfgs.length} attempts, ${res.statusCode}`);
 
+  // A found risk missing from the model's OWN gap list must not also be
+  // restated as a separate itemised gap, duplicating the checklist's job.
+  const sysNoDup = buildSystemPrompt('third-molar', 'standard');
+  ok('the prompt tells the model not to itemise checklist items in its own gaps',
+    /Do not itemise individual missing risks or alternatives here/.test(sysNoDup));
+
   const { config: fnConfig } = await import('../api/transcribe.mjs');
   ok('maxDuration fits the Hobby plan cap, so no invocation can be killed mid-poll', fnConfig?.maxDuration <= 60, String(fnConfig?.maxDuration));
 }
