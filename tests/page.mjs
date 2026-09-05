@@ -1174,6 +1174,73 @@ async function testReferral() {
   ok('and hides the panel', $(doc, 'referral-box').classList.contains('hidden'));
 }
 
+/**
+ * Starting a NEW recording must leave nothing of the last patient behind. The
+ * screen is cleared either way, so the failure is invisible: the danger is the
+ * derived documents surviving in memory, and the "already drafted, don't
+ * redraft over corrections" guard then refusing to draft for the new patient
+ * and showing an empty box instead.
+ */
+async function testNewRecordingDropsThePreviousPatient() {
+  section('A new recording leaves nothing of the last patient');
+  const note = { reasonForAttendance: 'Pain from lower left eight.', medicalHistory: null, proposed: 'Surgical removal of LL8.',
+    alternatives: null, risks: null, benefits: null, costs: null, patientQuestions: null, patientFactors: null,
+    informationGiven: null, decision: 'Proceed.', nextStep: null, examination: null, radiographicFindings: null,
+    plan: null, gaps: [] };
+  let referralCalls = 0, summaryCalls = 0;
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind === 'referral') {
+          referralCalls++;
+          return { ok: true, status: 200, json: async () => ({ status: 'done', referral: {
+            situation: 'Patient ' + referralCalls + ' situation.', background: null,
+            assessment: 'Findings for patient ' + referralCalls + '.', recommendation: 'Please assess.', redFlags: [] } }) };
+        }
+        if (b.kind === 'summary') {
+          summaryCalls++;
+          return { ok: true, status: 200, json: async () => ({ status: 'done', summary: {
+            whatWeDiscussed: 'Patient ' + summaryCalls + '.', whatYouDecided: null,
+            whatHappensNext: null, whatToExpect: null, yourQuestions: null } }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  const record = async () => {
+    click($(doc, 'start'));
+    await tick(60);
+    click($(doc, 'stop'));
+    await tick(300);
+  };
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+
+  await record();
+  click($(doc, 'make-referral'));
+  await tick(150);
+  click($(doc, 'make-summary'));
+  await tick(150);
+  ok('first patient gets a referral', /Patient 1 situation/.test($(doc, 'referral-text').textContent));
+
+  // Second patient, same session: press Start again rather than Clear.
+  await record();
+  click($(doc, 'make-referral'));
+  await tick(150);
+  click($(doc, 'make-summary'));
+  await tick(150);
+  ok('the second patient gets their OWN referral, not an empty box',
+    /Patient 2 situation/.test($(doc, 'referral-text').textContent), $(doc, 'referral-text').textContent.slice(0, 120));
+  ok('and their own summary', /Patient 2/.test($(doc, 'summary-text').textContent), $(doc, 'summary-text').textContent.slice(0, 120));
+  ok('which means both were actually re-drafted', referralCalls === 2 && summaryCalls === 2,
+    `referral=${referralCalls} summary=${summaryCalls}`);
+}
+
 async function testPauseResume() {
   section('Pause and resume — the examination is not recorded, and the note knows it');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -1378,6 +1445,7 @@ await testPauseResume();
 await testDerivedAndDictation();
 await testSummaryFailureIsNotCopyable();
 await testReferral();
+await testNewRecordingDropsThePreviousPatient();
 await testNotSaidPanel();
 await testEditingAndLength();
 await testStyles();

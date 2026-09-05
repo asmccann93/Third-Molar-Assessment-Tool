@@ -688,7 +688,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-06.1';
+  var BUILD = '2026-09-06.2';
 
   var CFG = {
     MAX_MS:        30 * 60 * 1000,   // hard cap; auto-stops. Raised from 25 on
@@ -1235,7 +1235,15 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.pauses = [];
     S.pausesForDraft = null;
     S.dictationFromMs = null;
+    // Every derived document from the last patient goes here, not just the
+    // summary object. Clearing the boxes on screen is not enough: whatever is
+    // left in S survives into the next consultation, and the "already drafted"
+    // guards then refuse to draft for the new patient and show an empty panel.
     S.summary = null;
+    S.summaryText = null;
+    S.summaryEdited = false;
+    S.referral = null;
+    S.referralText = null;
     $('summary-box').classList.add('hidden');
     $('referral-box').classList.add('hidden');
     $('referral-flags').classList.add('hidden');
