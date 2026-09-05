@@ -27,7 +27,7 @@
 // signed, not after.
 
 import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS,
-         buildSummarySystemPrompt, parseSummary } from './_prompt.mjs';
+         buildSummarySystemPrompt, parseSummary, buildAskSystemPrompt } from './_prompt.mjs';
 import { checklistGaps } from './_checklists.mjs';
 
 export const config = { maxDuration: 120 };
@@ -151,6 +151,25 @@ export default async function handler(req, res) {
     const transcript = lines.join('\n');
 
     if (!transcript || lines.every((l) => l === MARKER)) return res.status(400).json({ error: 'empty_transcript' });
+
+    // A question about this consultation, answered from the transcript only.
+    if (body?.kind === 'ask') {
+      const question = typeof body?.question === 'string' ? body.question.trim().slice(0, 500) : '';
+      if (!question) return res.status(400).json({ error: 'empty_question' });
+      const raw = await invokeModel({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 1024,
+        temperature: 0,
+        system: buildAskSystemPrompt(consultType),
+        messages: [{ role: 'user', content: `${buildUserMessage(transcript, pauses)}\n\nThe dentist asks: ${question}` }]
+      }, creds);
+      if (raw?.stop_reason === 'max_tokens') {
+        return res.status(502).json({ error: 'response_truncated', detail: 'The answer was cut off. Ask something narrower.' });
+      }
+      const answer = (raw?.content || []).filter((b) => b && b.type === 'text').map((b) => b.text).join('').trim();
+      if (!answer) return res.status(502).json({ error: 'empty_answer', detail: 'No answer came back.' });
+      return res.status(200).json({ status: 'done', answer });
+    }
 
     // A second product from the same transcript: the take-home summary for the
     // patient. Same processor, same rules; no new data goes anywhere.

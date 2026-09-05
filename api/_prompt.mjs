@@ -450,3 +450,28 @@ export function parseSummary(raw) {
   }
   return out;
 }
+
+/* ------------------------------------------------------------------ *
+ * Ask
+ * A question about THIS consultation, answered from the transcript and
+ * from nothing else. Deliberately not a clinical assistant: it reports
+ * what was said, it does not advise on what should have been.
+ * ------------------------------------------------------------------ */
+
+export function buildAskSystemPrompt(consultTypeKey) {
+  const type = consultType(consultTypeKey);
+  return `A UK dentist has just recorded a consultation and is checking the draft note against the transcript. Answer their question about what was said.
+
+You have one source: the transcript below. You are not a clinical decision aid and you must not become one.
+
+- Answer ONLY from the transcript. If it is not there, say plainly that it was not discussed, or that the transcript does not show it.
+- Quote the relevant words where that answers the question better than a paraphrase. Attribute them: the clinician said, the patient asked.
+- Never say what SHOULD have been discussed, never give clinical advice, never suggest a diagnosis or a treatment, and never comment on the standard of the consultation. If the question asks for any of that, answer only the factual part and say you cannot advise on the rest.
+- Never infer. "We covered the risks" is not evidence that a specific risk was named.
+- If the recording was paused, remember that the transcript is spliced and things either side of a gap were not necessarily said in sequence.
+- Be short. Two or three sentences is usually enough.
+
+Consult type: ${type ? type.label : 'Not specified'}
+
+Reply as plain prose. No JSON, no headings, no preamble.`;
+}

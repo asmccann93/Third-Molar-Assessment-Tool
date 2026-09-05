@@ -66,6 +66,8 @@
   --warn-line: #E8C9A6;
   --warn-ink:  #8A4B12;
 
+  --paper:     var(--page-bg);       /* recessed controls sitting on a white card */
+  --wash:      #EEF1F6;              /* quiet chips and tags */
   --radius:    8px;
   --tap:       48px;                 /* minimum touch target, chairside */
   --font-ui:   var(--sans);
@@ -108,6 +110,29 @@ button:disabled { opacity: .45; cursor: default; }
   outline-offset: 2px;
 }
 
+/* ===================================================================
+   PRINT
+   The draft and the patient summary are the only things worth putting on
+   paper. Everything that is a control, a warning about the screen, or a
+   navigation aid comes off.
+   =================================================================== */
+@media print {
+  body { background: #fff; font-size: 11pt; }
+  .wrap { max-width: none; padding: 0; }
+  .masthead #lock, .storage-note, .session-note,
+  #recbar, #setup, #recording, #working, #mask, #error-actions,
+  .length-picker, #edit-hint, #template-hint, .rate-note, .actions,
+  .field-head .copy, .derived .actions, #ask-box { display: none !important; }
+  .card { border: none; padding: 0; margin: 0 0 14pt; break-inside: avoid; }
+  .card > h2 { color: #000; }
+  .field { break-inside: avoid; }
+  .field pre { white-space: pre-wrap; }
+  .section-heading { break-after: avoid; }
+  #gaps, #notsaid { border: 1pt solid #999; break-inside: avoid; }
+  .pagefoot { border-top: 1pt solid #999; }
+  a[href]::after { content: ""; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
@@ -136,6 +161,15 @@ button:disabled { opacity: .45; cursor: default; }
 @media print{.ostb{display:none !important;}}
 @media (max-width:480px){.ostb-label{width:100%;margin-bottom:2px;}}
 
+/* Chairside, one-handed, possibly gloved: four targets across is too many. */
+@media (max-width: 480px) {
+  .record-row { flex-wrap: wrap; }
+  .record-row .btn-pause { flex: 1 1 calc(50% - 6px); min-width: 0; }
+  .record-row .btn-stop,
+  .record-row .btn-discard { flex: 1 1 100%; }
+  .record-row .btn-discard { min-height: var(--tap); }
+}
+
 /* ===================================================================
    MASTHEAD
    =================================================================== */
@@ -148,7 +182,19 @@ button:disabled { opacity: .45; cursor: default; }
   flex: none; min-height: 40px; padding: 0 16px;
   font-size: .8125rem; font-weight: 600; color: var(--ink-muted);
 }
-.masthead #lock:hover { color: var(--stop); border-color: var(--stop); }
+.masthead #lock:hover,
+.masthead #lock:active { color: var(--stop); border-color: var(--stop); }
+.pagefoot {
+  display: flex; justify-content: space-between; gap: 12px;
+  margin-top: 28px; padding-top: 12px; border-top: 1px solid var(--line);
+  font-family: var(--font-mono); font-size: .6875rem; color: var(--ink-faint);
+}
+.storage-note {
+  margin: 12px 0 0; padding: 8px 12px;
+  border-left: 2px solid var(--line-firm); background: var(--tint-soft);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: .75rem; line-height: 1.5; color: var(--ink-muted);
+}
 .session-note { margin: 10px 0 0 !important; font-size: .75rem; min-height: 1em; }
 .session-note.warn { color: var(--stop); font-weight: 600; }
 
@@ -239,14 +285,20 @@ button:disabled { opacity: .45; cursor: default; }
 .timer-note { text-align: center; font-size: .8125rem; color: var(--ink-muted); margin: 0 0 18px; }
 
 .level { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-bottom: 6px; }
-.level > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .08s linear; }
+.level > i {
+  display: block; height: 100%; width: 0; background: var(--accent);
+  transition: width .08s linear, background-color .3s linear;
+}
+.level > i.near-limit { background: var(--warn-ink); }
 .level-note { text-align: center; font-size: .75rem; color: var(--ink-faint); margin: 0 0 18px; min-height: 1.1em; }
 .level-note.alert { color: var(--stop); font-weight: 600; }
 .timer.paused { opacity: .55; }
 .btn-pause { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
 .btn-pause.resuming { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .btn-pause[disabled] { opacity: .5; }
-.draft-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.draft-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; }
+.draft-head h2 { flex: 1 1 100%; }
+@media (min-width: 620px) { .draft-head h2 { flex: 1 1 auto; } }
 .length-picker { display: flex; gap: 4px; }
 .length-picker button {
   padding: 4px 11px; border: 1px solid var(--line); background: var(--paper);
@@ -263,7 +315,7 @@ button:disabled { opacity: .45; cursor: default; }
 }
 .field.edited > .field-head h3::after {
   content: 'edited'; margin-left: 8px; padding: 1px 7px; border-radius: 999px;
-  background: var(--wash, #EEF1F6); font-size: .62rem; letter-spacing: .06em;
+  background: var(--wash); font-size: .62rem; letter-spacing: .06em;
   text-transform: uppercase; color: var(--ink-faint); font-weight: 600;
 }
 .rate-note { margin: 0 0 14px; font-size: .78rem; color: var(--ink-faint); }
@@ -285,6 +337,19 @@ button:disabled { opacity: .45; cursor: default; }
 table.implant-log { width: 100%; border-collapse: collapse; font-size: .85rem; margin: 6px 0 14px; }
 table.implant-log th, table.implant-log td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
 table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+.ask-row { display: flex; gap: 8px; }
+.ask-row input {
+  flex: 1; min-height: var(--tap); padding: 0 14px; font: inherit;
+  border: 1px solid var(--line-firm); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink);
+}
+.ask-row input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.ask-answer {
+  margin: 12px 0 0; padding: 12px 14px;
+  border-left: 3px solid var(--accent); background: var(--tint-soft);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: .9375rem; line-height: 1.55; white-space: pre-wrap;
+}
 .derived pre { white-space: pre-wrap; font: inherit; font-size: .92rem; line-height: 1.5; margin: 10px 0 0; }
 .derived .actions { margin-top: 12px; }
 
@@ -400,6 +465,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       </div>
       <button type="button" id="lock" title="End this session and require the passcode again">Lock</button>
     </div>
+    <p class="storage-note">
+      Nothing is saved. The recording, the transcript and the draft exist only in
+      this tab, and are destroyed when you press Clear or Lock, close the tab, or
+      leave it idle.
+    </p>
     <p class="session-note" id="session-note" role="status"></p>
   </header>
 
@@ -413,10 +483,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   </div>
 
   <!-- ============ SETUP ============ -->
-  <section id="setup">
+  <section id="setup" tabindex="-1" aria-labelledby="setup-h">
 
     <div class="card">
-      <h2>Before you start</h2>
+      <h2 id="setup-h">Before you start</h2>
       <p class="consent-script" id="script"></p>
       <label class="consent-confirm">
         <input type="checkbox" id="consent">
@@ -442,9 +512,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   </section>
 
   <!-- ============ RECORDING ============ -->
-  <section id="recording" class="hidden">
+  <section id="recording" class="hidden" tabindex="-1" aria-labelledby="recording-h">
     <div class="card">
-      <h2>Recording</h2>
+      <h2 id="recording-h">Recording</h2>
       <p class="timer" id="timer">0:00</p>
       <p class="timer-note" id="timer-note">Stops automatically at 30:00</p>
       <div class="level" aria-hidden="true"><i id="level"></i></div>
@@ -459,7 +529,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   </section>
 
   <!-- ============ WORKING ============ -->
-  <section id="working" class="hidden">
+  <section id="working" class="hidden" tabindex="-1">
     <div class="card">
       <div class="working">
         <span class="spinner" aria-hidden="true"></span>
@@ -469,7 +539,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   </section>
 
   <!-- ============ DRAFT ============ -->
-  <section id="draft" class="hidden">
+  <section id="draft" class="hidden" tabindex="-1" aria-labelledby="draft-heading">
 
     <div class="gaps" id="notsaid">
       <h2 id="notsaid-title">Not said during this consultation</h2>
@@ -490,12 +560,18 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     <div class="card">
       <div class="draft-head">
         <h2 id="draft-heading">Draft note</h2>
+        <div class="length-picker" id="template-picker" role="group" aria-label="Note layout">
+          <button type="button" data-template="clinical" class="on">Clinical</button>
+          <button type="button" data-template="consent">Consent</button>
+          <button type="button" data-template="soap">SOAP</button>
+        </div>
         <div class="length-picker" role="group" aria-label="Level of detail">
           <button type="button" data-length="brief">Brief</button>
           <button type="button" data-length="standard" class="on">Standard</button>
           <button type="button" data-length="full">Full</button>
         </div>
       </div>
+      <p class="timer-note" id="template-hint" style="margin:2px 0 0"></p>
       <p class="timer-note" id="edit-hint">Every field can be edited here before you copy it.</p>
       <div id="fields"></div>
     </div>
@@ -511,9 +587,22 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       </div>
       <div id="summary-box" class="hidden">
         <h3 style="margin:16px 0 0">Patient summary</h3>
-        <pre id="summary-text"></pre>
+        <pre id="summary-text" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Patient summary"></pre>
         <div class="actions"><button id="copy-summary">Copy summary</button></div>
       </div>
+      <div id="ask-box">
+        <h3 style="margin:16px 0 6px">Ask about this consultation</h3>
+        <p class="timer-note" style="margin:0 0 8px;text-align:left">
+          Answered from the transcript only. It reports what was said; it will not advise.
+        </p>
+        <div class="ask-row">
+          <input type="text" id="ask-input" maxlength="500" autocomplete="off"
+                 placeholder="Did I mention the cost?" aria-label="Question about this consultation">
+          <button type="button" id="ask-go">Ask</button>
+        </div>
+        <p id="ask-answer" class="ask-answer hidden" role="status"></p>
+      </div>
+
       <div id="consent-box" class="hidden">
         <h3 style="margin:16px 0 0">Consent form text</h3>
         <pre id="consent-text"></pre>
@@ -534,6 +623,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   </section>
 
+  <footer class="pagefoot">
+    <span>AI Notes &middot; nothing is stored</span>
+    <span id="build-stamp"></span>
+  </footer>
+
 </div>
 
 <div id="mask" class="hidden">
@@ -551,6 +645,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      CONFIG — the behavioural knobs. Two of these have DPIA consequences
      and are flagged as such.
      ================================================================== */
+  // Shown in the footer and quotable in a governance query: "which build wrote
+  // this note?". Bump it with any change that alters what the tool produces.
+  var BUILD = '2026-09-03.4';
+
   var CFG = {
     MAX_MS:        30 * 60 * 1000,   // hard cap; auto-stops. Raised from 25 on
                                      // 3 Sep 2026 after real consultations up to
@@ -641,35 +739,63 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     ['plan',                 'Treatment plan']
   ];
   // How the note READS, which is not the order the fields are extracted in.
-  // A clinical note is read chronologically: what brought them in, what was
-  // found, what was discussed, what was decided. The consent fields keep their
-  // Montgomery tags wherever they sit.
+  // A template is a LAYOUT: which fields appear, in what order, under what
+  // headings. It never changes what was extracted, so switching between them
+  // is instant and cannot alter the content of the note.
   //   [key, dictated?]
-  var SECTIONS = [
-    ['Presentation', [
-      ['reasonForAttendance', false],
-      ['medicalHistory',      false]
-    ]],
-    ['Findings', [
-      ['examination',          true],
-      ['radiographicFindings', true]
-    ]],
-    ['Discussion', [
-      ['proposed',         false],
-      ['alternatives',     false],
-      ['patientFactors',   false],
-      ['risks',            false],
-      ['benefits',         false],
-      ['costs',            false],
-      ['patientQuestions', false]
-    ]],
-    ['Outcome', [
-      ['decision',         false],
-      ['informationGiven', false],
-      ['nextStep',         false],
-      ['plan',             true]
-    ]]
-  ];
+  var TEMPLATES = {
+    clinical: {
+      label: 'Clinical note',
+      hint: 'Chronological. What brought them in, what was found, what was discussed, what was decided.',
+      sections: [
+        ['Presentation', [['reasonForAttendance', false], ['medicalHistory', false]]],
+        ['Findings',     [['examination', true], ['radiographicFindings', true]]],
+        ['Discussion',   [['proposed', false], ['alternatives', false], ['patientFactors', false],
+                          ['risks', false], ['benefits', false], ['costs', false], ['patientQuestions', false]]],
+        ['Outcome',      [['decision', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
+      ]
+    },
+    consent: {
+      label: 'Consent record',
+      hint: 'Montgomery order: what was proposed, what alternatives were offered, what risks were named, what was decided.',
+      sections: [
+        ['The discussion', [['proposed', false], ['alternatives', false], ['risks', false],
+                            ['benefits', false], ['patientFactors', false], ['costs', false]]],
+        ['The patient',    [['patientQuestions', false], ['informationGiven', false], ['decision', false]]],
+        ['Context',        [['reasonForAttendance', false], ['medicalHistory', false],
+                            ['examination', true], ['radiographicFindings', true]]],
+        ['Next',           [['nextStep', false], ['plan', true]]]
+      ]
+    },
+    soap: {
+      label: 'SOAP',
+      hint: 'Subjective, objective, assessment, plan.',
+      sections: [
+        ['Subjective', [['reasonForAttendance', false], ['medicalHistory', false], ['patientQuestions', false], ['patientFactors', false]]],
+        ['Objective',  [['examination', true], ['radiographicFindings', true]]],
+        ['Assessment', [['proposed', false], ['alternatives', false], ['risks', false], ['benefits', false]]],
+        ['Plan',       [['decision', false], ['costs', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
+      ]
+    }
+  };
+
+  // Every template must lay out every field exactly once, or a field could be
+  // silently dropped from a record. Checked at load, not left to review.
+  (function verifyTemplates() {
+    var all = FIELDS.map(function (f) { return f[0]; }).concat(DICTATED_FIELDS.map(function (f) { return f[0]; })).sort();
+    Object.keys(TEMPLATES).forEach(function (name) {
+      var keys = [];
+      TEMPLATES[name].sections.forEach(function (sec) { sec[1].forEach(function (k) { keys.push(k[0]); }); });
+      var sorted = keys.slice().sort();
+      if (sorted.join(',') !== all.join(',')) {
+        console.error('AI Notes: template "' + name + '" does not lay out every field exactly once.',
+          { missing: all.filter(function (k) { return keys.indexOf(k) === -1; }),
+            duplicated: keys.filter(function (k, i) { return keys.indexOf(k) !== i; }) });
+      }
+    });
+  })();
+
+  function sections() { return (TEMPLATES[S.template] || TEMPLATES.clinical).sections; }
 
   function fieldSpec(key) {
     for (var i = 0; i < FIELDS.length; i++) if (FIELDS[i][0] === key) return { label: FIELDS[i][1], core: FIELDS[i][2], dictated: false };
@@ -705,6 +831,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     captureNote: null,// set when the encoder captured less than the recorded clock; rendered as a gap
     rateNote: '',     // measured size of the last recording, shown under the draft
     noteLength: 'standard',  // brief | standard | full
+    template: 'clinical',    // layout only; see TEMPLATES
     edited: false,    // the clinician has changed the draft in place
     paused: false,
     pausedAt: 0,      // when the current pause began
@@ -712,6 +839,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     pauses: [],       // [{ atRecordedMs, forMs }] — where in the RECORDING each gap falls
     dictationFromMs: null, // recorded-time point where Dictate was pressed
     summary: null,    // the patient summary, once requested
+    summaryText: null,// its rendered text, which the clinician may correct
+    summaryEdited: false,
     jobId: null,
     turns: null,      // held ONLY between a failed draft and a retry
     note: null,
@@ -731,10 +860,23 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      VIEW
      ================================================================== */
   function show(name) {
+    var changed = S.view !== name;
+    S.view = name;
     ['setup', 'recording', 'working', 'draft'].forEach(function (k) {
       $(k).classList.toggle('hidden', k !== name);
     });
     $('recbar').classList.toggle('hidden', name !== 'recording');
+
+    // Move focus to the section that just appeared. Without this, focus stays
+    // on the button you pressed in a section that is now hidden: a screen
+    // reader announces nothing, and a keyboard user tabs from nowhere.
+    if (!changed) return;
+    var el = $(name);
+    try {
+      el.focus({ preventScroll: true });
+    } catch (e) {
+      el.focus();
+    }
   }
 
   function fail(title, body, retryable) {
@@ -1055,6 +1197,15 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     $('consent-box').classList.add('hidden');
     $('summary-text').textContent = '';
     $('consent-text').textContent = '';
+    $('ask-input').value = '';
+    $('ask-answer').textContent = '';
+    $('ask-answer').classList.add('hidden');
+    $('pause').textContent = 'Pause';
+    $('pause').classList.remove('resuming');
+    $('dictate').textContent = 'Dictate';
+    $('dictate').disabled = false;
+    $('level').classList.remove('near-limit');
+    $('level').style.width = '0%';
     startMeter();
     startTicking();
     show('recording');
@@ -1120,6 +1271,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
     var perSec = elapsed > 30000 ? bytes / (elapsed / 1000) : 0;
     var minutesLeft = perSec > 0 ? Math.floor((CFG.MAX_BYTES * CFG.SIZE_STOP - bytes) / perSec / 60) : null;
+
+    $('level').classList.toggle('near-limit', bytes >= CFG.MAX_BYTES * CFG.SIZE_WARN);
 
     if (bytes >= CFG.MAX_BYTES * CFG.SIZE_WARN) {
       S.sizeNote = 'Approaching the size limit' +
@@ -1307,7 +1460,12 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     } else {
       S.rateNote = '';
     S.noteLength = 'standard';
+    S.template = 'clinical';
     S.edited = false;
+    [].forEach.call(document.querySelectorAll('#template-picker button'), function (b) {
+      b.classList.toggle('on', b.dataset.template === 'clinical');
+    });
+    $('template-hint').textContent = TEMPLATES.clinical.hint;
     setLengthButtons(false);
     }
 
@@ -1557,7 +1715,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       host.appendChild(rn);
     }
 
-    SECTIONS.forEach(function (section) {
+    sections().forEach(function (section) {
       var title = section[0], keys = section[1];
 
       // A section with nothing in it is omitted entirely. Most consultations
@@ -1565,7 +1723,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       var visible = keys.filter(function (k) {
         var spec = fieldSpec(k[0]);
         if (!spec) return false;
-        if (k[1]) return hasText(note[k[0]]);   // dictated: show only if dictated
+        // Dictated fields appear when there is something in them, and also
+        // whenever Dictate was pressed — otherwise a field the model left
+        // empty could not be filled in by hand, unlike every other field here.
+        if (k[1]) return hasText(note[k[0]]) || S.dictationFromMs !== null;
         return true;                            // consent fields always show, gap or not
       });
       if (!visible.length) return;
@@ -1737,7 +1898,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   function noteAsText(note) {
     var out = [];
-    SECTIONS.forEach(function (section) {
+    sections().forEach(function (section) {
       var title = section[0], keys = section[1];
       var lines = [];
       keys.forEach(function (k) {
@@ -1782,7 +1943,22 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     return out.length ? out.join('\n').trim() : 'Nothing in the recording could be summarised for the patient.';
   }
 
-  [].forEach.call(document.querySelectorAll('.length-picker button'), function (btn) {
+  // Layout only. No model call, no redraft: the note is re-rendered from the
+  // same data, so this is instant and cannot change what it says.
+  [].forEach.call(document.querySelectorAll('#template-picker button'), function (btn) {
+    btn.addEventListener('click', function () {
+      resetIdle();
+      if (!TEMPLATES[btn.dataset.template] || btn.dataset.template === S.template) return;
+      S.template = btn.dataset.template;
+      [].forEach.call(document.querySelectorAll('#template-picker button'), function (b) {
+        b.classList.toggle('on', b.dataset.template === S.template);
+      });
+      $('template-hint').textContent = TEMPLATES[S.template].hint;
+      if (S.note) render(S.note);
+    });
+  });
+
+  [].forEach.call(document.querySelectorAll('.length-picker:not(#template-picker) button'), function (btn) {
     btn.addEventListener('click', async function () {
       resetIdle();
       var want = btn.dataset.length;
@@ -1814,7 +1990,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   });
 
   function setLengthButtons(busy) {
-    [].forEach.call(document.querySelectorAll('.length-picker button'), function (b) {
+    [].forEach.call(document.querySelectorAll('.length-picker:not(#template-picker) button'), function (b) {
       b.classList.toggle('on', b.dataset.length === S.noteLength);
       b.disabled = !!busy;
     });
@@ -1823,6 +1999,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   $('make-summary').addEventListener('click', async function () {
     resetIdle();
     if (!S.turns || S.busy) return;
+    // Already drafted. Show what is there — including any corrections made to
+    // it — rather than silently redrafting over them.
     if (S.summary) { $('summary-box').classList.remove('hidden'); return; }
     var btn = $('make-summary');
     btn.disabled = true;
@@ -1842,10 +2020,12 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       if (gen !== S.gen) return;
       if (!res.ok || !data.summary) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
       S.summary = data.summary;
-      $('summary-text').textContent = summaryAsText(S.summary);
+      S.summaryText = summaryAsText(S.summary);
+      $('summary-text').textContent = S.summaryText;
       $('summary-box').classList.remove('hidden');
     } catch (err) {
       if (gen !== S.gen) return;
+      S.summaryText = null;
       $('summary-text').textContent = 'Could not draft the summary: ' + String(err && err.message || err);
       $('summary-box').classList.remove('hidden');
     } finally {
@@ -1854,9 +2034,70 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     }
   });
 
+  async function askQuestion() {
+    resetIdle();
+    var q = $('ask-input').value.trim();
+    if (!q || S.busy) return;
+    if (!S.turns) {
+      $('ask-answer').textContent = 'The transcript is no longer held, so there is nothing to check against.';
+      $('ask-answer').classList.remove('hidden');
+      return;
+    }
+    var btn = $('ask-go');
+    btn.disabled = true;
+    var was = btn.textContent;
+    btn.textContent = 'Asking\u2026';
+    $('ask-answer').textContent = '';
+    $('ask-answer').classList.add('hidden');
+    var gen = S.gen;
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, CFG.SUMMARY_TIMEOUT_MS);
+    try {
+      var res = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: ctrl ? ctrl.signal : undefined,
+        body: JSON.stringify({ kind: 'ask', question: q, turns: S.turns, consultType: S.consultType,
+                               pauses: S.pausesForDraft || [],
+                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (gen !== S.gen) return;
+      if (!res.ok || !data.answer) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+      $('ask-answer').textContent = data.answer;
+      $('ask-answer').classList.remove('hidden');
+    } catch (err) {
+      if (gen !== S.gen) return;
+      $('ask-answer').textContent = 'Could not answer: ' + String(err && err.message || err);
+      $('ask-answer').classList.remove('hidden');
+    } finally {
+      clearTimeout(timer);
+      if (gen === S.gen) { btn.disabled = false; btn.textContent = was; }
+    }
+  }
+
+  $('ask-go').addEventListener('click', askQuestion);
+  $('ask-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); askQuestion(); }
+  });
+
   $('copy-summary').addEventListener('click', function () {
-    if (!S.summary) return;
-    writeClipboard(summaryAsText(S.summary), $('copy-summary'));
+    // Copy what is on screen, which may have been corrected, not what the
+    // model first produced.
+    var text = $('summary-text').textContent.trim();
+    if (!text) return;
+    writeClipboard(text, $('copy-summary'));
+  });
+
+  $('summary-text').addEventListener('paste', function (e) {
+    e.preventDefault();
+    var t = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, t);
+  });
+
+  $('summary-text').addEventListener('input', function () {
+    S.summaryEdited = true;
+    resetIdle();
   });
 
   // Consent form text is assembled from the note itself, with no model call:
@@ -1969,6 +2210,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.pausesForDraft = null;
     S.dictationFromMs = null;
     S.summary = null;
+    S.summaryText = null;
+    S.summaryEdited = false;
     S.rateNote = '';
 
     $('summary-box').classList.add('hidden');
@@ -1977,12 +2220,17 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     $('consent-text').textContent = '';
     $('make-summary').disabled = false;
     $('make-summary').textContent = 'Patient summary';
+    $('ask-input').value = '';
+    $('ask-answer').textContent = '';
+    $('ask-answer').classList.add('hidden');
+    $('ask-go').disabled = false;
     $('pause').textContent = 'Pause';
     $('pause').classList.remove('resuming');
     $('dictate').textContent = 'Dictate';
     $('dictate').disabled = false;
     $('recbar-label').textContent = 'Recording \u2014 conversation only';
     $('timer').classList.remove('paused');
+    $('level').classList.remove('near-limit');
     $('fields').textContent = '';
     $('gaps-list').textContent = '';
     $('notsaid-list').textContent = '';
@@ -2076,6 +2324,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     });
   }
 
+  $('build-stamp').textContent = 'build ' + BUILD;
+  $('template-hint').textContent = TEMPLATES[S.template].hint;
   refreshStart();
   show('setup');
   checkSession();

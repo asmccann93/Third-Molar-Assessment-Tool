@@ -502,6 +502,41 @@ async function testExtract() {
   await handler(mockReq({ body: { turns, pauses: 'not an array' } }), res);
   ok('a malformed pauses field is ignored, not fatal', res.statusCode === 200, `got ${res.statusCode}`);
 
+  // --- ask: reports what was said, and must not become a clinical adviser ---
+  const { buildAskSystemPrompt } = await import('../api/_prompt.mjs');
+  const askSys = buildAskSystemPrompt('third-molar');
+  ok('the ask prompt is bound to the transcript', /Answer ONLY from the transcript/.test(askSys));
+  ok('and explicitly refuses to advise',
+    /never give clinical advice/.test(askSys) && /never suggest a diagnosis or a treatment/.test(askSys));
+  ok('and refuses to judge the consultation', /never comment on the standard of the consultation/.test(askSys));
+  ok('and will not infer from a generality', /is not evidence that a specific risk was named/.test(askSys));
+  ok('and is told the transcript may be spliced', /spliced/.test(askSys));
+
+  let askBody = null;
+  stubFetch(async (c, opts) => { askBody = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: 'The cost was not discussed.' }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { kind: 'ask', question: 'Did I mention the cost?', turns, consultType: 'third-molar' } }), res);
+  ok('an ask returns a plain answer, not a note',
+    res.statusCode === 200 && res.body?.answer === 'The cost was not discussed.' && !res.body?.note, JSON.stringify(res.body).slice(0, 120));
+  ok('using the ask prompt', /checking the draft note against the transcript/.test(askBody?.system || ''));
+  ok('with the question attached to the transcript', /The dentist asks: Did I mention the cost\?/.test(askBody?.messages?.[0]?.content || ''));
+
+  res = mockRes();
+  await handler(mockReq({ body: { kind: 'ask', question: '   ', turns } }), res);
+  ok('an empty question is refused rather than sent', res.statusCode === 400 && res.body?.error === 'empty_question', `${res.statusCode}`);
+
+  stubFetch(async (c, opts) => { askBody = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { kind: 'ask', question: 'x'.repeat(900), turns } }), res);
+  const askedText = (askBody?.messages?.[0]?.content || '').split('The dentist asks: ')[1] || '';
+  ok('an over-long question is truncated, not rejected',
+    res.statusCode === 200 && askedText.length === 500, `${res.statusCode}, question length ${askedText.length}`);
+
+  stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: '' }], stop_reason: 'end_turn' } }));
+  res = mockRes();
+  await handler(mockReq({ body: { kind: 'ask', question: 'anything', turns } }), res);
+  ok('an empty answer is reported rather than shown as blank', res.statusCode === 502 && res.body?.error === 'empty_answer');
+
   // --- who is who: advisory, sanitised, and never fatal ---
   const { parseNote: pn } = await import('../api/_prompt.mjs');
   const bare = { ...goodNote };

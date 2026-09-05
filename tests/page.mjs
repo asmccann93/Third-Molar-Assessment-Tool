@@ -629,7 +629,7 @@ async function testDerivedAndDictation() {
   const note = { reasonForAttendance: 'Missing lower left six.', medicalHistory: null, proposed: 'Single implant at LL6.',
     alternatives: 'Bridge, denture, or leave the space.', risks: 'Failure to integrate, nerve injury, infection.', benefits: null,
     costs: null, patientQuestions: 'How long does it last?', patientFactors: null, informationGiven: null, decision: 'Proceed.',
-    nextStep: 'Surgery booked.', examination: 'Adequate ridge width clinically.', radiographicFindings: 'CBCT: 11 mm to the canal.',
+    nextStep: 'Surgery booked.', examination: 'Adequate ridge width clinically.', radiographicFindings: null,
     plan: 'Straumann BLT 4.1 x 10 at LL6, delayed loading.',
     implantLog: [{ site: 'LL6', system: 'Straumann BLT', diameter: '4.1', length: '10', lot: 'LOT9', torque: '35 Ncm', isq: '71', graft: null, notes: null }],
     gaps: ['Costs not mentioned'] };
@@ -669,6 +669,7 @@ async function testDerivedAndDictation() {
   // container it destroys these children, and the test must report that as a
   // failure rather than crashing the run.
   ok('the bar says so', /Dictating/.test($(doc, 'recbar-label')?.textContent || ''), $(doc, 'recbar-label')?.textContent ?? '#recbar-label was destroyed');
+  const dictatedAt = true;
   // Pausing and resuming mid-dictation must not put "conversation only" back
   // on the red bar: the patient has left and that would be a false statement.
   click($(doc, 'pause'));
@@ -715,8 +716,13 @@ async function testDerivedAndDictation() {
   ok('a consent field is never tagged as dictated',
     ![...$(doc, 'fields').querySelectorAll('.field')].some((f) =>
       f.querySelector('.dictated-tag') && f.querySelector('h3').textContent === 'Treatment proposed'));
-  ok('with the dictated fields', /Adequate ridge width/.test(text) && /11 mm to the canal/.test(text));
+  ok('with the dictated fields', /Adequate ridge width/.test(text));
   ok('and the implant log as a table', doc.querySelector('table.implant-log') && /LOT9/.test(doc.querySelector('table.implant-log').textContent));
+  // Every other field on the page can be typed into. A dictated field the model
+  // left empty must be too, or there is no way to add it without re-recording.
+  ok('a dictated field the model left empty is still offered after Dictate',
+    [...$(doc, 'fields').querySelectorAll('.field h3')].some((h) => h.textContent === 'Radiographic findings'),
+    [...$(doc, 'fields').querySelectorAll('.field h3')].map((h) => h.textContent).join(' | '));
   let copied = '';
   win.navigator.clipboard.writeText = async (t) => { copied = t; };
   click($(doc, 'copy-all'));
@@ -746,10 +752,138 @@ async function testDerivedAndDictation() {
   ok('the summary renders the sections that came back', /What we discussed/.test(sm) && /Replacing your lower left/.test(sm));
   ok('and omits the ones that were null', !/What happens next/.test(sm), sm);
 
+  // The summary is the only document that leaves the building with the patient,
+  // and it used to be the only one that could not be corrected.
+  const smEl = $(doc, 'summary-text');
+  ok('the patient summary can be corrected', smEl.getAttribute('contenteditable') === 'true');
+  smEl.textContent = 'What we discussed\nReplacing your lower left back tooth. Corrected by hand.';
+  smEl.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(30);
+  let copiedSm = '';
+  win.navigator.clipboard.writeText = async (t) => { copiedSm = t; };
+  click($(doc, 'copy-summary'));
+  await tick(40);
+  ok('and copying it takes the correction, not the model output',
+    /Corrected by hand\./.test(copiedSm), copiedSm.slice(0, 160));
+  click($(doc, 'make-summary'));
+  await tick(60);
+  ok('pressing the button again does not silently overwrite the correction',
+    /Corrected by hand\./.test(smEl.textContent), smEl.textContent.slice(0, 120));
+
   // Everything derived dies with the draft.
   click($(doc, 'clear'));
   await tick(30);
   ok('Clear removes the summary and consent text too', $(doc, 'summary-box').classList.contains('hidden') && $(doc, 'summary-text').textContent === '' && $(doc, 'consent-text').textContent === '');
+}
+
+async function testPolish() {
+  section('Polish: focus, print, templates, and asking about the consultation');
+  const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
+
+  // 1. focus follows the view change
+  ok('each view is focusable and labelled', (src.match(/<section id="\w+"[^>]*tabindex="-1"/g) || []).length === 4,
+    String((src.match(/<section id="\w+"[^>]*tabindex="-1"/g) || []).length));
+  ok('and show() moves focus to the section that appeared', /el\.focus\(\{ preventScroll: true \}\)/.test(src));
+
+  // 2. print
+  ok('there is a print stylesheet', /@media print \{[\s\S]*?\.card \{ border: none/.test(src));
+  ok('controls and screen-only notes are hidden on paper',
+    /#ask-box \{ display: none !important; \}/.test(src) && /\.storage-note,/.test(src));
+
+  // 3. the promise, stated
+  ok('the page says nothing is saved', /class="storage-note"/.test(src) && /Nothing is saved\./.test(src));
+
+  // 4. build stamp
+  ok('a build is shown and quotable', /var BUILD = '[\d.-]+';/.test(src) && /build-stamp/.test(src));
+
+  let asked = null;
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind === 'ask') { asked = b; return { ok: true, status: 200, json: async () => ({ status: 'done', answer: 'The cost was not discussed.' }) }; }
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note: {
+          reasonForAttendance: 'Pain from LL8.', medicalHistory: null, proposed: 'Surgical removal.',
+          alternatives: null, risks: 'Numbness.', benefits: null, costs: null, patientQuestions: null,
+          patientFactors: null, informationGiven: null, decision: 'Proceed.', nextStep: 'Book.',
+          examination: 'LL8 mesioangular.', gaps: [], notSaid: [] } }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+
+  // 5. templates are layout only
+  const heads = () => [...$(doc, 'fields').children].filter((e) => e.classList.contains('section-heading')).map((e) => e.textContent);
+  const fields = () => [...$(doc, 'fields').querySelectorAll('.field h3')].map((h) => h.textContent);
+  ok('the default layout is the clinical one', heads().join('|') === 'Presentation|Findings|Discussion|Outcome', heads().join('|'));
+  const before = fields().slice().sort().join('|');
+  const soap = [...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap');
+  click(soap);
+  await tick(40);
+  ok('switching to SOAP relayouts the note', heads().join('|') === 'Subjective|Objective|Assessment|Plan', heads().join('|'));
+  ok('with exactly the same fields, none lost or duplicated', fields().slice().sort().join('|') === before);
+  ok('and without a model call', !win.__extraCall);
+  const consentT = [...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'consent');
+  click(consentT);
+  await tick(40);
+  ok('the consent layout leads with the discussion', heads()[0] === 'The discussion', heads().join('|'));
+  ok('the picker shows which layout is active', consentT.classList.contains('on') && !soap.classList.contains('on'));
+
+  // 6. ask
+  $(doc, 'ask-input').value = 'Did I mention the cost?';
+  click($(doc, 'ask-go'));
+  await tick(200);
+  ok('a question is sent as an ask, with the transcript', asked?.kind === 'ask' && asked.turns.length === DEFAULT_TURNS.length);
+  ok('and the question itself', asked?.question === 'Did I mention the cost?');
+  ok('the answer is shown', /not discussed/.test($(doc, 'ask-answer').textContent), $(doc, 'ask-answer').textContent);
+  click($(doc, 'clear'));
+  await tick(40);
+  ok('Clear empties the question and answer',
+    $(doc, 'ask-input').value === '' && $(doc, 'ask-answer').classList.contains('hidden'));
+}
+
+async function testStyles() {
+  section('Stylesheet integrity and chairside layout');
+  const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
+  const css = [...src.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
+
+  // Every custom property that is USED must be DECLARED. --paper was referenced
+  // by three rules and declared nowhere, so those backgrounds silently fell
+  // through to transparent. A missing variable never errors; it just looks
+  // slightly wrong, which is exactly why it survived.
+  const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+  // A var() with a fallback is legitimate; a bare one that is never declared
+  // resolves to nothing and just looks slightly wrong.
+  const bare = [...css.matchAll(/var\((--[a-z0-9-]+)\s*\)/g)].map((m) => m[1]);
+  const undeclared = [...new Set(bare)].filter((v) => !declared.has(v));
+  ok('every CSS variable used without a fallback is declared', undeclared.length === 0, undeclared.join(', '));
+
+  // The recording view is used one-handed, chairside, possibly gloved.
+  ok('the four recording controls do not stay in one row on a phone',
+    /@media \(max-width: 480px\) \{[\s\S]{0,400}\.record-row \{ flex-wrap: wrap; \}/.test(css));
+  ok('and Stop and Discard each get their own full-width row there',
+    /\.record-row \.btn-stop,[\s\S]{0,80}\.record-row \.btn-discard \{ flex: 1 1 100%; \}/.test(css));
+  ok('the minimum touch target is still honoured', /--tap:\s*48px/.test(css));
+
+  // The size warning was text under a bar the eye is already on.
+  ok('the level meter changes colour as the size limit approaches',
+    /\.level > i\.near-limit \{ background: var\(--warn-ink\); \}/.test(css) &&
+    /classList\.toggle\('near-limit', bytes >= CFG\.MAX_BYTES \* CFG\.SIZE_WARN\)/.test(src));
+  ok('and it is cleared when a new recording starts and on wipe',
+    (src.match(/\$\('level'\)\.classList\.remove\('near-limit'\)/g) || []).length === 2,
+    String((src.match(/\$\('level'\)\.classList\.remove\('near-limit'\)/g) || []).length));
+
+  // Hover never fires on a touch screen.
+  ok('Lock has a pressed state, not only a hover state', /#lock:active/.test(css));
 }
 
 async function testEditingAndLength() {
@@ -1111,6 +1245,8 @@ await testPauseResume();
 await testDerivedAndDictation();
 await testNotSaidPanel();
 await testEditingAndLength();
+await testStyles();
+await testPolish();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
