@@ -8,7 +8,16 @@
  * for the clinician to correct.
  *
  *   third-molar         reviewed by AM, 5 September 2026
- *   all other types     STILL A FIRST DRAFT — not yet reviewed
+ *   implant-consult     reviewed by AM, 5 September 2026 — all 20 kept as drafted
+ *   extraction-surgery  reviewed by AM, 5 September 2026 — all 13 kept as drafted
+ *   sedation            EXPANDED 5 September 2026 at AM's request (7 -> 19)
+ *   implant-surgery     EXPANDED 5 September 2026 at AM's request (5 -> 15)
+ *
+ *                       For these two, AM specified WHAT was missing — fitness
+ *                       for sedation, the escort staying, surgical risks and
+ *                       implant post-op — and approved the result. The wording
+ *                       of each new item is the assistant's. If one reads
+ *                       oddly on a real case, that is why.
  *
  * For an unreviewed type, "no gaps flagged" means "nothing the draft list
  * looked for was missing", not a clinical all-clear. Nothing here is advice to
@@ -139,7 +148,23 @@ export const CHECKLISTS = {
     // Mostly dictated. The checklist is what the CONVERSATION on the day should still cover.
     items: [
       { key: 'consent-confirmed', ask: 'The clinician confirmed on the day that the patient still wished to proceed and had no new questions.', gap: 'Not mentioned: consent re-confirmed on the day.' },
+      { key: 'risks-revisited', ask: 'The main risks were revisited on the day, not only referred back to the consultation.', gap: 'Not mentioned: the main risks revisited on the day.' },
+
+      // Surgical risks. Added 5 September 2026 at AM's request: the list assumed
+      // the consult had covered everything, which is a poor assumption when the
+      // consult may have been months earlier.
+      { key: 'pain-swelling',  ask: 'The clinician told the patient to expect pain, swelling and bruising afterwards.', gap: 'Not mentioned: post-operative pain, swelling and bruising.' },
+      { key: 'bleeding',       ask: 'The clinician mentioned bleeding from the surgical site.', gap: 'Not mentioned: bleeding.' },
+      { key: 'infection',      ask: 'The clinician mentioned infection of the surgical site or the implant.', gap: 'Not mentioned: infection of the site or the implant.' },
+      { key: 'nerve-sinus',    ask: 'For a lower posterior site, altered sensation of the lip and chin was mentioned; for an upper posterior site, the sinus was mentioned. Report found if the one relevant to the site was mentioned.', gap: 'Not mentioned: nerve injury (lower) or sinus involvement (upper), as relevant to the site.' },
+      { key: 'site-not-usable', ask: 'What happens if the site cannot take the implant once opened \u2014 abandoning, grafting, or placing it later \u2014 was discussed.', gap: 'Not mentioned: what happens if the site cannot take the implant on the day.' },
+      { key: 'early-failure',  ask: 'The clinician mentioned that the implant may fail to integrate in the healing period.', gap: 'Not mentioned: the implant may fail to integrate while healing.' },
+
+      // Post-operative instructions specific to a healing implant.
       { key: 'aftercare',      ask: 'Post-operative instructions were given, including analgesia, hygiene around the site, and when to seek help.', gap: 'Not mentioned: post-operative instructions.' },
+      { key: 'site-care',      ask: 'Care of the site itself was explained \u2014 not disturbing it, how to clean around it, and any mouthwash.', gap: 'Not mentioned: how to care for and clean around the site while it heals.' },
+      { key: 'diet-smoking',   ask: 'Diet afterwards, and avoiding smoking during healing, were discussed.', gap: 'Not mentioned: soft diet, and not smoking while it heals.' },
+      { key: 'provisional',    ask: 'Whether a temporary restoration or an existing denture can be worn over the site, and any adjustment needed, was discussed.', gap: 'Not mentioned: whether a temporary or existing denture can be worn over the site.' },
       { key: 'review',         ask: 'A review appointment or the next stage was arranged.', gap: 'Not mentioned: review or next stage.' },
       MH.anticoagulants, MH.allergies,
     ]
@@ -147,12 +172,30 @@ export const CHECKLISTS = {
 
   sedation: {
     label: 'Sedation',
+    // Expanded 5 September 2026 at AM's request, from five items plus history.
+    // Fitness for sedation was absent entirely, which mattered because the site
+    // has a separate ASA tool and this list read as though it did not exist.
     items: [
-      { key: 'escort',         ask: 'The need for a responsible adult escort was discussed.', gap: 'Not mentioned: the escort requirement.' },
-      { key: 'no-driving',     ask: 'The patient was told not to drive, operate machinery, or make important decisions for the rest of the day, or the stated period.', gap: 'Not mentioned: no driving or important decisions afterwards.' },
-      { key: 'eating',         ask: 'Instructions about eating and drinking before the appointment were given.', gap: 'Not mentioned: eating and drinking before the appointment.' },
       { key: 'technique',      ask: 'The sedation technique and what the patient will experience were explained.', gap: 'Not mentioned: what the sedation involves and what the patient will feel.' },
       { key: 'amnesia',        ask: 'The patient was told they may not remember the treatment.', gap: 'Not mentioned: that they may not remember the treatment.' },
+      { key: 'sedation-limits', ask: 'What happens if the sedation is not enough, or the patient cannot tolerate the treatment under it, was discussed \u2014 stopping, rescheduling, or referral.', gap: 'Not mentioned: what happens if the sedation is not enough or is not tolerated.' },
+      { key: 'alt-sedation',   ask: 'Alternatives to sedation were mentioned \u2014 treatment under local anaesthetic alone, or referral for general anaesthetic.', gap: 'Not offered: local anaesthetic alone, or general anaesthetic, as alternatives.' },
+      { key: 'separate-consent', ask: 'The dental treatment itself was discussed and agreed, separately from agreeing to the sedation.', gap: 'Not clear: the treatment itself was agreed, separately from the sedation.' },
+
+      { key: 'eating',         ask: 'Instructions about eating and drinking before the appointment were given.', gap: 'Not mentioned: eating and drinking before the appointment.' },
+      { key: 'meds-on-the-day', ask: 'Whether to take their usual medication on the day was discussed.', gap: 'Not mentioned: whether to take their usual medication on the day.' },
+
+      { key: 'escort',         ask: 'The need for a responsible adult escort was discussed.', gap: 'Not mentioned: the escort requirement.' },
+      { key: 'escort-stays',   ask: 'The patient was told the escort must STAY WITH THEM afterwards, not simply take them home.', gap: 'Not mentioned: that the escort must stay with them afterwards, not just take them home.' },
+      { key: 'recovery',       ask: 'How long they will be kept in recovery, and how they will feel for the rest of the day, was explained.', gap: 'Not mentioned: recovery time and how they will feel afterwards.' },
+      { key: 'no-driving',     ask: 'The patient was told not to drive, operate machinery, or make important decisions for the rest of the day, or the stated period.', gap: 'Not mentioned: no driving or important decisions afterwards.' },
+      { key: 'responsibilities', ask: 'Care of children or dependants, and time off work, after the appointment was discussed.', gap: 'Not mentioned: childcare, dependants, or time off work afterwards.' },
+
+      { key: 'mh-fitness',     ask: 'The patient\u2019s general fitness for sedation was assessed or discussed \u2014 an ASA grade, or their general health and any heart or chest problems.', gap: 'Not asked about: general fitness for sedation (ASA grade, heart or chest problems).' },
+      { key: 'mh-airway',      ask: 'Snoring, sleep apnoea, or any airway or breathing problem was asked about.', gap: 'Not asked about: snoring, sleep apnoea, or breathing problems.' },
+      { key: 'mh-weight',      ask: 'Weight or body mass index was asked about or recorded, where it affects the sedation.', gap: 'Not asked about: weight or BMI.' },
+      { key: 'mh-pregnancy',   ask: 'Pregnancy or breastfeeding was asked about, where it applies.', gap: 'Not asked about: pregnancy or breastfeeding.' },
+      { key: 'mh-sedating-meds', ask: 'Other medication that may interact with sedation was asked about \u2014 opioids, benzodiazepines, antidepressants, or recreational drugs and alcohol.', gap: 'Not asked about: other sedating medication, alcohol or recreational drugs.' },
       MH.allergies, MH.anticoagulants,
     ]
   },
