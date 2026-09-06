@@ -130,7 +130,8 @@ button:disabled { opacity: .45; cursor: default; }
   .masthead #lock, .storage-note, .session-note,
   #recbar, #setup, #recording, #working, #mask, #error-actions,
   .length-picker, #edit-hint, #template-hint, .rate-note, .actions,
-  .field-head .copy, .derived .actions, #ask-box, #referral-box { display: none !important; }
+  .field-head .copy, .derived .actions, #ask-box, #referral-box,
+  .mic-check, #idle-warn { display: none !important; }
   .card { border: none; padding: 0; margin: 0 0 14pt; break-inside: avoid; }
   .card > h2 { color: #000; }
   .field { break-inside: avoid; }
@@ -298,6 +299,23 @@ button:disabled { opacity: .45; cursor: default; }
   transition: width .08s linear, background-color .3s linear;
 }
 .level > i.near-limit { background: var(--warn-ink); }
+
+.mic-check { margin: 0 0 14px; }
+.mic-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.mic-row select {
+  flex: 1 1 200px; min-width: 0; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+  font: inherit; font-size: .9375rem;
+}
+#idle-warn {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 40;
+  max-width: min(520px, calc(100vw - 32px));
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 12px 16px; border-radius: 10px;
+  border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn-ink);
+  font-size: .9375rem; box-shadow: 0 6px 24px rgba(0,0,0,.14);
+}
+#idle-warn button { flex: 0 0 auto; }
 
 /* Words that were said, surfaced for the clinician to check against urgent
    pathway criteria. Uses the same warning palette as the gaps panel, and like
@@ -520,6 +538,16 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
     <div class="card">
       <h2>Record</h2>
+      <div class="mic-check">
+        <div class="mic-row">
+          <button type="button" id="mic-test">Check microphone</button>
+          <select id="mic-picker" class="hidden" aria-label="Microphone"></select>
+        </div>
+        <div class="level" aria-hidden="true"><i id="mic-level"></i></div>
+        <p class="timer-note" id="mic-note" role="status" style="margin:6px 0 0;text-align:left">
+          Worth doing once per surgery. Nothing is recorded by this check.
+        </p>
+      </div>
       <div class="record-row">
         <button class="btn-record" id="start" disabled>Start recording</button>
       </div>
@@ -529,6 +557,12 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     </div>
 
   </section>
+
+  <div id="idle-warn" class="hidden" role="status">
+    <strong>Still there?</strong>
+    <span id="idle-warn-body"></span>
+    <button type="button" id="idle-keep">Keep this open</button>
+  </div>
 
   <!-- ============ RECORDING ============ -->
   <section id="recording" class="hidden" tabindex="-1" aria-labelledby="recording-h">
@@ -688,7 +722,14 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-06.3';
+  var BUILD = '2026-09-06.4';
+
+  // Two switches read from the query string. The URL is not storage — nothing is
+  // remembered between visits — but it lets a surgery keep a home-screen
+  // shortcut per clinic, and lets the audio processing be A/B tested without a
+  // deploy. Neither carries anything about a patient.
+  var PARAMS   = new URLSearchParams(location.search);
+  var RAW_AUDIO = PARAMS.get('audio') === 'raw';
 
   var CFG = {
     MAX_MS:        30 * 60 * 1000,   // hard cap; auto-stops. Raised from 25 on
@@ -731,6 +772,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     SESSION_WARN_S: 25 * 60,   // refuse to start a recording with less than this
                                // left on the session
     SIZE_WARN:     0.80,       // warn at this fraction of MAX_BYTES
+    IDLE_WARN_MS:  2 * 60 * 1000,    // warn this long BEFORE the idle wipe. The
+                                     // wipe is irreversible and nothing is
+                                     // saved, so destroying a draft without
+                                     // asking first is the one thing the idle
+                                     // timer should not do.
     SIZE_STOP:     0.95,       // stop here, while the result still fits
 
     // DPIA §2.1 step 6 / R13. The spec says destroy on tab hide. That would
@@ -863,6 +909,13 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     startedAt: 0,
     tickId: null,
     idleId: null,
+    idleWarnId: null,
+    micId: null,      // chosen input device, memory only, gone with everything else
+    micStream: null,  // the pre-flight test stream; never the recording stream
+    micCtx: null,
+    micAnalyser: null,
+    micRaf: null,
+    wakeLock: null,
     audioCtx: null,
     source: null,     // MediaStreamAudioSourceNode; feeds both the meter and the encoder
     analyser: null,
@@ -947,6 +1000,100 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     toastId = setTimeout(function () { el.remove(); }, 1800);
   }
 
+  /* ------------------------------------------------------------------
+     Microphone: choose it, and prove it works BEFORE the appointment.
+     The recording is never saved anywhere, so a consultation captured on the
+     wrong input — the laptop lid mic across the surgery instead of the headset
+     — is unrecoverable, and the first evidence of it used to be the transcript.
+     This check encodes nothing and uploads nothing; it only draws the level.
+     ------------------------------------------------------------------ */
+
+  // Device labels are blank until the browser has granted microphone access at
+  // least once, so the picker is only populated after a successful getUserMedia.
+  async function listMics() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+    try {
+      var devices = await navigator.mediaDevices.enumerateDevices();
+      return devices.filter(function (d) { return d.kind === 'audioinput'; });
+    } catch (err) { return []; }
+  }
+
+  function stopMicTest() {
+    if (S.micRaf) { cancelAnimationFrame(S.micRaf); S.micRaf = null; }
+    if (S.micStream) {
+      S.micStream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      S.micStream = null;
+    }
+    if (S.micCtx) { try { S.micCtx.close(); } catch (e) {} S.micCtx = null; }
+    S.micAnalyser = null;
+    $('mic-level').style.width = '0%';
+  }
+
+  function micTestFrame() {
+    if (!S.micAnalyser) return;
+    var data = new Uint8Array(S.micAnalyser.fftSize);
+    S.micAnalyser.getByteTimeDomainData(data);
+    var peak = 0;
+    for (var i = 0; i < data.length; i++) {
+      var d = Math.abs(data[i] - 128);
+      if (d > peak) peak = d;
+    }
+    $('mic-level').style.width = Math.min(100, (peak / 128) * 260) + '%';
+    if (peak > 4) $('mic-note').textContent = 'Picking you up. This is the input the recording will use.';
+    S.micRaf = requestAnimationFrame(micTestFrame);
+  }
+
+  async function runMicTest() {
+    stopMicTest();
+    $('mic-note').textContent = 'Asking for the microphone\u2026';
+    try {
+      S.micStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() });
+    } catch (err) {
+      $('mic-note').textContent = 'The browser refused access. Check the padlock in the address bar and allow it for this site.';
+      return;
+    }
+    var mics = await listMics();
+    var picker = $('mic-picker');
+    picker.textContent = '';
+    mics.forEach(function (d, i) {
+      var opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || ('Microphone ' + (i + 1));
+      picker.appendChild(opt);
+    });
+    if (mics.length > 1) {
+      picker.classList.remove('hidden');
+      // Reflect what the browser actually gave us, which may not be the default
+      // — but never overwrite a device the clinician has already chosen. Their
+      // choice is the whole point of the picker; adopting the track's reported
+      // device here would silently revert it on the next check.
+      var track = S.micStream.getAudioTracks && S.micStream.getAudioTracks()[0];
+      var actual = track && track.getSettings && track.getSettings().deviceId;
+      if (!S.micId && actual) S.micId = actual;
+      if (S.micId) picker.value = S.micId;
+    }
+    $('mic-note').textContent = mics.length > 1
+      ? 'Say something. If the bar stays flat, pick a different microphone.'
+      : 'Say something. If the bar stays flat, the microphone is not hearing you.';
+    try {
+      S.micCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var src = S.micCtx.createMediaStreamSource(S.micStream);
+      S.micAnalyser = S.micCtx.createAnalyser();
+      S.micAnalyser.fftSize = 512;
+      src.connect(S.micAnalyser);
+      micTestFrame();
+    } catch (err) {
+      $('mic-note').textContent = 'Microphone open, but this browser would not draw the level.';
+    }
+  }
+
+  $('mic-test').addEventListener('click', function () { resetIdle(); runMicTest(); });
+  $('mic-picker').addEventListener('change', function () {
+    S.micId = $('mic-picker').value || null;
+    resetIdle();
+    runMicTest();
+  });
+
   /* ==================================================================
      SETUP
      ================================================================== */
@@ -965,6 +1112,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       refreshStart();
     });
     $('types').appendChild(b);
+    // ?type=third-molar lands straight on the right clinic. Validated against
+    // the real list, so a typo or a stale bookmark simply selects nothing.
+    if (PARAMS.get('type') === pair[0]) b.click();
   });
 
   $('consent').addEventListener('change', function (e) {
@@ -1179,14 +1329,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     }
 
     try {
-      S.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
+      S.stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() });
     } catch (err) {
       stopTracks();
       return fail('Microphone blocked',
@@ -1276,6 +1419,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     $('dictate').disabled = false;
     $('level').classList.remove('near-limit');
     $('level').style.width = '0%';
+    stopMicTest();
     startMeter();
     startTicking();
     show('recording');
@@ -1360,6 +1504,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   }
 
   function startMeter() {
+    takeWakeLock();
     try {
       S.analyser = S.audioCtx.createAnalyser();
       S.analyser.fftSize = 512;
@@ -1497,7 +1642,53 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     $('recbar').classList.add('hidden');
   }
 
+  // One place decides what we ask the microphone for, so the pre-flight check
+  // and the real recording can never diverge.
+  //
+  // RAW_AUDIO turns the browser's processing off. Noise suppression and
+  // automatic gain are sensible defaults for two people at different distances
+  // from one microphone, and they can also smear speaker separation and chew
+  // through dental terminology. Nobody has measured which way it falls for this
+  // tool. Record the same consultation twice, once with ?audio=raw, and compare
+  // the transcripts before changing the default.
+  function micConstraints() {
+    var a = { channelCount: 1 };
+    if (RAW_AUDIO) {
+      a.echoCancellation = false;
+      a.noiseSuppression = false;
+      a.autoGainControl = false;
+    } else {
+      a.echoCancellation = true;
+      a.noiseSuppression = true;
+      a.autoGainControl = true;
+    }
+    if (S.micId) a.deviceId = { exact: S.micId };
+    return a;
+  }
+
+  /* A 20-minute consultation on a surgery tablet outlives the screen timeout.
+     When the screen sleeps the page can be suspended and the encoder starved,
+     and the recording exists nowhere else. Held only while recording, released
+     the moment it stops, and re-taken if the tab comes back to the foreground —
+     the browser drops the lock whenever the page is hidden. */
+  async function takeWakeLock() {
+    if (!('wakeLock' in navigator) || S.wakeLock) return;
+    try {
+      S.wakeLock = await navigator.wakeLock.request('screen');
+      S.wakeLock.addEventListener('release', function () { S.wakeLock = null; });
+    } catch (err) {
+      // Refused, unsupported, or the tab is not visible. Recording is unaffected.
+    }
+  }
+
+  function releaseWakeLock() {
+    if (!S.wakeLock) return;
+    try { S.wakeLock.release(); } catch (e) {}
+    S.wakeLock = null;
+  }
+
   function stopTracks() {
+    releaseWakeLock();
     if (S.stream) {
       S.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
       S.stream = null;
@@ -2363,6 +2554,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     if (S.tickId) { clearInterval(S.tickId); S.tickId = null; }
     if (S.rafId) { cancelAnimationFrame(S.rafId); S.rafId = null; }
     if (S.idleId) { clearTimeout(S.idleId); S.idleId = null; }
+    if (S.idleWarnId) { clearTimeout(S.idleWarnId); S.idleWarnId = null; }
+    hideIdleWarning();
+    stopMicTest();
+    releaseWakeLock();
 
     if (S.recorder && S.recorder.state !== 'inactive') {
       // gen is already bumped, so onRecorderStop will drop the pages.
@@ -2455,9 +2650,29 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   });
 
   /* ---- idle ---- */
+  function hideIdleWarning() {
+    $('idle-warn').classList.add('hidden');
+  }
+
+  function showIdleWarning() {
+    // Only worth interrupting for if there is something to lose.
+    if (!S.note && !S.turns) return;
+    var mins = Math.round(CFG.IDLE_WARN_MS / 60000);
+    $('idle-warn-body').textContent =
+      'This clears in about ' + mins + ' minute' + (mins === 1 ? '' : 's') +
+      ' and the draft cannot be recovered.';
+    $('idle-warn').classList.remove('hidden');
+  }
+
   function resetIdle() {
+    hideIdleWarning();
     if (S.idleId) clearTimeout(S.idleId);
+    if (S.idleWarnId) clearTimeout(S.idleWarnId);
+    // Ask before destroying, not after. The wipe itself is unchanged; this only
+    // gives the clinician a chance to say they are still there.
+    S.idleWarnId = setTimeout(showIdleWarning, Math.max(0, CFG.IDLE_WIPE_MS - CFG.IDLE_WARN_MS));
     S.idleId = setTimeout(function () {
+      hideIdleWarning();
       if (S.recorder && S.recorder.state === 'recording') { resetIdle(); return; }
       // Do not destroy a consultation that is mid-transcription. The clinician
       // is waiting on it, not idle, and the audio only exists in memory.
@@ -2473,6 +2688,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     }, CFG.IDLE_WIPE_MS);
   }
 
+  $('idle-keep').addEventListener('click', function () { resetIdle(); });
+
   ['pointerdown', 'keydown', 'scroll'].forEach(function (evt) {
     window.addEventListener(evt, function () { if (S.idleId) resetIdle(); }, { passive: true });
   });
@@ -2486,6 +2703,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   $('unmask').addEventListener('click', function () { unmask(); resetIdle(); });
 
   document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      if (S.recorder && (S.recorder.state === 'recording' || S.recorder.state === 'paused')) takeWakeLock();
+      return;
+    }
     if (document.visibilityState !== 'hidden') return;
     if (CFG.WIPE_ON_HIDE) { wipe(); show('setup'); return; }
     mask();

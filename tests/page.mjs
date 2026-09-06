@@ -49,8 +49,25 @@ async function boot({ session = { authenticated: true, expiresIn: 40000 }, onFet
       win.confirm = () => true;
       win.alert = () => {};
       win.navigator.clipboard = { writeText: async () => {} };
+      win.__mic = { constraints: [], devices: [] };
       Object.defineProperty(win.navigator, 'mediaDevices', {
-        value: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) },
+        value: {
+          getUserMedia: async (c) => {
+            win.__mic.constraints.push(c);
+            return {
+              getTracks: () => [{ stop() {} }],
+              getAudioTracks: () => [{ stop() {}, getSettings: () => ({ deviceId: win.__mic.actual || 'default' }) }]
+            };
+          },
+          enumerateDevices: async () => win.__mic.devices
+        },
+        configurable: true
+      });
+      win.__wake = { taken: 0, released: 0 };
+      Object.defineProperty(win.navigator, 'wakeLock', {
+        value: { request: async () => { win.__wake.taken++; return {
+          addEventListener() {}, release() { win.__wake.released++; }
+        }; } },
         configurable: true
       });
       win.scrollTo = () => {};
@@ -788,7 +805,7 @@ async function testPolish() {
   // 2. print
   ok('there is a print stylesheet', /@media print \{[\s\S]*?\.card \{ border: none/.test(src));
   ok('controls and screen-only notes are hidden on paper',
-    /#ask-box, #referral-box \{ display: none !important; \}/.test(src) && /\.storage-note,/.test(src));
+    /#ask-box, #referral-box,\s*\n\s*\.mic-check, #idle-warn \{ display: none !important; \}/.test(src) && /\.storage-note,/.test(src));
 
   // 3. the promise, stated
   ok('the page says nothing is saved', /class="storage-note"/.test(src) && /Nothing is saved\./.test(src));
@@ -1301,6 +1318,111 @@ async function testFailedDraftNeverShowsThePreviousPatientsNote() {
     !$(doc, 'error-actions').classList.contains('hidden'));
 }
 
+/**
+ * The recording exists nowhere but memory, so a consultation captured on the
+ * wrong input is gone. The check has to use the SAME constraints the recording
+ * will use, or it proves nothing.
+ */
+async function testMicCheck() {
+  section('Pre-flight microphone check');
+  const ctx = await boot();
+  const { doc, win } = ctx;
+  win.__mic.devices = [
+    { kind: 'audioinput', deviceId: 'built-in', label: 'MacBook Microphone' },
+    { kind: 'audioinput', deviceId: 'headset', label: 'Surgery Headset' }
+  ];
+  win.__mic.actual = 'built-in';
+
+  ok('the picker is hidden until the browser has granted access',
+    $(doc, 'mic-picker').classList.contains('hidden'));
+
+  click($(doc, 'mic-test'));
+  await tick(60);
+  ok('checking opens the microphone', win.__mic.constraints.length >= 1);
+  ok('and nothing is uploaded by the check',
+    !ctx.calls.some((c) => /\/api\/(transcribe|extract)/.test(c.url)));
+  ok('both microphones are offered once labels are available',
+    $(doc, 'mic-picker').options.length === 2, String($(doc, 'mic-picker').options.length));
+  ok('and the picker appears when there is a choice to make',
+    !$(doc, 'mic-picker').classList.contains('hidden'));
+  ok('it shows the one actually in use, not just the first in the list',
+    $(doc, 'mic-picker').value === 'built-in', $(doc, 'mic-picker').value);
+
+  // Choosing a device must bind the RECORDING to it, not only the test.
+  const before = win.__mic.constraints.length;
+  $(doc, 'mic-picker').value = 'headset';
+  $(doc, 'mic-picker').dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(60);
+  ok('choosing a different microphone re-opens it', win.__mic.constraints.length > before);
+
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(80);
+  const rec = win.__mic.constraints[win.__mic.constraints.length - 1];
+  ok('and the recording uses the chosen device, not the browser default',
+    rec && rec.audio && rec.audio.deviceId && rec.audio.deviceId.exact === 'headset',
+    JSON.stringify(rec));
+}
+
+/**
+ * A surgery tablet sleeps long before a 20-minute consultation ends, and a
+ * suspended page starves the encoder.
+ */
+async function testWakeLock() {
+  section('Screen wake lock while recording');
+  const ctx = await boot();
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  ok('no lock is held before recording', win.__wake.taken === 0);
+  click($(doc, 'start'));
+  await tick(80);
+  ok('recording takes a screen wake lock', win.__wake.taken >= 1, String(win.__wake.taken));
+  click($(doc, 'stop'));
+  await tick(300);
+  ok('and stopping releases it rather than holding the screen on all day',
+    win.__wake.released >= 1, String(win.__wake.released));
+}
+
+/**
+ * The idle wipe is irreversible and nothing is saved. It used to destroy the
+ * draft and then report it.
+ */
+async function testIdleWarning() {
+  section('Idle wipe warns before it destroys');
+  const src = html;
+  ok('there is a warning window before the wipe', /IDLE_WARN_MS/.test(src));
+  ok('the warning fires earlier than the wipe, not alongside it',
+    /CFG\.IDLE_WIPE_MS - CFG\.IDLE_WARN_MS/.test(src));
+  ok('it only interrupts when there is something to lose',
+    /function showIdleWarning\(\)[\s\S]{0,200}if \(!S\.note && !S\.turns\) return;/.test(src));
+  ok('and it offers a way to keep the draft', /id="idle-keep"/.test(src) &&
+    /\$\('idle-keep'\)\.addEventListener\('click', function \(\) \{ resetIdle\(\); \}\)/.test(src));
+  ok('any interaction clears the warning, because resetIdle hides it',
+    /function resetIdle\(\) \{\s*\n\s*hideIdleWarning\(\);/.test(src));
+}
+
+/**
+ * ?type= saves a tap per appointment; ?audio=raw makes the noise-suppression
+ * question answerable without a deploy. Neither is storage.
+ */
+async function testUrlSwitches() {
+  section('URL switches');
+  const src = html;
+  ok('the consult type can be preselected', /PARAMS\.get\('type'\) === pair\[0\]/.test(src));
+  ok('validated against the real list rather than trusted',
+    /CONSULT_TYPES\.forEach[\s\S]{0,900}PARAMS\.get\('type'\) === pair\[0\]/.test(src));
+  ok('audio processing can be turned off for a comparison', /RAW_AUDIO = PARAMS\.get\('audio'\) === 'raw'/.test(src));
+  ok('one constraint builder serves both the check and the recording',
+    /function micConstraints\(\)/.test(src) &&
+    (src.match(/micConstraints\(\)/g) || []).length >= 3);
+}
+
 async function testPauseResume() {
   section('Pause and resume — the examination is not recorded, and the note knows it');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -1507,6 +1629,10 @@ await testSummaryFailureIsNotCopyable();
 await testReferral();
 await testNewRecordingDropsThePreviousPatient();
 await testFailedDraftNeverShowsThePreviousPatientsNote();
+await testMicCheck();
+await testWakeLock();
+await testIdleWarning();
+await testUrlSwitches();
 await testNotSaidPanel();
 await testEditingAndLength();
 await testStyles();
