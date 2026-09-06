@@ -1423,6 +1423,320 @@ async function testUrlSwitches() {
     (src.match(/micConstraints\(\)/g) || []).length >= 3);
 }
 
+/**
+ * Two failure modes the mic picker introduced, both of which only bite outside
+ * the happy path.
+ */
+async function testMicCheckFailureModes() {
+  section('Microphone check: unplugged devices and a stream left open');
+
+  // 1. The chosen device is gone — headset unplugged, USB mic left in the other
+  //    surgery. deviceId:{exact} makes getUserMedia throw rather than fall back,
+  //    so a device that no longer exists could block recording entirely.
+  const ctx = await boot();
+  const { doc, win } = ctx;
+  win.__mic.devices = [
+    { kind: 'audioinput', deviceId: 'built-in', label: 'MacBook Microphone' },
+    { kind: 'audioinput', deviceId: 'headset', label: 'Surgery Headset' }
+  ];
+  win.__mic.actual = 'built-in';
+  click($(doc, 'mic-test'));
+  await tick(60);
+  $(doc, 'mic-picker').value = 'headset';
+  $(doc, 'mic-picker').dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(60);
+
+  // From here the headset does not exist.
+  const realGum = win.navigator.mediaDevices.getUserMedia;
+  win.navigator.mediaDevices.getUserMedia = async (c) => {
+    win.__mic.constraints.push(c);
+    if (c && c.audio && c.audio.deviceId) {
+      const e = new Error('Requested device not found');
+      e.name = 'OverconstrainedError';
+      throw e;
+    }
+    return realGum(c);
+  };
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(150);
+  ok('an unplugged microphone does not block the recording outright',
+    !$(doc, 'recording').classList.contains('hidden') || $(doc, 'error-title').textContent !== 'Microphone blocked',
+    $(doc, 'error-title').textContent);
+  const tried = win.__mic.constraints[win.__mic.constraints.length - 1];
+  ok('it retries on the default input instead of insisting on the missing one',
+    tried && tried.audio && !tried.audio.deviceId, JSON.stringify(tried));
+
+  // 2. Checking the mic and then NOT recording must not leave it open. The page
+  //    tells the patient nothing is being recorded while the operating system
+  //    shows a live microphone indicator.
+  const ctx2 = await boot();
+  ctx2.win.__mic.devices = [{ kind: 'audioinput', deviceId: 'built-in', label: 'Mic' }];
+  let stopped = 0;
+  ctx2.win.navigator.mediaDevices.getUserMedia = async () => ({
+    getTracks: () => [{ stop() { stopped++; } }],
+    getAudioTracks: () => [{ stop() { stopped++; }, getSettings: () => ({ deviceId: 'built-in' }) }]
+  });
+  click($(ctx2.doc, 'mic-test'));
+  await tick(80);
+  click($(ctx2.doc, 'lock'));
+  await tick(80);
+  ok('locking closes the microphone the check opened', stopped > 0, String(stopped));
+
+  // The check closing itself cannot be driven in a test without waiting out the
+  // real timeout, so these three assertions together stand for it: there is a
+  // deadline, runMicTest arms it, and stopMicTest disarms it so a second check
+  // cannot be killed by the first one's timer.
+  const src = html;
+  ok('the check has a deadline', /MIC_TEST_MS:\s*\d+ \* 1000/.test(src));
+  ok('and running the check arms it',
+    /S\.micStopId = setTimeout\(function \(\) \{\s*\n\s*stopMicTest\(\);/.test(src));
+  ok('and stopping the check disarms it, so one check cannot cut short the next',
+    /function stopMicTest\(\) \{\s*\n\s*if \(S\.micStopId\) \{ clearTimeout\(S\.micStopId\); S\.micStopId = null; \}/.test(src));
+}
+
+/**
+ * The check and the recording both open the microphone. If the check's stream is
+ * still live when the recording one is requested, two streams contend for the
+ * same device — which some hardware and some Bluetooth headsets will not do.
+ */
+async function testMicTestClosesBeforeRecording() {
+  section('The check releases the microphone before the recording takes it');
+  const ctx = await boot();
+  const { doc, win } = ctx;
+  let open = 0, peakWhileOpening = 0;
+  win.__mic.devices = [{ kind: 'audioinput', deviceId: 'built-in', label: 'Mic' }];
+  win.navigator.mediaDevices.getUserMedia = async (c) => {
+    peakWhileOpening = Math.max(peakWhileOpening, open);
+    open++;
+    const track = { stop() { open--; }, getSettings: () => ({ deviceId: 'built-in' }) };
+    return { getTracks: () => [track], getAudioTracks: () => [track] };
+  };
+  click($(doc, 'mic-test'));
+  await tick(80);
+  ok('the check holds the microphone open while it runs', open === 1, String(open));
+
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(150);
+  ok('but it is released before the recording stream is requested, not after',
+    peakWhileOpening === 0, `streams already open when a new one was requested: ${peakWhileOpening}`);
+}
+
+/**
+ * Every other async path in the page guards on S.gen so that a Clear or Lock
+ * mid-flight cannot be undone by a request that resolves afterwards. The
+ * microphone check did not, and the thing it leaves behind is an OPEN
+ * MICROPHONE — on a page that has just told the clinician everything was
+ * destroyed. The permission prompt makes the window arbitrarily long.
+ */
+async function testMicCheckHonoursClear() {
+  section('A check that resolves after Clear must not reopen the microphone');
+  const ctx = await boot();
+  const { doc, win } = ctx;
+  win.__mic.devices = [{ kind: 'audioinput', deviceId: 'built-in', label: 'Mic' }];
+  let open = 0;
+  let release;
+  const pending = new Promise((r) => { release = r; });
+  win.navigator.mediaDevices.getUserMedia = async () => {
+    await pending;                       // stands in for the permission prompt
+    open++;
+    const track = { stop() { open--; }, getSettings: () => ({ deviceId: 'built-in' }) };
+    return { getTracks: () => [track], getAudioTracks: () => [track] };
+  };
+
+  click($(doc, 'mic-test'));
+  await tick(40);
+  ok('nothing is open while the browser is still asking', open === 0, String(open));
+
+  click($(doc, 'clear'));            // the clinician wipes while the prompt is up
+  await tick(40);
+  release();
+  await tick(120);
+
+  ok('a microphone granted after Clear is closed again, not left running',
+    open === 0, `streams still open: ${open}`);
+}
+
+/**
+ * Two more instances of the same shape: something set up on one path, torn down
+ * on another. The buttons are disabled while a document drafts and re-enabled in
+ * a `finally` that refuses to act once the session has moved on — correct, but
+ * it means the RESET has to do it, and only wipe() does.
+ */
+async function testDerivedButtonsRecoverForTheNextPatient() {
+  section('Derived-document buttons recover when a new recording starts');
+  const note = { reasonForAttendance: 'Pain.', medicalHistory: null, proposed: 'Removal.', alternatives: null,
+    risks: null, benefits: null, costs: null, patientQuestions: null, patientFactors: null, informationGiven: null,
+    decision: 'Proceed.', nextStep: null, examination: null, radiographicFindings: null, plan: null, gaps: [] };
+  let releaseReferral;
+  const stall = new Promise((r) => { releaseReferral = r; });
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind === 'referral') {
+          await stall;
+          return { ok: true, status: 200, json: async () => ({ status: 'done', referral: { situation: 'x', background: null, assessment: null, recommendation: null, redFlags: [] } }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  const record = async () => { click($(doc, 'start')); await tick(60); click($(doc, 'stop')); await tick(300); };
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  await record();
+
+  click($(doc, 'make-referral'));
+  await tick(40);
+  ok('the button is disabled while it drafts', $(doc, 'make-referral').disabled);
+
+  await record();                       // next patient, while the draft is in flight
+  releaseReferral();
+  await tick(120);
+  ok('and it is usable again for the next patient', !$(doc, 'make-referral').disabled);
+  ok('with its own label back, not "Drafting..."',
+    /Referral/.test($(doc, 'make-referral').textContent), $(doc, 'make-referral').textContent);
+  ok('and the same for the patient summary', !$(doc, 'make-summary').disabled);
+
+  // The reason the buttons recovered is that S.gen was never bumped — which
+  // means the in-flight request was still considered current. So the referral
+  // drafted for the PREVIOUS patient lands in this patient's panel.
+  ok('and the previous patient\'s referral has NOT landed in this appointment',
+    !/x/.test($(doc, 'referral-text').textContent) && $(doc, 'referral-box').classList.contains('hidden'),
+    JSON.stringify($(doc, 'referral-text').textContent).slice(0, 120));
+}
+
+/**
+ * takeWakeLock assigns AFTER an await. A Clear landing inside that window finds
+ * S.wakeLock still null, releases nothing, and then the resolved lock is stored
+ * with no recording left to release it — the surgery screen stays awake.
+ */
+async function testWakeLockHonoursClear() {
+  section('A wake lock granted after Clear does not hold the screen on');
+  const ctx = await boot();
+  const { doc, win } = ctx;
+  let held = 0;
+  let grant;
+  const pending = new Promise((r) => { grant = r; });
+  win.navigator.wakeLock.request = async () => {
+    await pending;
+    held++;
+    return { addEventListener() {}, release() { held--; } };
+  };
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(80);
+  click($(doc, 'clear'));
+  await tick(40);
+  grant();
+  await tick(120);
+  ok('a lock granted after the session ended is released, not kept',
+    held === 0, `locks still held: ${held}`);
+}
+
+/* ====================================================================
+   STRUCTURAL GUARDS
+   Six bugs on 5 September were the same shape: a piece of state or a held
+   resource whose lifecycle was handled on ONE path and not the others. Every
+   one was found by a scan like the two below, run by hand in a container that
+   no longer exists. These are those scans, made permanent, so the NEXT feature
+   that forgets a path fails the build instead of waiting to be noticed.
+
+   They read the page source rather than driving the page, because what they
+   check is a property of the code, not of a run.
+   ==================================================================== */
+
+// Brace-matched function body, so these do not depend on how long a function is.
+function bodyAt(src, from) {
+  const i = src.indexOf('{', from);
+  let depth = 0;
+  for (let j = i; j < src.length; j++) {
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}' && --depth === 0) return src.slice(i, j + 1);
+  }
+  return src.slice(i);
+}
+
+function pageScript() {
+  return html.match(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/)[1];
+}
+
+async function testEveryAsyncPathHonoursTheGeneration() {
+  section('Guard: no async path writes to a session that has moved on');
+  const src = pageScript();
+  const starts = [];
+  const re = /async function [A-Za-z0-9_]+\s*\(|addEventListener\('[a-z]+',\s*async function\s*\(/g;
+  let m;
+  while ((m = re.exec(src))) starts.push(m.index);
+
+  const offenders = [];
+  for (const at of starts) {
+    const fn = bodyAt(src, at);
+    if (!/\bawait\b/.test(fn)) continue;
+    // Writes to session state (S.gen and S.busy are the bookkeeping itself).
+    if (!/\bS\.(?!gen\b|busy\b)[A-Za-z_$][\w$]*\s*=/.test(fn)) continue;
+    // Two accepted forms: reading S.gen directly, or being handed a liveness
+    // closure by the caller that already captured it — transcribe() takes
+    // live() from process(), which is the same guarantee, just passed in.
+    if (/S\.gen/.test(fn) || /\blive\(\)/.test(fn)) continue;
+    offenders.push(src.slice(at, src.indexOf('(', at)).trim().slice(0, 60));
+  }
+  ok('every async path that writes state checks S.gen after awaiting',
+    offenders.length === 0,
+    offenders.join(' | ') ||
+      'A Clear or Lock landing mid-request must not be undone by the response. ' +
+      'This is how one patient\'s referral reached the next patient\'s screen.');
+}
+
+async function testTheTwoResetPathsAgree() {
+  section('Guard: wipe() and the start-of-recording reset stay in step');
+  const src = pageScript();
+  const wipe = bodyAt(src, src.indexOf('function wipe()'));
+  const from = src.indexOf('S.startedAt = Date.now();');
+  const reset = src.slice(from, src.indexOf("show('recording');", from));
+
+  const fields = (t) => new Set([...t.matchAll(/\bS\.([A-Za-z_$][\w$]*)\s*=/g)].map((x) => x[1]));
+  const buttons = (t) => new Set([...t.matchAll(/\$\('([a-z-]+)'\)\.disabled = false/g)].map((x) => x[1]));
+
+  // Legitimately wipe-only: the machinery of a session rather than anything
+  // belonging to a patient. Starting a recording is not tearing the session
+  // down — the recorder and the timers are being set up, not cleared, and the
+  // passcode, consult type and consent are deliberately kept.
+  const wipeOnly = new Set(['busy', 'bytes', 'consent', 'consultType', 'idleId', 'idleWarnId',
+                            'jobId', 'rafId', 'rateNote', 'recorder', 'tickId']);
+
+  const missing = [...fields(wipe)].filter((f) => !fields(reset).has(f) && !wipeOnly.has(f));
+  ok('a new recording clears everything of the last patient that wipe() clears',
+    missing.length === 0,
+    missing.length
+      ? `left behind for the next patient: ${missing.join(', ')} — add it to the start reset, or to wipeOnly with a reason`
+      : '');
+
+  const btnMissing = [...buttons(wipe)].filter((b) => !buttons(reset).has(b));
+  ok('and re-enables every control wipe() re-enables',
+    btnMissing.length === 0,
+    btnMissing.length ? `stuck for the next patient: ${btnMissing.join(', ')}` : '');
+
+  ok('and voids the previous consultation\'s in-flight requests',
+    /S\.gen\+\+;[\s\S]{0,400}?S\.stream = await navigator\.mediaDevices\.getUserMedia/.test(src),
+    'the gen bump must happen before the recording captures its own gen');
+}
+
 async function testPauseResume() {
   section('Pause and resume — the examination is not recorded, and the note knows it');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -1630,6 +1944,13 @@ await testReferral();
 await testNewRecordingDropsThePreviousPatient();
 await testFailedDraftNeverShowsThePreviousPatientsNote();
 await testMicCheck();
+await testMicCheckFailureModes();
+await testMicTestClosesBeforeRecording();
+await testMicCheckHonoursClear();
+await testDerivedButtonsRecoverForTheNextPatient();
+await testWakeLockHonoursClear();
+await testEveryAsyncPathHonoursTheGeneration();
+await testTheTwoResetPathsAgree();
 await testWakeLock();
 await testIdleWarning();
 await testUrlSwitches();

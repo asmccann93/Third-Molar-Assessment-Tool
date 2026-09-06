@@ -722,7 +722,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-06.4';
+  var BUILD = '2026-09-06.8';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -772,6 +772,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     SESSION_WARN_S: 25 * 60,   // refuse to start a recording with less than this
                                // left on the session
     SIZE_WARN:     0.80,       // warn at this fraction of MAX_BYTES
+    MIC_TEST_MS:   20 * 1000,        // the pre-flight check closes itself after
+                                     // this. The page tells the patient nothing
+                                     // is being recorded; an operating-system
+                                     // microphone indicator burning through the
+                                     // whole appointment says otherwise.
     IDLE_WARN_MS:  2 * 60 * 1000,    // warn this long BEFORE the idle wipe. The
                                      // wipe is irreversible and nothing is
                                      // saved, so destroying a draft without
@@ -915,6 +920,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     micCtx: null,
     micAnalyser: null,
     micRaf: null,
+    micStopId: null,
     wakeLock: null,
     audioCtx: null,
     source: null,     // MediaStreamAudioSourceNode; feeds both the meter and the encoder
@@ -1019,6 +1025,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   }
 
   function stopMicTest() {
+    if (S.micStopId) { clearTimeout(S.micStopId); S.micStopId = null; }
     if (S.micRaf) { cancelAnimationFrame(S.micRaf); S.micRaf = null; }
     if (S.micStream) {
       S.micStream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
@@ -1046,13 +1053,28 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   async function runMicTest() {
     stopMicTest();
     $('mic-note').textContent = 'Asking for the microphone\u2026';
+    // The permission prompt can sit there for as long as the clinician takes,
+    // and Clear or Lock may land while it does. Every other async path in this
+    // page guards on S.gen for that reason; here the thing left behind would be
+    // an open microphone on a screen that has just said everything was
+    // destroyed. Take the stream, then check we are still the current session
+    // before keeping it.
+    var gen = S.gen;
+    var stream;
     try {
-      S.micStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() });
     } catch (err) {
+      if (gen !== S.gen) return;
       $('mic-note').textContent = 'The browser refused access. Check the padlock in the address bar and allow it for this site.';
       return;
     }
+    if (gen !== S.gen) {
+      stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      return;
+    }
+    S.micStream = stream;
     var mics = await listMics();
+    if (gen !== S.gen) { stopMicTest(); return; }
     var picker = $('mic-picker');
     picker.textContent = '';
     mics.forEach(function (d, i) {
@@ -1085,6 +1107,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     } catch (err) {
       $('mic-note').textContent = 'Microphone open, but this browser would not draw the level.';
     }
+    S.micStopId = setTimeout(function () {
+      stopMicTest();
+      $('mic-note').textContent = 'Check finished, microphone closed. Check again if you need to.';
+    }, CFG.MIC_TEST_MS);
   }
 
   $('mic-test').addEventListener('click', function () { resetIdle(); runMicTest(); });
@@ -1328,12 +1354,37 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       }
     }
 
+    // The previous consultation is over. Everything still in flight for it — a
+    // referral, a summary, an Ask — belongs to a patient who has left, and the
+    // handlers all check this before writing to S or the screen. Without it, a
+    // referral requested for the last patient lands in this one's panel.
+    // Must come BEFORE the recording captures its own gen below.
+    S.gen++;
+
     try {
       S.stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() });
     } catch (err) {
-      stopTracks();
-      return fail('Microphone blocked',
-        'The browser refused access to the microphone. Check the padlock in the address bar and allow it for this site, then try again.');
+      // A device chosen earlier can simply be gone — headset unplugged, USB mic
+      // left in the other surgery. deviceId:{exact} makes that throw instead of
+      // falling back, so insisting on it would block the appointment over a
+      // preference. Drop the choice, take whatever the browser has, and say so.
+      var wasPinned = !!S.micId;
+      if (wasPinned) {
+        S.micId = null;
+        $('mic-picker').classList.add('hidden');
+        try {
+          S.stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() });
+          toast('That microphone has gone \u2014 recording on the default input.');
+        } catch (err2) {
+          stopTracks();
+          return fail('Microphone blocked',
+            'The browser refused access to the microphone. Check the padlock in the address bar and allow it for this site, then try again.');
+        }
+      } else {
+        stopTracks();
+        return fail('Microphone blocked',
+          'The browser refused access to the microphone. Check the padlock in the address bar and allow it for this site, then try again.');
+      }
     }
 
     var gen = S.gen;   // this recording's identity, for the async handlers below
@@ -1413,6 +1464,14 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     $('ask-input').value = '';
     $('ask-answer').textContent = '';
     $('ask-answer').classList.add('hidden');
+    // A draft still in flight for the last patient has just been voided by the
+    // gen bump above, so its `finally` will decline to touch these. The reset
+    // owns them, or the next patient finds the buttons stuck on "Drafting...".
+    $('make-summary').disabled = false;
+    $('make-summary').textContent = 'Patient summary';
+    $('make-referral').disabled = false;
+    $('make-referral').textContent = 'Referral (SBAR)';
+    $('ask-go').disabled = false;
     $('pause').textContent = 'Pause';
     $('pause').classList.remove('resuming');
     $('dictate').textContent = 'Dictate';
@@ -1673,8 +1732,15 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      the browser drops the lock whenever the page is hidden. */
   async function takeWakeLock() {
     if (!('wakeLock' in navigator) || S.wakeLock) return;
+    // The request resolves asynchronously, and a Clear landing inside that
+    // window would find S.wakeLock still null, release nothing, and then have
+    // the lock stored with no recording left to ever let it go — the surgery
+    // screen stays lit. Same guard as every other async path here.
+    var gen = S.gen;
     try {
-      S.wakeLock = await navigator.wakeLock.request('screen');
+      var lock = await navigator.wakeLock.request('screen');
+      if (gen !== S.gen) { try { lock.release(); } catch (e) {} return; }
+      S.wakeLock = lock;
       S.wakeLock.addEventListener('release', function () { S.wakeLock = null; });
     } catch (err) {
       // Refused, unsupported, or the tab is not visible. Recording is unaffected.
@@ -1689,6 +1755,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   function stopTracks() {
     releaseWakeLock();
+    // The check and the recording want the same device. Releasing here rather
+    // than in the start handler's reset means the check's stream is always gone
+    // BEFORE a recording stream is requested, on every path that tears down.
+    stopMicTest();
     if (S.stream) {
       S.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
       S.stream = null;
