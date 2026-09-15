@@ -22,7 +22,16 @@ export const CONSULT_TYPES = {
       'Surgical removal of a wisdom tooth. Expect a specific discussion of nerve ' +
       'injury (lip, chin, tongue), the alternative of coronectomy or leaving the ' +
       'tooth, sedation options, and post-operative course. Capture exactly which ' +
-      'risks the clinician named and whether temporary and permanent were distinguished.',
+      'risks the clinician named and whether temporary and permanent were distinguished. ' +
+      'RADIOGRAPHS: where the clinician dictates radiographic findings, record the ' +
+      'specific signs they named, in their words, rather than summarising them as ' +
+      '"close to the nerve". The signs that matter are the relationship of the roots ' +
+      'to the inferior alveolar canal — darkening of the root where the canal crosses ' +
+      'it, interruption or loss of the canal\'s white lines, diversion or deflection ' +
+      'of the canal, narrowing of the canal or of the root, a bifid root apex — ' +
+      'together with the impaction (mesioangular, distoangular, horizontal, vertical), ' +
+      'the depth, and the root morphology. Record only the signs actually named. Do ' +
+      'NOT infer a sign from a warning, and do NOT infer a warning from a sign.',
   },
   'implant-consult': {
     label: 'Implant consult',
@@ -30,7 +39,13 @@ export const CONSULT_TYPES = {
       'Planning discussion for a dental implant. Expect staging and timeline, the ' +
       'possible need for grafting or a sinus lift, failure and peri-implantitis, ' +
       'maintenance for life, the full cost including the crown, any guarantee, and ' +
-      'the alternatives of a denture, a bridge, or leaving the space.',
+      'the alternatives of a denture, a bridge, or leaving the space. ' +
+      'RADIOGRAPHS: where radiographic or CBCT findings are dictated, record the ' +
+      'specific measurements and relationships named — available bone height and ' +
+      'width, the position of the inferior alveolar canal or the mental foramen for ' +
+      'a lower site, the sinus floor and any residual height for an upper one, bone ' +
+      'quality, and the proximity of adjacent roots. Take the figures exactly as ' +
+      'dictated and never round or convert them.',
   },
   'implant-surgery': {
     label: 'Implant surgery',
@@ -41,7 +56,13 @@ export const CONSULT_TYPES = {
   },
   'exam-recall': {
     label: 'Exam / recall',
+    // A routine examination contains no consent discussion. There is no
+    // procedure being weighed, so there are no alternatives, no material risks
+    // and no decision — those fields are INAPPLICABLE, not missing, and must not
+    // demand a gap. Getting this wrong made every recall fail to draft at all.
+    notApplicable: ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'decision'],
     emphasis:
+      'There is usually NO consent discussion in a recall: no procedure proposed, no alternatives weighed, no risks named, no decision taken. Leave those fields null and do NOT add gaps for them — they do not apply to this kind of appointment. If a treatment WAS proposed and discussed, fill them normally. ' +
       'Routine examination. Expect findings, oral hygiene advice, lifestyle advice ' +
       '(smoking, alcohol, diet), radiographic justification, and a recall interval.',
   },
@@ -170,6 +191,23 @@ The transcript is diarised. Work out from context who is the clinician, who is t
 - NURSE speech is excluded from the note, with one exception: where the nurse gives post-operative or aftercare instructions, record that under informationGiven and attribute it to her.
 - Where an accompanying adult speaks (parent, partner, carer), their contributions go in patientQuestions, marked as coming from the accompanying person.
 
+## WHICH TOOTH
+
+Removing the wrong tooth is the one error in oral surgery that cannot be undone,
+and the tooth reaches this note through a spoken conversation and a transcript.
+"Lower left eight" and "lower right eight" differ by a single transcribed word.
+
+- "teeth": every tooth the CLINICIAN identified as the subject of examination,
+  treatment, or the treatment being proposed. FDI notation where numbers were
+  used; keep their notation if they used Palmer. One entry per tooth.
+- Teeth mentioned only in passing — a history of extractions, a tooth the
+  patient asked about but which is not being treated — do NOT belong here.
+- Never infer a tooth from the consult type. A third molar consultation does not
+  mean the eights were named, and guessing which quadrant would be worse than
+  saying nothing.
+- Empty array if no tooth was identified. That is a real and useful answer; the
+  clinician will see it and know the recording did not pin the site down.
+
 ## WHO IS WHO
 
 The transcript labels speakers S1, S2 and so on. You work out which is the
@@ -183,6 +221,11 @@ the patient's words in the clinician's mouth.
   genuinely unclear — a short recording, or a transcript where both parties ask
   and answer in similar proportion. Do not be polite about this.
 - If you are unsure, still map them, but say low. Never leave a label out.
+
+If a CONFIRMED MAPPING appears in the message below, the clinician has read your
+previous attempt and corrected it. It is not a hint and it is not up for
+reconsideration: use it exactly, report it back unchanged in "speakers", and set
+"speakerConfidence" to "high". They were in the room and you were not.
 
 ## LENGTH
 
@@ -232,6 +275,16 @@ appointment may sit between.
   examination; anything discussed during it is not in this note."
 - Everything else is unchanged: record only what was said, and attribute it
   normally. A gap is missing time, not a reason to hedge what IS on the recording.
+
+## A TRANSCRIPT WITH NO CONSULTATION IN IT
+
+If the transcript is empty, or contains nothing that is recognisably a
+consultation — a few stray words, one side of a greeting, background noise
+transcribed as speech — do NOT invent a consultation and do NOT return a note
+full of nulls with an empty gaps array. Set every field to null and put ONE
+entry in gaps saying plainly that nothing usable was captured, for example
+"Nothing usable was recorded — check the microphone and record again." That is a
+complete and correct answer to a recording that did not work.
 
 ## GAPS
 
@@ -293,6 +346,7 @@ Return a single JSON object and nothing else. No markdown fences, no explanation
   "radiographicFindings": string | null,
   "plan": string | null,
   "implantLog": object[],
+  "teeth": string[],
   "checklist": { "<key>": string | null, ... },
   "speakers": { "S1": "clinician" | "patient" | "other", ... },
   "speakerConfidence": "high" | "medium" | "low",
@@ -317,10 +371,21 @@ ${lines}`;
  * User message
  * ------------------------------------------------------------------ */
 
-export function buildUserMessage(transcript, pauses) {
+export function buildUserMessage(transcript, pauses, speakerRoles) {
+  // A mapping the clinician corrected by hand. Stated first so it is read
+  // before the transcript that produced the wrong answer last time.
+  const confirmed = speakerRoles && typeof speakerRoles === 'object' && !Array.isArray(speakerRoles)
+    ? Object.entries(speakerRoles)
+        .filter(([k, v]) => /^S\d+$/.test(k) && /^(clinician|patient|other)$/.test(v))
+        .map(([k, v]) => `${k} is the ${v}`)
+    : [];
+  const roles = confirmed.length
+    ? `CONFIRMED MAPPING, corrected by the clinician who was present: ${confirmed.join('; ')}.\nUse it exactly. Report it back unchanged and set speakerConfidence to "high".\n\n`
+    : '';
+
   const list = Array.isArray(pauses) ? pauses.filter((p) => p && p.forMs > 1000) : [];
   if (!list.length) {
-    return `Transcript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>\n\nReturn the JSON object.`;
+    return `${roles}Transcript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>\n\nReturn the JSON object.`;
   }
   const mins = (ms) => {
     const m = Math.round(ms / 60000);
@@ -331,7 +396,7 @@ export function buildUserMessage(transcript, pauses) {
     return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
   };
   const lines = list.map((p) => `- at ${at(p.atRecordedMs)} into the recording, paused for ${mins(p.forMs)}`).join('\n');
-  return `This recording was PAUSED and resumed. The transcript is spliced: the audio either side of each gap below is contiguous in the transcript but was not spoken contiguously.\n\n${lines}\n\nApply the PAUSED RECORDINGS rules.\n\nTranscript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>\n\nReturn the JSON object.`;
+  return `${roles}This recording was PAUSED and resumed. The transcript is spliced: the audio either side of each gap below is contiguous in the transcript but was not spoken contiguously.\n\n${lines}\n\nApply the PAUSED RECORDINGS rules.\n\nTranscript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>\n\nReturn the JSON object.`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -340,7 +405,15 @@ export function buildUserMessage(transcript, pauses) {
  * produce a note with missing fields.
  * ------------------------------------------------------------------ */
 
-export function parseNote(raw) {
+// Consent fields that do not apply to this kind of appointment. Empty for every
+// type that involves a procedure, which is the safe default: a blank there is a
+// gap and must be explained.
+export function notApplicableFields(consultTypeKey) {
+  const type = consultType(consultTypeKey);
+  return Array.isArray(type && type.notApplicable) ? type.notApplicable : [];
+}
+
+export function parseNote(raw, consultTypeKey) {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
   let parsed;
@@ -371,6 +444,16 @@ export function parseNote(raw) {
     }
     return out;
   });
+  // Teeth. A model that omits them costs nothing — the page then says no tooth
+  // was identified, which is itself worth seeing on a surgical consultation.
+  if (!('teeth' in parsed) || parsed.teeth === null) parsed.teeth = [];
+  if (!Array.isArray(parsed.teeth)) throw new Error('teeth is not an array');
+  parsed.teeth = parsed.teeth
+    .filter((t) => (typeof t === 'string' || typeof t === 'number'))
+    .map((t) => String(t).trim())
+    .filter((t) => t && t.length <= 12)
+    .slice(0, 32);
+
   // Speaker mapping is advisory: a model that omits it must not cost the note.
   if (!parsed.speakers || typeof parsed.speakers !== 'object' || Array.isArray(parsed.speakers)) {
     parsed.speakers = null;
@@ -388,8 +471,13 @@ export function parseNote(raw) {
   if (typeof parsed.checklist !== 'object' || Array.isArray(parsed.checklist)) throw new Error('checklist is not an object');
   if (!Array.isArray(parsed.gaps)) throw new Error('Missing or invalid gaps array');
 
-  // Any null field must be accounted for in gaps.
-  const nulls = FIELDS.filter(([k]) => parsed[k] == null).length;
+  // Any null field must be accounted for in gaps — but only where the field
+  // APPLIES. A routine recall has no procedure being weighed, so alternatives,
+  // risks and a decision are not missing, they are irrelevant. Demanding a gap
+  // for them made every exam/recall fail to draft, deterministically, with a
+  // message about null fields that told the clinician nothing.
+  const skip = new Set(notApplicableFields(consultTypeKey));
+  const nulls = FIELDS.filter(([k]) => parsed[k] == null && !skip.has(k)).length;
   if (nulls > 0 && parsed.gaps.length === 0) {
     throw new Error('Fields are null but no gaps were reported');
   }
@@ -448,6 +536,81 @@ export function parseSummary(raw) {
     const v = parsed[key];
     if (v === undefined || v === null) { out[key] = null; continue; }
     if (typeof v !== 'string') throw new Error(`Summary field "${key}" (${label}) came back as ${typeof v}, not text`);
+    out[key] = v;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * Post-operative instructions
+ *
+ * The document the surgical patient actually needs: the one they take home
+ * and read at nine o'clock that night when the bleeding starts again.
+ *
+ * It is built from the corrected note, like the referral, and it inherits the
+ * same discipline. A post-operative sheet is exactly where a model would be
+ * most tempted to supply the standard advice for the procedure, and standard
+ * advice invented for a specific patient is neither the clinician's nor the
+ * practice's. What was not said is named as a blank for the clinician to fill,
+ * not quietly filled in.
+ * ------------------------------------------------------------------ */
+
+export const POSTOP_FIELDS = [
+  ['expect', 'What to expect'],
+  ['pain', 'Pain relief'],
+  ['bleeding', 'If it bleeds'],
+  ['careOfSite', 'Looking after the area'],
+  ['eating', 'Eating and drinking'],
+  ['avoid', 'What to avoid'],
+  ['whenToWorry', 'When to get in touch'],
+  ['followUp', 'Your next appointment'],
+];
+
+export function buildPostopSystemPrompt(consultTypeKey) {
+  const type = consultType(consultTypeKey);
+  return `You write the post-operative instruction sheet a UK dental patient takes home after oral surgery. The clinician will read it, correct it, and give it to the patient.
+
+YOUR ONLY SOURCE is the note below, as the clinician has already corrected it, and the transcript behind it. Everything on this sheet must be something that was actually said to this patient.
+
+THE RULE THAT MATTERS MOST: do NOT supply the standard aftercare for the procedure. You will be tempted to, because post-operative advice is largely the same every time and the sheet looks incomplete without it. Advice this patient was never given is not advice the clinician has approved, and it goes home in the patient's hands with the practice's name on it. If an area was not covered, return null for it. The clinician will see the blank and fill it.
+
+Write in the second person, to the patient ("you", "your tooth"). Short sentences. Plain English, no jargon: if a clinical term was used in the room and explained, use the explanation. Aim for something readable by an anxious person who is not concentrating.
+
+- expect: what is normal in the days afterwards — swelling, bruising, stiffness, discomfort — as described to them.
+- pain: what to take, how much, how often, as stated. Take any dose, drug name or frequency EXACTLY as it was given and never adjust, round or add one.
+- bleeding: what to do if it bleeds, as described.
+- careOfSite: cleaning, rinsing, mouthwash, not disturbing the area.
+- eating: food and drink afterwards.
+- avoid: smoking, alcohol, exercise, straws, hot food — whatever was actually named.
+- whenToWorry: the signs that should prompt them to make contact, and how to make it.
+- followUp: the review or next stage, as arranged.
+
+Never invent a phone number, an opening time, a drug, a dose, or a timescale. If the clinician said "ring the practice" without saying when, write that and no more.
+
+Consult type: ${type ? type.label : 'Not specified'}
+
+Return ONLY a JSON object with exactly these keys:
+{
+  "expect": string | null,
+  "pain": string | null,
+  "bleeding": string | null,
+  "careOfSite": string | null,
+  "eating": string | null,
+  "avoid": string | null,
+  "whenToWorry": string | null,
+  "followUp": string | null
+}`;
+}
+
+export function parsePostop(raw) {
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(cleaned); } catch { throw new Error('Model did not return valid JSON'); }
+  const out = {};
+  for (const [key, label] of POSTOP_FIELDS) {
+    const v = parsed[key];
+    if (v === undefined || v === null) { out[key] = null; continue; }
+    if (typeof v !== 'string') throw new Error(`Post-op field "${key}" (${label}) came back as ${typeof v}, not text`);
     out[key] = v;
   }
   return out;

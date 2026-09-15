@@ -131,7 +131,7 @@ button:disabled { opacity: .45; cursor: default; }
   #recbar, #setup, #recording, #working, #mask, #error-actions,
   .length-picker, #edit-hint, #template-hint, .rate-note, .actions,
   .field-head .copy, .derived .actions, #ask-box, #referral-box,
-  .mic-check, #idle-warn { display: none !important; }
+  .mic-check, #idle-warn, #stats-row, #teeth-strip button, #postop-box .actions { display: none !important; }
   .card { border: none; padding: 0; margin: 0 0 14pt; break-inside: avoid; }
   .card > h2 { color: #000; }
   .field { break-inside: avoid; }
@@ -327,6 +327,25 @@ button:disabled { opacity: .45; cursor: default; }
 }
 #referral-flags ul { margin: 6px 0 0; padding-left: 20px; }
 #referral-flags li { margin-bottom: 4px; }
+
+/* The session line is an audit aid, not part of the clinical workflow, so it
+   sits quieter than the buttons that produce documents. */
+/* The site check. Loud until confirmed, quiet afterwards — the wrong tooth is
+   the one error in oral surgery that cannot be undone, and it arrives here as
+   ordinary-looking prose. */
+#teeth-strip {
+  margin: 0 0 16px; padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn-ink);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+#teeth-strip.confirmed { border-color: var(--line); background: transparent; color: var(--muted); }
+#teeth-strip h2 { font-size: .9375rem; margin: 0; text-transform: none; letter-spacing: 0; color: inherit; }
+#teeth-strip .sites { font-weight: 700; font-size: 1.125rem; letter-spacing: .02em; }
+#teeth-strip .none { font-weight: 600; }
+#teeth-strip button { margin-left: auto; }
+
+#copy-stats { background: transparent; color: var(--muted); border-color: var(--line); font-size: .875rem; }
+#copy-stats:hover { color: var(--ink); }
 .level-note { text-align: center; font-size: .75rem; color: var(--ink-faint); margin: 0 0 18px; min-height: 1.1em; }
 .level-note.alert { color: var(--stop); font-weight: 600; }
 .timer.paused { opacity: .55; }
@@ -638,11 +657,24 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         <button id="make-summary">Patient summary</button>
         <button id="make-consent">Consent form text</button>
         <button id="make-referral">Referral (SBAR)</button>
+        <button id="make-postop">Post-op instructions</button>
+      </div>
+      <div class="actions" id="stats-row" style="margin-top:4px">
+        <button type="button" id="copy-stats">Copy session line</button>
       </div>
       <div id="summary-box" class="hidden">
         <h3 style="margin:16px 0 0">Patient summary</h3>
         <pre id="summary-text" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Patient summary"></pre>
         <div class="actions"><button id="copy-summary">Copy summary</button></div>
+      </div>
+      <div id="postop-box" class="hidden">
+        <h3 style="margin:16px 0 0">Post-op instructions</h3>
+        <p class="timer-note" style="margin:0 0 8px;text-align:left">
+          Only what was actually said to this patient. Anything blank was not
+          covered &mdash; fill it in or delete the heading before you print.
+        </p>
+        <pre id="postop-text" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Post-operative instructions"></pre>
+        <div class="actions"><button id="copy-postop">Copy instructions</button></div>
       </div>
       <div id="referral-box" class="hidden">
         <h3 style="margin:16px 0 0">Referral (SBAR)</h3>
@@ -722,7 +754,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-06.8';
+  var BUILD = '2026-09-08.6';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -771,6 +803,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     POLL_MAX:      240,              // x POLL_MS = 20 minutes of client-side polling
     SESSION_WARN_S: 25 * 60,   // refuse to start a recording with less than this
                                // left on the session
+    MIN_WORDS:     25,         // a whole recording thinner than this was not a
+                               // consultation; say so plainly rather than
+                               // reporting a parser error about null fields
     SIZE_WARN:     0.80,       // warn at this fraction of MAX_BYTES
     MIC_TEST_MS:   20 * 1000,        // the pre-flight check closes itself after
                                      // this. The page tells the patient nothing
@@ -943,6 +978,15 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     summaryEdited: false,
     referral: null,   // the SBAR referral narrative, once requested
     referralText: null,
+    speakerRoles: null,   // a mapping the clinician corrected; overrides the model
+    drafted: null,        // the note EXACTLY as it arrived, to count what was corrected
+    asked: false,         // whether the Ask box was used, for the session line
+    draftFails: 0,        // consecutive failures on the SAME transcript
+    teethConfirmed: false,// the clinician has checked the site against the note
+    postop: null,
+    postopText: null,
+    recBytes: 0,          // what the recording cost, for the session line
+    recSecs: 0,
     jobId: null,
     turns: null,      // held ONLY between a failed draft and a retry
     note: null,
@@ -1423,62 +1467,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.lastSoundAt = Date.now();
     S.sizeNote = '';
     S.captureNote = null;
-    S.paused = false;
-    S.pausedAt = 0;
-    S.pausedMs = 0;
-    S.pauses = [];
-    S.pausesForDraft = null;
-    S.dictationFromMs = null;
-    // Every derived document from the last patient goes here, not just the
-    // summary object. Clearing the boxes on screen is not enough: whatever is
-    // left in S survives into the next consultation, and the "already drafted"
-    // guards then refuse to draft for the new patient and show an empty panel.
-    //
-    // The note and the transcript go too, and they matter more. draft() treats a
-    // surviving S.note as "a redraft failed, the note below is unchanged, carry
-    // on with it" — which is right for a redraft and catastrophic when S.note
-    // belongs to the PREVIOUS patient. Same for S.turns and the retry button.
-    // A new recording means the last consultation is over.
-    S.note = null;
-    S.turns = null;
-    // And the rendered note itself. Nulling S.note stops the logic reaching for
-    // it; this stops the previous patient's text sitting in the DOM through the
-    // next consultation, hidden but present.
-    $('fields').textContent = '';
-    $('gaps-list').textContent = '';
-    $('notsaid-list').textContent = '';
-    $('notsaid').classList.add('hidden');
-    S.summary = null;
-    S.summaryText = null;
-    S.summaryEdited = false;
-    S.referral = null;
-    S.referralText = null;
-    $('summary-box').classList.add('hidden');
-    $('referral-box').classList.add('hidden');
-    $('referral-flags').classList.add('hidden');
-    $('consent-box').classList.add('hidden');
-    $('summary-text').textContent = '';
-    $('referral-text').textContent = '';
-    $('referral-context').value = '';
-    $('consent-text').textContent = '';
-    $('ask-input').value = '';
-    $('ask-answer').textContent = '';
-    $('ask-answer').classList.add('hidden');
-    // A draft still in flight for the last patient has just been voided by the
-    // gen bump above, so its `finally` will decline to touch these. The reset
-    // owns them, or the next patient finds the buttons stuck on "Drafting...".
-    $('make-summary').disabled = false;
-    $('make-summary').textContent = 'Patient summary';
-    $('make-referral').disabled = false;
-    $('make-referral').textContent = 'Referral (SBAR)';
-    $('ask-go').disabled = false;
-    $('pause').textContent = 'Pause';
-    $('pause').classList.remove('resuming');
-    $('dictate').textContent = 'Dictate';
-    $('dictate').disabled = false;
-    $('level').classList.remove('near-limit');
-    $('level').style.width = '0%';
-    stopMicTest();
+    clearConsultation();
     startMeter();
     startTicking();
     show('recording');
@@ -1785,6 +1774,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     var recS = recordedMs() / 1000;
     if (recS > 60 && rec.bytes > 0) {
       var perSec = rec.bytes / recS;
+      S.recBytes = rec.bytes;
+      S.recSecs = Math.round(recS);
       S.rateNote = fmtTime(recS) + ' recorded, ' + (rec.bytes / 1048576).toFixed(2) + ' MB, ' +
         (perSec / 1024).toFixed(2) + ' KB/s \u2014 at this rate the upload limit falls at about ' +
         Math.floor(CFG.MAX_BYTES * CFG.SIZE_STOP / perSec / 60) + ' minutes.';
@@ -1888,6 +1879,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [],
                                length: S.noteLength,
+                               speakerRoles: S.speakerRoles || undefined,
                                dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
       });
       var data = await res.json().catch(function () { return {}; });
@@ -1899,6 +1891,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         throw new Error(data.detail || data.error || ('HTTP ' + res.status));
       }
       S.note = data.note;
+      // A snapshot of what the model produced, before any correction. Kept in
+      // memory only, destroyed with the rest; it exists so the session line can
+      // say how much of the draft needed changing.
+      try { S.drafted = JSON.parse(JSON.stringify(data.note)); } catch (e) { S.drafted = null; }
     } catch (err) {
       if (!live()) return false;
       S.busy = false;
@@ -1912,9 +1908,39 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         return false;
       }
       show('setup');
+
+      // The commonest cause of a drafting failure is not the model but an
+      // almost-empty recording: the wrong input, a muted headset, a test that
+      // captured nothing. The parser's own message for that case is
+      // "Fields are null but no gaps were reported", which is accurate and
+      // tells a clinician nothing. Say what actually happened instead.
+      var words = (S.turns || []).reduce(function (n, t) {
+        return n + String((t && t.text) || '').trim().split(/\s+/).filter(Boolean).length;
+      }, 0);
+      // Only when the MODEL could not make a note of it. A network failure or a
+      // Bedrock outage is not a microphone problem, however short the recording,
+      // and saying so would send the clinician to check the wrong thing.
+      var unusable = /no gaps were reported|did not return valid JSON|invalid gaps array/i
+        .test(String(err.message || err));
+      var thin = words < CFG.MIN_WORDS && unusable;
+
+      if (thin) {
+        fail('Almost nothing was recorded',
+          'Only ' + words + ' word' + (words === 1 ? '' : 's') + ' came back from the whole recording, so there was ' +
+          'nothing to write a note from. Check the microphone with the button on the setup screen \u2014 ' +
+          'if the level bar does not move when you speak, the wrong input is selected.');
+        return false;
+      }
+
+      // Drafting runs at temperature 0, so a second attempt on the same
+      // transcript usually returns the same result. Say so rather than let the
+      // retry button imply otherwise.
+      S.draftFails = (S.draftFails || 0) + 1;
       fail('Could not draft the note',
         String(err.message || err) +
-        '  \u2014  The recording has been transcribed and is still held in memory, so this can be retried without recording again.',
+        (S.draftFails > 1
+          ? '  \u2014  This is attempt ' + S.draftFails + ' on the same transcript, and drafting is deterministic, so further retries will most likely fail the same way. Write the note by hand.'
+          : '  \u2014  The recording has been transcribed and is still held in memory, so this can be retried without recording again.'),
         true);
       return false;
     }
@@ -2014,6 +2040,55 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       $('gaps-lead').textContent = 'Every field was filled from the transcript. Still read it through — a filled field can still be wrong.';
     }
 
+    /* The site check.
+
+       Every tooth reference in this note arrived through a conversation and a
+       transcript. "Lower left eight" and "lower right eight" differ by one
+       transcribed word, and by the time it reaches the note it reads perfectly.
+       Pulling the sites out of the prose and into one line makes a wrong one
+       obvious; leaving them buried in four fields does not.
+
+       On a surgical consultation an EMPTY list is the louder finding: the
+       recording never pinned down which tooth. */
+    var existingTeeth = document.getElementById('teeth-strip');
+    if (existingTeeth) existingTeeth.remove();
+    var SURGICAL = ['third-molar', 'extraction-surgery', 'implant-surgery'];
+    var teeth = Array.isArray(note.teeth) ? note.teeth : [];
+    if (teeth.length || SURGICAL.indexOf(S.consultType) !== -1) {
+      var strip = document.createElement('div');
+      strip.id = 'teeth-strip';
+      if (S.teethConfirmed) strip.className = 'confirmed';
+
+      var th = document.createElement('h2');
+      th.textContent = teeth.length ? 'Check the site' : 'No tooth identified';
+      strip.appendChild(th);
+
+      var sites = document.createElement('span');
+      if (teeth.length) {
+        sites.className = 'sites';
+        sites.textContent = teeth.join('  \u00b7  ');
+      } else {
+        sites.className = 'none';
+        sites.textContent = 'The recording did not pin down which tooth. Add it before you paste.';
+      }
+      strip.appendChild(sites);
+
+      if (teeth.length && !S.teethConfirmed) {
+        var tb = document.createElement('button');
+        tb.type = 'button';
+        tb.id = 'confirm-teeth';
+        tb.textContent = 'Correct';
+        tb.addEventListener('click', function () {
+          resetIdle();
+          S.teethConfirmed = true;
+          strip.className = 'confirmed';
+          tb.remove();
+        });
+        strip.appendChild(tb);
+      }
+      box.parentNode.insertBefore(strip, box);
+    }
+
     // Speaker mapping banner, only if the prompt is later amended to report it.
     var existingMap = document.getElementById('speaker-map');
     if (existingMap) existingMap.remove();
@@ -2025,13 +2100,53 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         banner.className = 'gaps';
         banner.style.marginBottom = '16px';
         var h = document.createElement('h2');
-        h.textContent = 'Check the speaker mapping';
+        h.textContent = S.speakerRoles
+          ? 'Speaker mapping \u2014 confirmed by you'
+          : 'Check the speaker mapping';
         var p = document.createElement('p');
         p.className = 'lead';
         p.textContent = entries.join('  \u00b7  ') +
           (note.speakerConfidence ? '  \u2014  confidence: ' + note.speakerConfidence : '');
         banner.appendChild(h);
         banner.appendChild(p);
+
+        // The prompt says a swap "would put the patient's words in the
+        // clinician's mouth" — and until now the tool could only tell you that,
+        // not let you fix it. Every field is inverted when the mapping is wrong,
+        // so the only remedy was to discard and write by hand.
+        var keys = Object.keys(note.speakers).filter(function (k) {
+          return note.speakers[k] === 'clinician' || note.speakers[k] === 'patient';
+        });
+        if (keys.length === 2 && !S.busy) {
+          var act = document.createElement('div');
+          act.className = 'actions';
+          act.style.marginTop = '10px';
+          var swap = document.createElement('button');
+          swap.type = 'button';
+          swap.id = 'swap-speakers';
+          // Reversible: a mis-tap here would otherwise invert the whole note with
+          // no way back short of discarding the recording.
+          swap.textContent = S.speakerRoles
+            ? 'Swap back'
+            : 'No \u2014 swap them and redraft';
+          swap.addEventListener('click', function () {
+            resetIdle();
+            if (S.busy || !S.turns) return;
+            var fixed = {};
+            keys.forEach(function (k) {
+              fixed[k] = note.speakers[k] === 'clinician' ? 'patient' : 'clinician';
+            });
+            Object.keys(note.speakers).forEach(function (k) {
+              if (!(k in fixed)) fixed[k] = note.speakers[k];   // keep nurse, relative
+            });
+            S.speakerRoles = fixed;
+            S.gen++;                       // the note on screen is about to be replaced
+            draft(S.gen);
+          });
+          act.appendChild(swap);
+          banner.appendChild(act);
+        }
+
         box.parentNode.insertBefore(banner, box);
       }
     }
@@ -2391,6 +2506,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     resetIdle();
     var q = $('ask-input').value.trim();
     if (!q || S.busy) return;
+    S.asked = true;
     if (!S.turns) {
       $('ask-answer').textContent = 'The transcript is no longer held, so there is nothing to check against.';
       $('ask-answer').classList.remove('hidden');
@@ -2433,6 +2549,84 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   $('ask-input').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); askQuestion(); }
   });
+
+  var POSTOP_FIELDS = [
+    ['expect', 'What to expect'],
+    ['pain', 'Pain relief'],
+    ['bleeding', 'If it bleeds'],
+    ['careOfSite', 'Looking after the area'],
+    ['eating', 'Eating and drinking'],
+    ['avoid', 'What to avoid'],
+    ['whenToWorry', 'When to get in touch'],
+    ['followUp', 'Your next appointment']
+  ];
+
+  // A blank heading is the point. The alternative is a sheet that silently omits
+  // what was never discussed, which reads as complete and goes home that way.
+  function postopAsText(po) {
+    var out = [];
+    POSTOP_FIELDS.forEach(function (spec) {
+      out.push(spec[1]);
+      out.push(hasText(po[spec[0]])
+        ? String(po[spec[0]]).trim()
+        : '[Not covered in this consultation \u2014 fill in or delete before printing]');
+      out.push('');
+    });
+    return out.join('\n').trim();
+  }
+
+  $('make-postop').addEventListener('click', async function () {
+    resetIdle();
+    if (!S.turns || S.busy) return;
+    if (S.postop) { $('postop-box').classList.remove('hidden'); return; }
+    var btn = $('make-postop');
+    btn.disabled = true;
+    btn.textContent = 'Writing\u2026';
+    var gen = S.gen;
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, CFG.SUMMARY_TIMEOUT_MS);
+    try {
+      var res = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: ctrl ? ctrl.signal : undefined,
+        body: JSON.stringify({ kind: 'postop', turns: S.turns, consultType: S.consultType,
+                               pauses: S.pausesForDraft || [], note: S.note || {},
+                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (gen !== S.gen) return;
+      if (!res.ok || !data.postop) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+      S.postop = data.postop;
+      S.postopText = postopAsText(S.postop);
+      $('postop-text').textContent = S.postopText;
+      $('postop-box').classList.remove('hidden');
+    } catch (err) {
+      if (gen !== S.gen) return;
+      S.postopText = null;
+      $('postop-text').textContent = 'Could not write the instructions: ' + String(err && err.message || err);
+      $('postop-box').classList.remove('hidden');
+    } finally {
+      clearTimeout(timer);
+      if (gen === S.gen) { btn.disabled = false; btn.textContent = 'Post-op instructions'; }
+    }
+  });
+
+  $('copy-postop').addEventListener('click', function () {
+    // Same guard as the summary and the referral: on failure the error text sits
+    // in this editable box, and this sheet goes home in the patient's hands.
+    var text = $('postop-text').textContent.trim();
+    if (!S.postop || !text) return;
+    writeClipboard(text, $('copy-postop'));
+  });
+
+  $('postop-text').addEventListener('paste', function (e) {
+    e.preventDefault();
+    var t = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, t);
+  });
+
+  $('postop-text').addEventListener('input', function () { resetIdle(); });
 
   $('make-referral').addEventListener('click', async function () {
     resetIdle();
@@ -2523,6 +2717,78 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   });
 
   $('referral-text').addEventListener('input', function () { resetIdle(); });
+
+  /* ------------------------------------------------------------------
+     One line per consultation, for a spreadsheet the clinician keeps himself.
+
+     The tool stores nothing, so it cannot learn from its own use: there is no
+     way to know which checklist items fire on every recording, which fields the
+     model always leaves blank, or how much of each draft gets corrected. Those
+     are the questions that decide what to change next, and guessing at them is
+     what this exists to stop.
+
+     It carries NO clinical content and no identifiers — counts, durations and
+     field names only. Nothing here would mean anything to anyone who did not
+     have the note in front of them.
+     ------------------------------------------------------------------ */
+  var STATS_HEADER = 'date,consult,length,template,rec_secs,rec_kb,kb_per_s,pauses,dictated,' +
+                     'gaps,not_said,speaker_conf,speaker_fixed,teeth,teeth_confirmed,' +
+                     'fields_filled,fields_edited,edited_fields,summary,referral,postop,asked';
+
+  function editedFields() {
+    if (!S.note || !S.drafted) return [];
+    var out = [];
+    [].concat(FIELDS, DICTATED_FIELDS).forEach(function (f) {
+      var k = f[0];
+      var before = S.drafted[k] == null ? '' : String(S.drafted[k]).trim();
+      var after = S.note[k] == null ? '' : String(S.note[k]).trim();
+      if (before !== after) out.push(k);
+    });
+    return out;
+  }
+
+  function statsLine() {
+    var n = S.note || {};
+    var filled = [].concat(FIELDS, DICTATED_FIELDS).filter(function (f) { return hasText(n[f[0]]); }).length;
+    var edited = editedFields();
+    var kb = S.recBytes ? (S.recBytes / 1024) : 0;
+    var cells = [
+      new Date().toISOString().slice(0, 10),
+      S.consultType || '',
+      S.noteLength || '',
+      S.template || '',
+      S.recSecs || 0,
+      kb ? kb.toFixed(0) : '',
+      (kb && S.recSecs) ? (kb / S.recSecs).toFixed(2) : '',
+      (S.pausesForDraft || []).length,
+      S.dictationFromMs === null ? 0 : 1,
+      Array.isArray(n.gaps) ? n.gaps.length : 0,
+      Array.isArray(n.notSaid) ? n.notSaid.length : 0,
+      n.speakerConfidence || '',
+      S.speakerRoles ? 1 : 0,
+      (Array.isArray(n.teeth) ? n.teeth : []).join(' '),
+      S.teethConfirmed ? 1 : 0,
+      filled,
+      edited.length,
+      edited.join(' '),
+      S.summary ? 1 : 0,
+      S.referral ? 1 : 0,
+      S.postop ? 1 : 0,
+      S.asked ? 1 : 0
+    ];
+    return cells.map(function (c) {
+      var v = String(c);
+      return /[",]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }).join(',');
+  }
+
+  $('copy-stats').addEventListener('click', function () {
+    resetIdle();
+    if (!S.note) return;
+    // The header goes with it, so the first paste into an empty sheet gives
+    // column names and later pastes can simply have that row deleted.
+    writeClipboard(STATS_HEADER + '\n' + statsLine(), $('copy-stats'));
+  });
 
   $('copy-summary').addEventListener('click', function () {
     // Copy what is on screen, which may have been corrected, not what the
@@ -2618,6 +2884,88 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   /* ==================================================================
      DESTRUCTION
      ================================================================== */
+  /* ------------------------------------------------------------------
+     Everything belonging to the PREVIOUS PATIENT, in one place.
+
+     This used to live twice: once in wipe(), once inline in the Start
+     handler. The two drifted apart repeatedly and every time the result was
+     a wrong-patient bug that the screen hid, because both paths look clean
+     whichever one forgot something. Anything a new consultation must not
+     inherit goes here and only here.
+
+     It does NOT touch the session itself — the passcode, the consult type,
+     the recorder, the timers, the wake lock. Starting a recording is setting
+     those up, not tearing them down; only wipe() does that.
+     ------------------------------------------------------------------ */
+  function clearConsultation() {
+    S.turns = null;
+    S.note = null;
+    S.sizeNote = '';
+    S.captureNote = null;
+    S.paused = false;
+    S.pausedAt = 0;
+    S.pausedMs = 0;
+    S.pauses = [];
+    S.pausesForDraft = null;
+    S.dictationFromMs = null;
+    S.summary = null;
+    S.summaryText = null;
+    S.summaryEdited = false;
+    S.referral = null;
+    S.referralText = null;
+    S.postop = null;
+    S.postopText = null;
+    S.speakerRoles = null;
+    S.drafted = null;
+    S.asked = false;
+    S.draftFails = 0;
+    S.teethConfirmed = false;
+    S.recBytes = 0;
+    S.recSecs = 0;
+
+    // The rendered note. Nulling S.note stops the logic reaching for it; this
+    // stops the last patient's text sitting in the DOM, hidden but present.
+    $('fields').textContent = '';
+    $('gaps-list').textContent = '';
+    $('notsaid-list').textContent = '';
+    $('notsaid').classList.add('hidden');
+    var map = document.getElementById('speaker-map');
+    if (map) map.remove();
+
+    $('summary-box').classList.add('hidden');
+    $('referral-box').classList.add('hidden');
+    $('referral-flags').classList.add('hidden');
+    $('postop-box').classList.add('hidden');
+    $('postop-text').textContent = '';
+    $('consent-box').classList.add('hidden');
+    $('summary-text').textContent = '';
+    $('referral-text').textContent = '';
+    $('referral-context').value = '';
+    $('consent-text').textContent = '';
+    $('ask-input').value = '';
+    $('ask-answer').textContent = '';
+    $('ask-answer').classList.add('hidden');
+
+    // A draft still in flight for the last patient has been voided by the gen
+    // bump, so its `finally` declines to touch these. The reset owns them, or
+    // the next patient finds the buttons stuck on "Drafting...".
+    $('make-summary').disabled = false;
+    $('make-summary').textContent = 'Patient summary';
+    $('make-referral').disabled = false;
+    $('make-referral').textContent = 'Referral (SBAR)';
+    $('make-postop').disabled = false;
+    $('make-postop').textContent = 'Post-op instructions';
+    $('ask-go').disabled = false;
+
+    $('pause').textContent = 'Pause';
+    $('pause').classList.remove('resuming');
+    $('dictate').textContent = 'Dictate';
+    $('dictate').disabled = false;
+    $('level').classList.remove('near-limit');
+    $('level').style.width = '0%';
+    stopMicTest();
+  }
+
   function wipe() {
     S.gen++;                      // invalidates every in-flight async path
     S.bytes = 0;
@@ -2648,53 +2996,14 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       S.jobId = null;
     }
 
-    S.turns = null;
-    S.note = null;
-    S.busy = false;
-    S.sizeNote = '';
-    S.captureNote = null;
-    S.paused = false;
-    S.pausedAt = 0;
-    S.pausedMs = 0;
-    S.pauses = [];
-    S.pausesForDraft = null;
-    S.dictationFromMs = null;
-    S.summary = null;
-    S.summaryText = null;
-    S.summaryEdited = false;
-    S.referral = null;
-    S.referralText = null;
-    S.rateNote = '';
+    clearConsultation();
 
-    $('summary-box').classList.add('hidden');
-    $('referral-box').classList.add('hidden');
-    $('referral-flags').classList.add('hidden');
-    $('consent-box').classList.add('hidden');
-    $('summary-text').textContent = '';
-    $('referral-text').textContent = '';
-    $('referral-context').value = '';
-    $('consent-text').textContent = '';
-    $('make-summary').disabled = false;
-    $('make-summary').textContent = 'Patient summary';
-    $('make-referral').disabled = false;
-    $('make-referral').textContent = 'Referral (SBAR)';
-    $('ask-input').value = '';
-    $('ask-answer').textContent = '';
-    $('ask-answer').classList.add('hidden');
-    $('ask-go').disabled = false;
-    $('pause').textContent = 'Pause';
-    $('pause').classList.remove('resuming');
-    $('dictate').textContent = 'Dictate';
-    $('dictate').disabled = false;
+    // Session machinery — wipe() only. A new recording sets these up rather
+    // than tearing them down.
+    S.busy = false;
+    S.rateNote = '';
     $('recbar-label').textContent = 'Recording \u2014 conversation only';
     $('timer').classList.remove('paused');
-    $('level').classList.remove('near-limit');
-    $('fields').textContent = '';
-    $('gaps-list').textContent = '';
-    $('notsaid-list').textContent = '';
-    $('notsaid').classList.add('hidden');
-    var map = document.getElementById('speaker-map');
-    if (map) map.remove();
     $('timer').textContent = '0:00';
     $('timer').classList.remove('over');
     $('timer-note').textContent = 'Stops automatically at ' + Math.round(CFG.MAX_MS / 60000) + ':00';

@@ -487,6 +487,128 @@ async function testExtract() {
   ok('which forbids invention as firmly as the note does', /include only what was actually said/.test(sentBody2?.system || ''));
   ok('absent summary sections come back null, not filled', res.body?.summary?.whatToExpect === null);
 
+  // A malformed teeth value must fail loudly. A note whose site list is quietly
+  // dropped would show "No tooth identified" on a note that named one.
+  stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ ...goodNote, teeth: '48' }) }], stop_reason: 'end_turn' } }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar' } }), res);
+  ok('a teeth value that is not an array is rejected, not silently dropped',
+    res.statusCode === 502 && /teeth is not an array/.test(JSON.stringify(res.body)),
+    `${res.statusCode} ${JSON.stringify(res.body).slice(0, 90)}`);
+
+  // A recording that captured nothing is a real answer, not a parser error. The
+  // model must say so in gaps rather than return nulls with an empty gaps array,
+  // which is what produced the failure Aiden hit on 8 September.
+  let sentSys = null;
+  stubFetch(async (c, opts) => { sentSys = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar' } }), res);
+  const sys = sentSys?.system || '';
+  const sys0 = sys;
+
+  // Radiographic findings for a third molar. "Close to the nerve" is a
+  // conclusion; the signs behind it are what a Montgomery challenge examines and
+  // what the receiving surgeon needs.
+  ok('the third molar prompt asks for the specific radiographic signs',
+    /darkening of the root/.test(sys0) && /interruption or loss of the canal/.test(sys0) &&
+    /diversion or deflection/.test(sys0), 'sign vocabulary missing');
+  ok('and the impaction and root morphology',
+    /mesioangular, distoangular, horizontal, vertical/.test(sys0));
+  ok('and forbids reasoning in either direction between sign and warning',
+    /do NOT infer a sign from a warning, and do NOT infer a warning from a sign/i.test(sys0));
+
+  // A routine recall has no consent discussion in it — nothing proposed, no
+  // alternatives weighed, no decision. Demanding a gap for those made EVERY
+  // exam/recall fail to draft, deterministically, and the retry button could
+  // never help because drafting runs at temperature 0.
+  const recallNote = { ...goodNote, gaps: [] };
+  for (const k of ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'decision']) recallNote[k] = null;
+  stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(recallNote) }], stop_reason: 'end_turn' } }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'exam-recall' } }), res);
+  ok('a recall with no consent discussion drafts normally',
+    res.statusCode === 200 && res.body?.note, `${res.statusCode} ${JSON.stringify(res.body).slice(0, 120)}`);
+  ok('and the inapplicable fields stay null rather than being invented',
+    res.body?.note?.risks === null && res.body?.note?.decision === null);
+
+  // The rule still bites where it matters. Same payload, surgical type.
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar' } }), res);
+  ok('but the SAME blanks on a surgical consultation are still refused',
+    res.statusCode === 502 && /no gaps were reported/.test(JSON.stringify(res.body)),
+    `${res.statusCode}`);
+
+  // Which tooth. The never-event, arriving through a transcript.
+  ok('the model is told to report which teeth were identified',
+    /## WHICH TOOTH/.test(sys0) && /"teeth": string\[\]/.test(sys0));
+  ok('and told not to infer one from the consult type',
+    /Never infer a tooth from the consult type/.test(sys0));
+  ok('and that an empty list is a real answer, not a failure',
+    /Empty array if no tooth was identified/.test(sys0));
+
+  ok('the model is told what to do with a transcript containing no consultation',
+    /A TRANSCRIPT WITH NO CONSULTATION IN IT/.test(sys));
+  ok('and told explicitly not to return nulls with an empty gaps array',
+    /do NOT return a note[\s\S]{0,60}full of nulls with an empty gaps array/i.test(sys));
+  ok('and told to say plainly that nothing usable was captured',
+    /Nothing usable was recorded/.test(sys));
+
+  // --- a speaker mapping the clinician corrected by hand ---
+  let sentRoles = null;
+  stubFetch(async (c, opts) => { sentRoles = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar',
+    speakerRoles: { S1: 'clinician', S2: 'patient', S3: 'other', evil: 'clinician', S4: 'dentist' } } }), res);
+  let msg = sentRoles?.messages?.[0]?.content || '';
+  ok('a corrected mapping is put to the model as confirmed, not as a hint',
+    /CONFIRMED MAPPING, corrected by the clinician who was present/.test(msg), msg.slice(0, 120));
+  ok('valid labels and roles are carried through',
+    /S1 is the clinician/.test(msg) && /S2 is the patient/.test(msg) && /S3 is the other/.test(msg));
+  ok('a junk label is dropped', !/evil/.test(msg));
+  ok('and a role that is not one of the three is dropped', !/dentist/.test(msg));
+
+  // Both layers filter, so the two above hold even without the handler's
+  // whitelist. The label length cap is the handler's alone — this is the
+  // assertion that fails if its sanitising is removed.
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar',
+    speakerRoles: { S1: 'clinician', S99999999: 'patient' } } }), res);
+  msg = sentRoles?.messages?.[0]?.content || '';
+  ok('an implausibly long speaker label is dropped by the handler',
+    /S1 is the clinician/.test(msg) && !/S99999999/.test(msg), msg.slice(0, 140));
+  ok('the model is told to stop second-guessing it',
+    /Use it exactly[\s\S]{0,80}speakerConfidence to "high"/.test(msg));
+
+  // No correction means no mention of one, or the model is primed with a
+  // mapping nobody confirmed.
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar' } }), res);
+  ok('and an ordinary draft says nothing about a confirmed mapping',
+    !/CONFIRMED MAPPING/.test(sentRoles?.messages?.[0]?.content || ''));
+
+  // --- post-op sheet: goes home in the patient's hands ---
+  let sentPo = null;
+  stubFetch(async (c, opts) => { sentPo = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ expect: 'Swelling.', pain: null, bleeding: null, careOfSite: null, eating: null, avoid: null, whenToWorry: null, followUp: null }) }], stop_reason: 'end_turn' } }; });
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', kind: 'postop', note: { reasonForAttendance: 'Pain.' } } }), res);
+  ok('a post-op request returns instructions, not a note',
+    res.statusCode === 200 && res.body?.postop?.expect === 'Swelling.' && !res.body?.note, JSON.stringify(res.body).slice(0, 100));
+  ok('an area that was not covered stays null rather than being filled in',
+    res.body?.postop?.pain === null);
+  ok('the model is forbidden from supplying the standard aftercare',
+    /do NOT supply the standard aftercare for the procedure/i.test(sentPo?.system || ''));
+  ok('and told why: it goes home with the practice\'s name on it',
+    /goes home in the patient's hands with the practice's name on it/.test(sentPo?.system || ''));
+  ok('doses are taken exactly as given',
+    /never adjust, round or add one/i.test(sentPo?.system || ''));
+  ok('and nothing may be invented — no number, dose or timescale',
+    /Never invent a phone number, an opening time, a drug, a dose, or a timescale/.test(sentPo?.system || ''));
+
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar', kind: 'postop' } }), res);
+  ok('instructions with no note behind them are refused',
+    res.statusCode === 400 && res.body?.error === 'empty_postop_source', `${res.statusCode}`);
+
   // --- referral: third product, leaves the practice, so the strictest rules ---
   let sentBody3 = null;
   stubFetch(async (c, opts) => { sentBody3 = JSON.parse(opts.body); return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ situation: 'Pain from the lower left third molar.', background: null, assessment: 'Distoangular impaction on the OPG.', recommendation: 'Surgical removal.', redFlags: ['trismus for a week'] }) }], stop_reason: 'end_turn' } }; });

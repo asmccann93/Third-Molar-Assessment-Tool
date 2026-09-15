@@ -804,8 +804,11 @@ async function testPolish() {
 
   // 2. print
   ok('there is a print stylesheet', /@media print \{[\s\S]*?\.card \{ border: none/.test(src));
+  // Screen-only furniture, listed together. Anything added here must be added
+  // to that rule too, or it turns up on a printed clinical note.
   ok('controls and screen-only notes are hidden on paper',
-    /#ask-box, #referral-box,\s*\n\s*\.mic-check, #idle-warn \{ display: none !important; \}/.test(src) && /\.storage-note,/.test(src));
+    /#ask-box, #referral-box,\s*\n\s*\.mic-check, #idle-warn, #stats-row, #teeth-strip button, #postop-box \.actions \{ display: none !important; \}/.test(src) &&
+    /\.storage-note,/.test(src));
 
   // 3. the promise, stated
   ok('the page says nothing is saved', /class="storage-note"/.test(src) && /Nothing is saved\./.test(src));
@@ -895,9 +898,10 @@ async function testStyles() {
   ok('the level meter changes colour as the size limit approaches',
     /\.level > i\.near-limit \{ background: var\(--warn-ink\); \}/.test(css) &&
     /classList\.toggle\('near-limit', bytes >= CFG\.MAX_BYTES \* CFG\.SIZE_WARN\)/.test(src));
-  ok('and it is cleared when a new recording starts and on wipe',
-    (src.match(/\$\('level'\)\.classList\.remove\('near-limit'\)/g) || []).length === 2,
-    String((src.match(/\$\('level'\)\.classList\.remove\('near-limit'\)/g) || []).length));
+  // Was: count two copies, one per reset path. That asserted the duplication
+  // rather than the behaviour, and broke the moment the two paths were merged.
+  ok('and it is cleared for the next patient, by the one shared reset',
+    /function clearConsultation\(\)[\s\S]*?\$\('level'\)\.classList\.remove\('near-limit'\)[\s\S]*?\n  \}/.test(src));
 
   // Hover never fires on a touch screen.
   ok('Lock has a pressed state, not only a hover state', /#lock:active/.test(css));
@@ -1703,38 +1707,417 @@ async function testEveryAsyncPathHonoursTheGeneration() {
       'This is how one patient\'s referral reached the next patient\'s screen.');
 }
 
-async function testTheTwoResetPathsAgree() {
-  section('Guard: wipe() and the start-of-recording reset stay in step');
+async function testOneResetPathNotTwo() {
+  section('Guard: one reset path, not two');
   const src = pageScript();
+
+  // The original of this test compared wipe() against an inline reset in the
+  // Start handler and demanded they clear the same things. Six bugs came from
+  // those two drifting apart. They are now one function, so the guarantee to
+  // pin is different: everything belonging to the previous patient lives in
+  // clearConsultation(), and every path that starts fresh calls it.
+  const shared = bodyAt(src, src.indexOf('function clearConsultation()'));
+  ok('there is a single shared reset', shared.length > 200);
+
+  // Anything a new consultation must not inherit. Each of these caused, or
+  // would have caused, a wrong-patient bug.
+  const mustClear = ['note', 'turns', 'summary', 'summaryText', 'summaryEdited',
+                     'referral', 'referralText', 'dictationFromMs', 'pausesForDraft'];
+  const missing = mustClear.filter((f) => !new RegExp('\\bS\\.' + f + '\\s*=').test(shared));
+  ok('it clears every piece of the last patient\'s consultation',
+    missing.length === 0, missing.join(', '));
+
+  // Buttons a voided in-flight draft will not re-enable for itself.
+  const mustEnable = ['make-summary', 'make-referral', 'ask-go'];
+  const stuck = mustEnable.filter((b) => !shared.includes("$('" + b + "').disabled = false"));
+  ok('and re-enables every control an abandoned draft left disabled',
+    stuck.length === 0, stuck.join(', '));
+
+  // And the rendered note, or the last patient's text sits in the DOM.
+  ok('and clears the rendered note from the page',
+    /\$\('fields'\)\.textContent = ''/.test(shared) && /speaker-map/.test(shared));
+
+  // Both entry points must go through it.
   const wipe = bodyAt(src, src.indexOf('function wipe()'));
-  const from = src.indexOf('S.startedAt = Date.now();');
-  const reset = src.slice(from, src.indexOf("show('recording');", from));
+  ok('wipe() goes through the shared reset', /clearConsultation\(\)/.test(wipe));
 
-  const fields = (t) => new Set([...t.matchAll(/\bS\.([A-Za-z_$][\w$]*)\s*=/g)].map((x) => x[1]));
-  const buttons = (t) => new Set([...t.matchAll(/\$\('([a-z-]+)'\)\.disabled = false/g)].map((x) => x[1]));
+  const startAt = src.indexOf("$('start').addEventListener");
+  const startBody = src.slice(startAt, src.indexOf("show('recording');", startAt));
+  ok('and so does starting a new recording', /clearConsultation\(\)/.test(startBody));
 
-  // Legitimately wipe-only: the machinery of a session rather than anything
-  // belonging to a patient. Starting a recording is not tearing the session
-  // down — the recorder and the timers are being set up, not cleared, and the
-  // passcode, consult type and consent are deliberately kept.
-  const wipeOnly = new Set(['busy', 'bytes', 'consent', 'consultType', 'idleId', 'idleWarnId',
-                            'jobId', 'rafId', 'rateNote', 'recorder', 'tickId']);
-
-  const missing = [...fields(wipe)].filter((f) => !fields(reset).has(f) && !wipeOnly.has(f));
-  ok('a new recording clears everything of the last patient that wipe() clears',
-    missing.length === 0,
-    missing.length
-      ? `left behind for the next patient: ${missing.join(', ')} — add it to the start reset, or to wipeOnly with a reason`
-      : '');
-
-  const btnMissing = [...buttons(wipe)].filter((b) => !buttons(reset).has(b));
-  ok('and re-enables every control wipe() re-enables',
-    btnMissing.length === 0,
-    btnMissing.length ? `stuck for the next patient: ${btnMissing.join(', ')}` : '');
-
-  ok('and voids the previous consultation\'s in-flight requests',
+  ok('which also voids the previous consultation\'s in-flight requests',
     /S\.gen\+\+;[\s\S]{0,400}?S\.stream = await navigator\.mediaDevices\.getUserMedia/.test(src),
     'the gen bump must happen before the recording captures its own gen');
+
+  // The whole point of merging them: no second list to drift.
+  const inlineResets = (src.match(/S\.summaryEdited\s*=\s*false/g) || []).length;
+  ok('and no second copy of the reset has reappeared', inlineResets === 1, String(inlineResets));
+}
+
+/**
+ * A swapped speaker mapping inverts every field — the patient's words land in
+ * the clinician's mouth and vice versa. The prompt already warned that this is
+ * invisible; until now the tool could report it but not fix it, so the only
+ * remedy was to discard the recording and write by hand.
+ */
+async function testSpeakerSwap() {
+  section('Correcting a swapped speaker mapping');
+  const base = { medicalHistory: null, alternatives: null, risks: null, benefits: null, costs: null,
+    patientQuestions: null, patientFactors: null, informationGiven: null, nextStep: null,
+    examination: null, radiographicFindings: null, plan: null, gaps: [] };
+  const wrong = { ...base, reasonForAttendance: 'INVERTED', proposed: 'x', decision: 'y',
+    speakers: { S1: 'patient', S2: 'clinician' }, speakerConfidence: 'low' };
+  const right = { ...base, reasonForAttendance: 'CORRECTED', proposed: 'x', decision: 'y',
+    speakers: { S1: 'clinician', S2: 'patient' }, speakerConfidence: 'high' };
+
+  let calls = 0, sentRoles = [];
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind) return { ok: true, status: 200, json: async () => ({ status: 'done', note: right }) };
+        calls++;
+        sentRoles.push(b.speakerRoles || null);
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note: calls === 1 ? wrong : right }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(320);
+
+  ok('a low-confidence mapping is shown', /confidence: low/.test(doc.body.textContent));
+  const swap = doc.getElementById('swap-speakers');
+  ok('and the clinician is offered a way to correct it', !!swap);
+  ok('the first draft sent no correction', sentRoles[0] === null || sentRoles[0] === undefined);
+
+  click(swap);
+  await tick(320);
+  ok('correcting it redrafts', calls === 2, String(calls));
+  ok('and sends the roles the clinician confirmed, inverted',
+    sentRoles[1] && sentRoles[1].S1 === 'clinician' && sentRoles[1].S2 === 'patient',
+    JSON.stringify(sentRoles[1]));
+  ok('the corrected note replaces the inverted one',
+    /CORRECTED/.test($(doc, 'fields').textContent) && !/INVERTED/.test($(doc, 'fields').textContent));
+  // Reversible, because a mis-tap would otherwise invert the whole note with no
+  // way back short of discarding the recording.
+  ok('the banner now says the clinician set it',
+    /confirmed by you/i.test(doc.body.textContent));
+  ok('and the correction can be undone',
+    /Swap back/.test((doc.getElementById('swap-speakers') || {}).textContent || ''));
+
+  // It belongs to this patient and must not survive into the next.
+  click($(doc, 'clear'));
+  await tick(80);
+  ok('the correction is cleared with the rest of the consultation',
+    /S\.speakerRoles = null;/.test(html) &&
+    /function clearConsultation\(\)[\s\S]*?S\.speakerRoles = null;[\s\S]*?\n  \}/.test(html));
+}
+
+/**
+ * The tool stores nothing, so it cannot learn from its own use. The session line
+ * exists to answer the questions that decide what to change next — which
+ * checklist items fire every time, which fields are always blank, how much of
+ * each draft gets corrected — without storing anything to do it.
+ *
+ * The hard requirement is that it carries no clinical content at all.
+ */
+async function testSessionLine() {
+  section('Session line for a spreadsheet');
+  const note = { reasonForAttendance: 'SECRET PATIENT DETAIL', medicalHistory: null,
+    proposed: 'Surgical removal of LL8.', alternatives: null, risks: null, benefits: null, costs: null,
+    patientQuestions: null, patientFactors: null, informationGiven: null, decision: 'Proceed.',
+    nextStep: null, examination: null, radiographicFindings: null, plan: null,
+    gaps: ['No alternatives discussed', 'Costs not mentioned'],
+    notSaid: ['Not mentioned: bleeding.'],
+    speakers: { S1: 'clinician', S2: 'patient' }, speakerConfidence: 'high' };
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(320);
+
+  let copied = null;
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  click($(doc, 'copy-stats'));
+  await tick(60);
+  ok('a line is produced', typeof copied === 'string' && copied.includes('\n'), String(copied).slice(0, 60));
+
+  const [header, row] = String(copied).split('\n');
+  ok('with column names, so the first paste into an empty sheet is usable',
+    /^date,consult,length/.test(header));
+  ok('and the same number of cells as columns',
+    row.split(',').length === header.split(',').length,
+    `${row.split(',').length} vs ${header.split(',').length}`);
+
+  // The whole point: it must be safe to keep in a spreadsheet indefinitely.
+  ok('it carries NO clinical content', !/SECRET PATIENT DETAIL|Surgical removal|Proceed/.test(row), row);
+  ok('nor any of the gap or not-said text',
+    !/alternatives discussed|Costs not mentioned|bleeding/i.test(row), row);
+
+  const cells = row.split(',');
+  ok('it counts the gaps rather than quoting them', cells.includes('2'));
+  ok('and records the consult type', /third-molar/.test(row));
+  ok('and the speaker confidence', /high/.test(row));
+
+  // Was: row.split(',')[14]. Adding two columns silently moved that index onto a
+  // different field and the assertion kept passing for the wrong reason. Resolve
+  // by column name instead, which cannot drift.
+  const col = (name) => row.split(',')[header.split(',').indexOf(name)];
+  ok('nothing is recorded as edited before anything is edited',
+    col('fields_edited') === '0', String(col('fields_edited')));
+  ok('and the site check is recorded as unconfirmed until it is confirmed',
+    col('teeth_confirmed') === '0', String(col('teeth_confirmed')));
+}
+
+/**
+ * The real error Aiden hit: "Fields are null but no gaps were reported". The
+ * guard is right — a note with blanks and no explanation must not be shown —
+ * but the message describes JSON, not what went wrong, and the commonest cause
+ * is a recording that captured almost nothing.
+ */
+async function testThinRecordingSaysSo() {
+  section('A recording that captured nothing says so');
+  const ctx = await boot({
+    onFetch: async (entry) => {
+      if (entry.url.includes('/api/transcribe')) {
+        return { ok: true, status: 200, json: async () => ({ status: 'done', turns: [{ speaker: 'S1', text: 'Right.' }] }) };
+      }
+      if (entry.url.includes('/api/extract')) {
+        return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed', detail: 'Fields are null but no gaps were reported' }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(340);
+
+  const title = $(doc, 'error-title').textContent;
+  const body = $(doc, 'error-body').textContent;
+  ok('the clinician is told the recording was empty, not told about JSON',
+    /Almost nothing was recorded/.test(title) && !/gaps were reported/.test(body), title);
+  ok('and pointed at the microphone check', /microphone|level bar/i.test(body));
+  ok('with the actual word count, so the judgement is theirs', /\b1 word\b/.test(body), body.slice(0, 90));
+}
+
+/**
+ * Drafting runs at temperature 0. A second attempt on the same transcript
+ * usually returns the same answer, so a retry button that says nothing about
+ * that invites the clinician to keep pressing it.
+ */
+async function testRepeatedFailureSaysRetryingWontHelp() {
+  section('A second identical failure says so');
+  const turns = Array.from({ length: 12 }, (_, i) => ({ speaker: i % 2 ? 'S2' : 'S1', text: 'We discussed the treatment and the risks at some length today.' }));
+  const ctx = await boot({
+    onFetch: async (entry) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns }) };
+      if (entry.url.includes('/api/extract')) return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed', detail: 'Bedrock unavailable' }) };
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(340);
+  ok('the first failure offers a retry', /still held in memory/.test($(doc, 'error-body').textContent));
+
+  const retry = [...doc.querySelectorAll('#error-actions button')].find((b) => /retry|try/i.test(b.textContent));
+  ok('a retry control is offered', !!retry);
+  click(retry);
+  await tick(340);
+  ok('the second says further retries will not help',
+    /deterministic|most likely fail the same way/i.test($(doc, 'error-body').textContent),
+    $(doc, 'error-body').textContent.slice(0, 140));
+  ok('and tells them to write it by hand', /by hand/i.test($(doc, 'error-body').textContent));
+}
+
+/**
+ * Wrong-site surgery is the never-event. The tooth reaches this note through a
+ * conversation and a transcript — "lower left eight" and "lower right eight"
+ * differ by one transcribed word — and by the time it is in the note it reads
+ * perfectly. Buried across four fields a wrong one is invisible; pulled into one
+ * line it is obvious.
+ */
+async function testSiteCheck() {
+  section('Site check');
+  const base = { medicalHistory: null, alternatives: null, risks: null, benefits: null, costs: null,
+    patientQuestions: null, patientFactors: null, informationGiven: null, nextStep: null,
+    examination: null, radiographicFindings: null, plan: null, gaps: [],
+    speakers: null, speakerConfidence: null };
+  const mk = (teeth) => ({ ...base, reasonForAttendance: 'Pain.', proposed: 'Removal.', decision: 'Proceed.', teeth });
+
+  const boot2 = (teeth) => boot({
+    onFetch: async (entry) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ status: 'done', note: mk(teeth) }) };
+    }
+  });
+  const run = async (ctx, type) => {
+    const { doc, win } = ctx;
+    $(doc, 'consent').checked = true;
+    $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+    click([...$(doc, 'types').children].find((b) => new RegExp(type, 'i').test(b.textContent)));
+    await tick();
+    click($(doc, 'start'));
+    await tick(60);
+    click($(doc, 'stop'));
+    await tick(320);
+    return ctx;
+  };
+
+  // 1. Sites are surfaced, and flagged until checked.
+  let ctx = await run(await boot2(['LL8', 'LL7']), 'Third molar');
+  let strip = ctx.doc.getElementById('teeth-strip');
+  ok('the sites are pulled out of the note into one line', !!strip && /LL8/.test(strip.textContent) && /LL7/.test(strip.textContent));
+  ok('and flagged for checking rather than presented as settled',
+    !strip.classList.contains('confirmed') && /Check the site/.test(strip.textContent));
+
+  const confirm = ctx.doc.getElementById('confirm-teeth');
+  ok('the clinician can confirm it', !!confirm);
+  click(confirm);
+  await tick(40);
+  strip = ctx.doc.getElementById('teeth-strip');
+  ok('once confirmed it stops shouting', strip.classList.contains('confirmed'));
+  ok('and the button is gone, so it cannot be half-confirmed',
+    !ctx.doc.getElementById('confirm-teeth'));
+
+  // 2. On a surgical consultation, NO tooth is the louder finding.
+  ctx = await run(await boot2([]), 'Third molar');
+  strip = ctx.doc.getElementById('teeth-strip');
+  ok('a surgical note with no tooth identified says so prominently',
+    !!strip && /No tooth identified/.test(strip.textContent) && !strip.classList.contains('confirmed'));
+  ok('and tells the clinician to add it before pasting', /before you paste/i.test(strip.textContent));
+
+  // 3. On a non-surgical consultation it stays out of the way.
+  ctx = await run(await boot2([]), 'Exam');
+  ok('but an exam with no tooth named shows nothing',
+    !ctx.doc.getElementById('teeth-strip'));
+}
+
+/**
+ * The sheet the surgical patient reads at nine that night when the bleeding
+ * starts. It is where a model is most tempted to supply the standard aftercare
+ * for the procedure, and standard advice invented for a specific patient goes
+ * home in their hands with the practice's name on it.
+ */
+async function testPostopSheet() {
+  section('Post-operative instructions');
+  const note = { reasonForAttendance: 'Pain from LL8.', medicalHistory: null, proposed: 'Surgical removal.',
+    alternatives: null, risks: null, benefits: null, costs: null, patientQuestions: null, patientFactors: null,
+    informationGiven: null, decision: 'Proceed.', nextStep: null, examination: null, radiographicFindings: null,
+    plan: null, gaps: [], teeth: ['LL8'], speakers: null, speakerConfidence: null };
+  let sent = null;
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind === 'postop') {
+          sent = b;
+          return { ok: true, status: 200, json: async () => ({ status: 'done', postop: {
+            expect: 'Some swelling for two or three days.', pain: 'Paracetamol, two tablets, four times a day.',
+            bleeding: 'Bite on the gauze for twenty minutes.', careOfSite: null, eating: null,
+            avoid: 'No smoking.', whenToWorry: null, followUp: null } }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(320);
+
+  click($(doc, 'make-postop'));
+  await tick(160);
+  const txt = $(doc, 'postop-text').textContent;
+  ok('it is built from the corrected note, not the transcript alone',
+    sent?.note?.reasonForAttendance === 'Pain from LL8.', JSON.stringify(sent?.note || {}).slice(0, 80));
+  ok('what was said appears', /two or three days/.test(txt) && /Paracetamol/.test(txt));
+
+  // The whole discipline of the sheet.
+  ok('what was NOT covered is named, not quietly dropped',
+    /Looking after the area\n\[Not covered in this consultation/.test(txt), txt.slice(0, 200));
+  ok('every heading is present so nothing is silently missing',
+    ['What to expect', 'Pain relief', 'If it bleeds', 'Looking after the area',
+     'Eating and drinking', 'What to avoid', 'When to get in touch',
+     'Your next appointment'].every((h) => txt.includes(h)));
+
+  let copied = null;
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  click($(doc, 'copy-postop'));
+  await tick(40);
+  ok('it can be copied', /Paracetamol/.test(String(copied)));
+
+  click($(doc, 'clear'));
+  await tick(60);
+  ok('and it is cleared with the rest of the consultation',
+    $(doc, 'postop-text').textContent === '' && $(doc, 'postop-box').classList.contains('hidden'));
+
+  // The failure path. This box is editable, so a failed attempt leaves the error
+  // text sitting in it — and this is the one document that leaves with the
+  // patient. Copying "Could not write the instructions" into their hands is the
+  // worst outcome this panel has available.
+  const ctx2 = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind === 'postop') return { ok: false, status: 502, json: async () => ({ error: 'Bedrock unavailable' }) };
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+      }
+    }
+  });
+  $(ctx2.doc, 'consent').checked = true;
+  $(ctx2.doc, 'consent').dispatchEvent(new ctx2.win.Event('change', { bubbles: true }));
+  click([...$(ctx2.doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(ctx2.doc, 'start'));
+  await tick(60);
+  click($(ctx2.doc, 'stop'));
+  await tick(320);
+  click($(ctx2.doc, 'make-postop'));
+  await tick(160);
+  ok('a failure says so on screen', /Could not write the instructions/.test($(ctx2.doc, 'postop-text').textContent));
+
+  let copied2 = null;
+  ctx2.win.navigator.clipboard.writeText = async (t) => { copied2 = t; };
+  click($(ctx2.doc, 'copy-postop'));
+  await tick(40);
+  ok('but copying it copies NOTHING, rather than sending the error home with the patient',
+    copied2 === null, String(copied2).slice(0, 100));
 }
 
 async function testPauseResume() {
@@ -1940,6 +2323,12 @@ await testFormatAndSize();
 await testPauseResume();
 await testDerivedAndDictation();
 await testSummaryFailureIsNotCopyable();
+await testThinRecordingSaysSo();
+await testRepeatedFailureSaysRetryingWontHelp();
+await testSessionLine();
+await testSiteCheck();
+await testSpeakerSwap();
+await testPostopSheet();
 await testReferral();
 await testNewRecordingDropsThePreviousPatient();
 await testFailedDraftNeverShowsThePreviousPatientsNote();
@@ -1950,7 +2339,7 @@ await testMicCheckHonoursClear();
 await testDerivedButtonsRecoverForTheNextPatient();
 await testWakeLockHonoursClear();
 await testEveryAsyncPathHonoursTheGeneration();
-await testTheTwoResetPathsAgree();
+await testOneResetPathNotTwo();
 await testWakeLock();
 await testIdleWarning();
 await testUrlSwitches();

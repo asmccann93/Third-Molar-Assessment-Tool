@@ -28,7 +28,8 @@
 
 import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS,
          buildSummarySystemPrompt, parseSummary, buildAskSystemPrompt,
-         buildReferralSystemPrompt, buildReferralUserMessage, parseReferral } from './_prompt.mjs';
+         buildReferralSystemPrompt, buildReferralUserMessage, parseReferral,
+         buildPostopSystemPrompt, parsePostop } from './_prompt.mjs';
 import { checklistGaps } from './_checklists.mjs';
 
 export const config = { maxDuration: 120 };
@@ -189,6 +190,33 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'done', summary: parseSummary(text) });
     }
 
+    // The sheet the surgical patient takes home. Built from the corrected note
+    // like the referral, and for the same reason: the clinician has already
+    // checked it, so the instructions inherit checked content.
+    if (body?.kind === 'postop') {
+      const incoming = body?.note && typeof body.note === 'object' && !Array.isArray(body.note) ? body.note : {};
+      const note = {};
+      for (const [key] of [...FIELDS, ...DICTATED_FIELDS]) {
+        const v = incoming[key];
+        if (typeof v === 'string' && v.trim()) note[key] = v.trim().slice(0, 4000);
+      }
+      if (!Object.keys(note).length) {
+        return res.status(400).json({ error: 'empty_postop_source', detail: 'Draft the note first — the instructions are built from it.' });
+      }
+      const raw = await invokeModel({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 2048,
+        temperature: 0,
+        system: buildPostopSystemPrompt(consultType),
+        messages: [{ role: 'user', content: buildReferralUserMessage(note, '', buildUserMessage(transcript, pauses)) }]
+      }, creds);
+      if (raw?.stop_reason === 'max_tokens') {
+        return res.status(502).json({ error: 'response_truncated', detail: 'The instructions were cut off. Try again.' });
+      }
+      const text = (raw?.content || []).filter((b) => b && b.type === 'text').map((b) => b.text).join('');
+      return res.status(200).json({ status: 'done', postop: parsePostop(text) });
+    }
+
     // A third product, and the only one built from the CORRECTED note rather
     // than from the transcript alone: the clinician has already read and fixed
     // the note, so the referral inherits checked content instead of re-deriving
@@ -221,6 +249,20 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'done', referral: parseReferral(text) });
     }
 
+    // A speaker mapping the clinician corrected by hand and asked us to redraft
+    // with. Untrusted input: labels and roles are both whitelisted, and a
+    // mapping that survives that is passed through verbatim.
+    const rawRoles = body?.speakerRoles;
+    const speakerRoles = {};
+    if (rawRoles && typeof rawRoles === 'object' && !Array.isArray(rawRoles)) {
+      for (const [k, v] of Object.entries(rawRoles)) {
+        if (/^S\d{1,2}$/.test(k) && (v === 'clinician' || v === 'patient' || v === 'other')) {
+          speakerRoles[k] = v;
+        }
+      }
+    }
+    const roles = Object.keys(speakerRoles).length ? speakerRoles : null;
+
     const payload = {
       anthropic_version: 'bedrock-2023-05-31',
       // Raised from 4096 when the checklist, dictated fields and implant log
@@ -229,7 +271,7 @@ export default async function handler(req, res) {
       max_tokens: 8192,
       temperature: 0,
       system: buildSystemPrompt(consultType, length),
-      messages: [{ role: 'user', content: buildUserMessage(transcript, pauses) }]
+      messages: [{ role: 'user', content: buildUserMessage(transcript, pauses, roles) }]
     };
 
     const raw = await invokeModel(payload, creds);
@@ -246,7 +288,7 @@ export default async function handler(req, res) {
       .map((block) => block.text)
       .join('');
 
-    const note = parseNote(text); // throws on malformed output
+    const note = parseNote(text, consultType); // throws on malformed output
     assertShape(note);            // and on output of the wrong shape
 
     // The procedure checklist. The model reported what it FOUND; the wording
