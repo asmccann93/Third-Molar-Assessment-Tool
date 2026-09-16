@@ -1716,8 +1716,15 @@ async function testOneResetPathNotTwo() {
   // those two drifting apart. They are now one function, so the guarantee to
   // pin is different: everything belonging to the previous patient lives in
   // clearConsultation(), and every path that starts fresh calls it.
-  const shared = bodyAt(src, src.indexOf('function clearConsultation()'));
+  // Two functions now, nested: clearDerived() holds everything built FROM a
+  // note, clearConsultation() calls it and adds the consultation itself. The
+  // split exists because a REDRAFT must clear the first but not the second.
+  const derived = bodyAt(src, src.indexOf('function clearDerived()'));
+  const consult = bodyAt(src, src.indexOf('function clearConsultation()'));
+  const shared = derived + consult;
   ok('there is a single shared reset', shared.length > 200);
+  ok('and the consultation reset goes through the derived one, not around it',
+    /clearDerived\(\)/.test(consult));
 
   // Anything a new consultation must not inherit. Each of these caused, or
   // would have caused, a wrong-patient bug.
@@ -1748,6 +1755,12 @@ async function testOneResetPathNotTwo() {
   ok('which also voids the previous consultation\'s in-flight requests',
     /S\.gen\+\+;[\s\S]{0,400}?S\.stream = await navigator\.mediaDevices\.getUserMedia/.test(src),
     'the gen bump must happen before the recording captures its own gen');
+
+  // A redraft replaces the note, so everything derived from it is stale — the
+  // referral that claims to be built from it, the site the clinician signed off.
+  const draftBody = bodyAt(src, src.indexOf('async function draft('));
+  ok('and a redraft invalidates what the old note produced',
+    /clearDerived\(\);[\s\S]{0,120}S\.note = data\.note;/.test(draftBody));
 
   // The whole point of merging them: no second list to drift.
   const inlineResets = (src.match(/S\.summaryEdited\s*=\s*false/g) || []).length;
@@ -2120,6 +2133,75 @@ async function testPostopSheet() {
     copied2 === null, String(copied2).slice(0, 100));
 }
 
+/**
+ * A redraft replaces the note for the SAME patient — the length picker, or a
+ * speaker-mapping correction. Everything derived from the old note is then
+ * stale: the referral says "built from the note above, as you have corrected
+ * it", which stops being true the moment the note is replaced, and the site
+ * check still reads "confirmed by you" for teeth the clinician never saw.
+ */
+async function testRedraftInvalidatesWhatCameFromTheOldNote() {
+  section('A redraft invalidates everything derived from the old note');
+  const base = { medicalHistory: null, alternatives: null, risks: null, benefits: null, costs: null,
+    patientQuestions: null, patientFactors: null, informationGiven: null, nextStep: null,
+    examination: null, radiographicFindings: null, plan: null, gaps: [],
+    speakers: null, speakerConfidence: null };
+  let drafts = 0;
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        if (b.kind === 'referral') {
+          return { ok: true, status: 200, json: async () => ({ status: 'done', referral: {
+            situation: 'FROM THE FIRST NOTE', background: null, assessment: null,
+            recommendation: null, redFlags: [] } }) };
+        }
+        if (b.kind) return { ok: true, status: 200, json: async () => ({ status: 'done', summary: {
+          whatWeDiscussed: 'x', whatYouDecided: null, whatHappensNext: null, whatToExpect: null, yourQuestions: null } }) };
+        drafts++;
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note: {
+          ...base, reasonForAttendance: 'Pain.', proposed: 'Removal.', decision: 'Proceed.',
+          teeth: drafts === 1 ? ['LL8'] : ['LR8'] } }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(320);
+
+  click($(doc, 'confirm-teeth'));
+  await tick(40);
+  click($(doc, 'make-referral'));
+  await tick(160);
+  ok('a referral is produced from the first note', /FROM THE FIRST NOTE/.test($(doc, 'referral-text').textContent));
+  ok('and the site is confirmed', doc.getElementById('teeth-strip').classList.contains('confirmed'));
+
+  // Redraft at a different length. A NEW note replaces the old one.
+  const full = [...doc.querySelectorAll('.length-picker:not(#template-picker) button')]
+    .find((b) => /full/i.test(b.textContent));
+  ok('the length picker is available', !!full);
+  click(full);
+  await tick(340);
+  ok('the note was redrafted', drafts === 2, String(drafts));
+  ok('the site check shows the NEW teeth', /LR8/.test(doc.getElementById('teeth-strip').textContent),
+    doc.getElementById('teeth-strip').textContent.slice(0, 80));
+  ok('and is no longer marked confirmed, because these teeth were never checked',
+    !doc.getElementById('teeth-strip').classList.contains('confirmed'));
+
+  // The referral was built from a note that no longer exists.
+  ok('the stale referral is withdrawn rather than left on screen',
+    $(doc, 'referral-box').classList.contains('hidden') &&
+    !/FROM THE FIRST NOTE/.test($(doc, 'referral-text').textContent),
+    $(doc, 'referral-text').textContent.slice(0, 80));
+}
+
 async function testPauseResume() {
   section('Pause and resume — the examination is not recorded, and the note knows it');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -2327,6 +2409,7 @@ await testThinRecordingSaysSo();
 await testRepeatedFailureSaysRetryingWontHelp();
 await testSessionLine();
 await testSiteCheck();
+await testRedraftInvalidatesWhatCameFromTheOldNote();
 await testSpeakerSwap();
 await testPostopSheet();
 await testReferral();

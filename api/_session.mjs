@@ -45,27 +45,70 @@ export function safeEqual(a, b) {
   return diff === 0;
 }
 
-// Token format: v1.<expiryEpochSeconds>.<hexHmac>
-export async function mintToken(secret, ttlSeconds = DEFAULT_TTL_SECONDS) {
+// Token formats:
+//   v1.<exp>.<hexHmac>            one shared passcode, nobody identified
+//   v2.<exp>.<who>.<hexHmac>      per-user passcode; <who> identifies the holder
+//
+// v1 is still accepted, deliberately. A token format change that rejected live
+// cookies would end every session the moment it deployed, and somebody would be
+// halfway through a consent discussion when it did. v1 sessions simply have no
+// identity and expire on their own within the day.
+const WHO_RE = /^[A-Za-z0-9_-]{1,16}$/;
+
+export async function mintToken(secret, ttlSeconds = DEFAULT_TTL_SECONDS, who = null) {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  if (who && WHO_RE.test(who)) {
+    const payload = `v2.${exp}.${who}`;
+    return `${payload}.${await sign(secret, payload)}`;
+  }
   const payload = `v1.${exp}`;
-  const sig = await sign(secret, payload);
-  return `${payload}.${sig}`;
+  return `${payload}.${await sign(secret, payload)}`;
 }
 
 export async function verifyToken(secret, token) {
-  if (!secret || !token) return false;
+  return !!(await readToken(secret, token));
+}
+
+// Returns { exp, who } for a good token, or null. `who` is null for v1.
+export async function readToken(secret, token) {
+  if (!secret || !token) return null;
   const parts = String(token).split('.');
-  if (parts.length !== 3) return false;
-  const [version, expRaw, sig] = parts;
-  if (version !== 'v1') return false;
 
-  const exp = Number(expRaw);
-  if (!Number.isFinite(exp)) return false;
-  if (Math.floor(Date.now() / 1000) >= exp) return false;
+  if (parts[0] === 'v1' && parts.length === 3) {
+    const [, expRaw, sig] = parts;
+    const exp = Number(expRaw);
+    if (!Number.isFinite(exp)) return null;
+    if (Math.floor(Date.now() / 1000) >= exp) return null;
+    if (!safeEqual(sig, await sign(secret, `v1.${expRaw}`))) return null;
+    return { exp, who: null };
+  }
 
-  const expected = await sign(secret, `v1.${expRaw}`);
-  return safeEqual(sig, expected);
+  if (parts[0] === 'v2' && parts.length === 4) {
+    const [, expRaw, who, sig] = parts;
+    const exp = Number(expRaw);
+    if (!Number.isFinite(exp)) return null;
+    if (!WHO_RE.test(who)) return null;
+    if (Math.floor(Date.now() / 1000) >= exp) return null;
+    if (!safeEqual(sig, await sign(secret, `v2.${expRaw}.${who}`))) return null;
+    return { exp, who };
+  }
+
+  return null;
+}
+
+/* A transcription job belongs to the session that submitted it.
+   There is nowhere to record that — nothing is stored — so the binding is
+   signed instead: the job ticket is an HMAC over the job id and the holder.
+   Without it any valid cookie can fetch any transcript given its id, which
+   with one user is invisible and with a team is a consent discussion handed
+   to the wrong clinician. */
+export async function mintJobTicket(secret, jobId, who) {
+  return sign(secret, `job.${jobId}.${who || '-'}`);
+}
+
+export async function verifyJobTicket(secret, jobId, who, ticket) {
+  if (!secret || !jobId || !ticket) return false;
+  return safeEqual(String(ticket), await mintJobTicket(secret, jobId, who));
 }
 
 // Seconds remaining on a token, or 0 if absent, malformed or expired. Does NOT
@@ -74,7 +117,7 @@ export async function verifyToken(secret, token) {
 export function secondsRemaining(token) {
   if (!token) return 0;
   const parts = String(token).split('.');
-  if (parts.length !== 3 || parts[0] !== 'v1') return 0;
+  if (!(parts.length === 3 && parts[0] === 'v1') && !(parts.length === 4 && parts[0] === 'v2')) return 0;
   const exp = Number(parts[1]);
   if (!Number.isFinite(exp)) return 0;
   return Math.max(0, exp - Math.floor(Date.now() / 1000));

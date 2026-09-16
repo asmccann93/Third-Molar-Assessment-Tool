@@ -98,6 +98,31 @@ const ADDITIONAL_VOCAB = [
   { content: 'Montgomery' }
 ];
 
+import { readCookie, readToken, mintJobTicket, verifyJobTicket } from './_session.mjs';
+
+/* Who is asking, and does this job belong to them?
+
+   There is nowhere to record which session submitted a job — nothing is stored
+   — so the binding travels with the client as a signed ticket. Without it, any
+   valid cookie fetches any transcript given its id. With one clinician that is
+   invisible; with a team it is one patient's consent discussion handed to the
+   wrong colleague.
+
+   A v1 cookie has no identity, so its tickets bind to "-". Those sessions are
+   no worse off than before and expire within the day. */
+async function holder(req) {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) return { secret: null, who: null };
+  const claims = await readToken(secret, readCookie(req.headers.cookie));
+  return { secret, who: (claims && claims.who) || null };
+}
+
+function ticketFrom(req) {
+  const url = new URL(req.url, 'https://placeholder.local');
+  const t = url.searchParams.get('ticket');
+  return t && /^[a-f0-9]{64}$/.test(t) ? t : null;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
@@ -118,8 +143,13 @@ export default async function handler(req, res) {
   }
 
   try {
+    const { secret: sessionSecret, who } = await holder(req);
+
     if (req.method === 'DELETE') {
       const jobId = jobIdFrom(req);
+      if (jobId && !(await verifyJobTicket(sessionSecret, jobId, who, ticketFrom(req)))) {
+        return res.status(403).json({ error: 'job_not_yours' });
+      }
       if (!jobId) {
         // Never report success for a delete that did not happen: this is the
         // path that keeps the zero-retention claim true, and a silent no-op
@@ -133,6 +163,11 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const jobId = jobIdFrom(req);
       if (!jobId) return res.status(400).json({ error: 'missing_job_id' });
+      // The gate proves they are a clinician here. This proves the transcript
+      // is theirs.
+      if (!(await verifyJobTicket(sessionSecret, jobId, who, ticketFrom(req)))) {
+        return res.status(403).json({ error: 'job_not_yours' });
+      }
       // One check per request: the client paces itself, and no invocation
       // sits waiting long enough to hit a plan's duration cap.
       return await pollOrCleanUp(key, jobId, res, 0);
@@ -197,7 +232,8 @@ export default async function handler(req, res) {
     // is not reliably accepted. The extension on the filename is what matters.
     const contentType = contentTypeRaw.split(';')[0].trim() || 'audio/webm';
     const jobId = await submitJob(key, audio, contentType, via);
-    return await pollOrCleanUp(key, jobId, res, POST_BUDGET_MS);
+    const ticket = await mintJobTicket(sessionSecret, jobId, who);
+    return await pollOrCleanUp(key, jobId, res, POST_BUDGET_MS, ticket);
   } catch (err) {
     // Never log payloads — R11. Message only.
     console.error('transcribe failed:', err && err.message);
@@ -296,16 +332,16 @@ async function submitJob(key, audio, contentType, via, domain = DOMAIN) {
  * The one path that must NOT delete is the 202 pending return — the client is
  * coming back for that job.
  */
-async function pollOrCleanUp(key, jobId, res, budgetMs) {
+async function pollOrCleanUp(key, jobId, res, budgetMs, ticket) {
   try {
-    return await pollToCompletion(key, jobId, res, budgetMs);
+    return await pollToCompletion(key, jobId, res, budgetMs, ticket);
   } catch (err) {
     await deleteJob(key, jobId);
     throw err;
   }
 }
 
-async function pollToCompletion(key, jobId, res, budgetMs) {
+async function pollToCompletion(key, jobId, res, budgetMs, ticket) {
   const deadline = Date.now() + budgetMs;
   let waitMs = 1500;
 
@@ -340,7 +376,7 @@ async function pollToCompletion(key, jobId, res, budgetMs) {
 
   // Out of budget, job still running. Hand the id back so the client can carry
   // on against the GET route rather than losing the recording.
-  return res.status(202).json({ status: 'pending', jobId });
+  return res.status(202).json({ status: 'pending', jobId, ticket });
 }
 
 async function fetchTranscript(key, jobId) {

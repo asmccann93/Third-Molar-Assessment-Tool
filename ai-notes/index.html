@@ -754,7 +754,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-08.6';
+  var BUILD = '2026-09-08.8';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -988,6 +988,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     recBytes: 0,          // what the recording cost, for the session line
     recSecs: 0,
     jobId: null,
+    jobTicket: null,  // proves this job is ours; the server stores nothing
     turns: null,      // held ONLY between a failed draft and a retry
     note: null,
     busy: false,
@@ -1890,6 +1891,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         }
         throw new Error(data.detail || data.error || ('HTTP ' + res.status));
       }
+      // A new note replaces the one every derived document was built from, and
+      // the one whose teeth the clinician signed off. Both stop being true here.
+      clearDerived();
       S.note = data.note;
       // A snapshot of what the model produced, before any correction. Kept in
       // memory only, destroyed with the rest; it exists so the session line can
@@ -1989,15 +1993,17 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
     if (data.status === 'pending' && data.jobId) {
       S.jobId = data.jobId;
+      S.jobTicket = data.ticket || null;
       $('working-text').textContent = 'Transcribing\u2026 this one is taking a little longer.';
       for (var i = 0; i < CFG.POLL_MAX; i++) {
         await new Promise(function (r) { setTimeout(r, CFG.POLL_MS); });
         // Stop polling the moment the clinician has destroyed the session. The
         // Clear button has already asked the server to delete the job.
         if (!live()) return null;
-        var pr = await fetch('/api/transcribe?jobId=' + encodeURIComponent(data.jobId));
+        var pr = await fetch('/api/transcribe?jobId=' + encodeURIComponent(data.jobId) +
+                             (S.jobTicket ? '&ticket=' + encodeURIComponent(S.jobTicket) : ''));
         var pd = await pr.json().catch(function () { return {}; });
-        if (pd.status === 'done') { S.jobId = null; return pd.turns; }
+        if (pd.status === 'done') { S.jobId = null; S.jobTicket = null; return pd.turns; }
         if (!pr.ok && pr.status !== 202) throw new Error(pd.detail || pd.error || ('HTTP ' + pr.status));
       }
       throw new Error('Transcription did not finish in time.');
@@ -2897,7 +2903,48 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      the recorder, the timers, the wake lock. Starting a recording is setting
      those up, not tearing them down; only wipe() does that.
      ------------------------------------------------------------------ */
+  /* Everything DERIVED FROM A NOTE — the documents built from it, and the
+     clinician's sign-off on what it says.
+
+     Cleared on two occasions: a new patient (below), and a REDRAFT of the same
+     patient, because a redraft replaces the note those things came from. A
+     referral states it was built from the note above; a site check states the
+     clinician confirmed the teeth. Both stop being true the moment a new note
+     lands, and a stale referral sitting in its panel is still copyable. */
+  function clearDerived() {
+    S.summary = null;
+    S.summaryText = null;
+    S.summaryEdited = false;
+    S.referral = null;
+    S.referralText = null;
+    S.postop = null;
+    S.postopText = null;
+    S.teethConfirmed = false;
+
+    $('summary-box').classList.add('hidden');
+    $('referral-box').classList.add('hidden');
+    $('referral-flags').classList.add('hidden');
+    $('postop-box').classList.add('hidden');
+    $('consent-box').classList.add('hidden');
+    $('summary-text').textContent = '';
+    $('referral-text').textContent = '';
+    $('referral-context').value = '';
+    $('postop-text').textContent = '';
+    $('consent-text').textContent = '';
+    $('ask-answer').textContent = '';
+    $('ask-answer').classList.add('hidden');
+
+    $('make-summary').disabled = false;
+    $('make-summary').textContent = 'Patient summary';
+    $('make-referral').disabled = false;
+    $('make-referral').textContent = 'Referral (SBAR)';
+    $('make-postop').disabled = false;
+    $('make-postop').textContent = 'Post-op instructions';
+    $('ask-go').disabled = false;
+  }
+
   function clearConsultation() {
+    clearDerived();
     S.turns = null;
     S.note = null;
     S.sizeNote = '';
@@ -2908,18 +2955,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.pauses = [];
     S.pausesForDraft = null;
     S.dictationFromMs = null;
-    S.summary = null;
-    S.summaryText = null;
-    S.summaryEdited = false;
-    S.referral = null;
-    S.referralText = null;
-    S.postop = null;
-    S.postopText = null;
     S.speakerRoles = null;
     S.drafted = null;
     S.asked = false;
     S.draftFails = 0;
-    S.teethConfirmed = false;
     S.recBytes = 0;
     S.recSecs = 0;
 
@@ -2932,30 +2971,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     var map = document.getElementById('speaker-map');
     if (map) map.remove();
 
-    $('summary-box').classList.add('hidden');
-    $('referral-box').classList.add('hidden');
-    $('referral-flags').classList.add('hidden');
-    $('postop-box').classList.add('hidden');
-    $('postop-text').textContent = '';
-    $('consent-box').classList.add('hidden');
-    $('summary-text').textContent = '';
-    $('referral-text').textContent = '';
-    $('referral-context').value = '';
-    $('consent-text').textContent = '';
     $('ask-input').value = '';
-    $('ask-answer').textContent = '';
-    $('ask-answer').classList.add('hidden');
 
     // A draft still in flight for the last patient has been voided by the gen
     // bump, so its `finally` declines to touch these. The reset owns them, or
     // the next patient finds the buttons stuck on "Drafting...".
-    $('make-summary').disabled = false;
-    $('make-summary').textContent = 'Patient summary';
-    $('make-referral').disabled = false;
-    $('make-referral').textContent = 'Referral (SBAR)';
-    $('make-postop').disabled = false;
-    $('make-postop').textContent = 'Post-op instructions';
-    $('ask-go').disabled = false;
 
     $('pause').textContent = 'Pause';
     $('pause').classList.remove('resuming');
@@ -2988,12 +3008,14 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     // sitting on their side. keepalive lets it survive the page going away.
     if (S.jobId) {
       try {
-        fetch('/api/transcribe?jobId=' + encodeURIComponent(S.jobId), {
+        fetch('/api/transcribe?jobId=' + encodeURIComponent(S.jobId) +
+              (S.jobTicket ? '&ticket=' + encodeURIComponent(S.jobTicket) : ''), {
           method: 'DELETE',
           keepalive: true
         });
       } catch (e) {}
       S.jobId = null;
+      S.jobTicket = null;
     }
 
     clearConsultation();

@@ -81,6 +81,11 @@ const TURNS_PAYLOAD = {
    ================================================================ */
 async function testTranscribe() {
   section('transcribe.mjs — Speechmatics job lifecycle (DPIA R4)');
+  // A job now belongs to the session that submitted it, proved by a signed
+  // ticket rather than anything stored. Requests without one are refused.
+  process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'secret-for-tests';
+  const { mintJobTicket } = await import('../api/_session.mjs');
+  const ticketFor = async (id) => mintJobTicket(process.env.SESSION_SECRET, id, null);
   process.env.SPEECHMATICS_API_KEY = 'test-key';
   const { default: handler } = await import('../api/transcribe.mjs');
 
@@ -208,7 +213,7 @@ async function testTranscribe() {
   // --- explicit cleanup route, used by the Clear button ---
   calls = stubFetch(async () => ({ status: 200, body: {} }));
   res = mockRes();
-  await handler(mockReq({ method: 'DELETE', url: '/api/transcribe?jobId=abandoned9' }), res);
+  await handler(mockReq({ method: 'DELETE', url: '/api/transcribe?jobId=abandoned9&ticket=' + (await ticketFor('abandoned9')) }), res);
   ok('Clear button cleanup deletes the job', calls.some((c) => c.method === 'DELETE' && c.url.includes('abandoned9')));
   ok('cleanup returns ok', res.statusCode === 200);
 
@@ -297,7 +302,7 @@ async function testTranscribe() {
   });
   res = mockRes();
   const t0 = Date.now();
-  await handler(mockReq({ method: 'GET', url: '/api/transcribe?jobId=jobLong' }), res);
+  await handler(mockReq({ method: 'GET', url: '/api/transcribe?jobId=jobLong&ticket=' + (await ticketFor('jobLong')) }), res);
   ok('a still-running job comes back 202 with its id', res.statusCode === 202 && res.body?.jobId === 'jobLong', `got ${res.statusCode}`);
   ok('after exactly one status check, with no sleeping', calls.length === 1 && Date.now() - t0 < 1000, `${calls.length} calls, ${Date.now() - t0} ms`);
   ok('and the job is NOT deleted while it is still wanted', !calls.some((c) => c.method === 'DELETE'));
@@ -956,6 +961,60 @@ async function testMiddleware() {
 /* ================================================================
    4. auth.mjs
    ================================================================ */
+/**
+ * With one clinician and one shared passcode, nobody is identified and any
+ * valid cookie can fetch any transcript given its id. With colleagues, that is
+ * one patient's consent discussion handed to the wrong clinician.
+ */
+async function testMultiUser() {
+  section('Per-user passcodes and job ownership');
+  process.env.SESSION_SECRET = 'secret-for-tests';
+  const S = process.env.SESSION_SECRET;
+  const { mintToken, readToken, verifyToken, mintJobTicket, verifyJobTicket } = await import('../api/_session.mjs');
+  const { parseUsers } = await import('../api/auth.mjs');
+
+  // Identity in the token.
+  const t = await mintToken(S, 3600, 'AM');
+  const claims = await readToken(S, t);
+  ok('a per-user session records who it belongs to', claims && claims.who === 'AM', JSON.stringify(claims));
+  ok('and the identity is signed, not just carried',
+    !(await verifyToken(S, t.replace('.AM.', '.MM.'))));
+
+  // Existing sessions must survive the deploy. Somebody will be mid-recording.
+  const legacy = await mintToken(S, 3600);
+  ok('a session minted before this change still works', await verifyToken(S, legacy));
+  ok('it simply has no identity', (await readToken(S, legacy)).who === null);
+
+  // Job ownership.
+  const mine = await mintJobTicket(S, 'job-1', 'AM');
+  ok('a job ticket proves the job is this session\'s', await verifyJobTicket(S, 'job-1', 'AM', mine));
+  ok('a colleague cannot use it', !(await verifyJobTicket(S, 'job-1', 'MM', mine)));
+  ok('nor can it be reused for another job', !(await verifyJobTicket(S, 'job-2', 'AM', mine)));
+  ok('and a missing ticket is refused, not waved through',
+    !(await verifyJobTicket(S, 'job-1', 'AM', null)));
+
+  // The route itself.
+  process.env.SPEECHMATICS_API_KEY = 'k';
+  process.env.SPEECHMATICS_API_BASE = 'https://eu1.asr.api.speechmatics.com/v2';
+  const { default: transcribe } = await import('../api/transcribe.mjs');
+  const theirs = await mintJobTicket(S, 'job-9', 'MM');
+  let res = mockRes();
+  await transcribe(mockReq({ method: 'GET', url: '/api/transcribe?jobId=job-9&ticket=' + theirs,
+    headers: { cookie: 'ai_notes_session=' + (await mintToken(S, 3600, 'AM')) } }), res);
+  ok('one clinician cannot poll another\'s transcript',
+    res.statusCode === 403 && res.body?.error === 'job_not_yours', `${res.statusCode} ${JSON.stringify(res.body)}`);
+
+  res = mockRes();
+  await transcribe(mockReq({ method: 'GET', url: '/api/transcribe?jobId=job-9',
+    headers: { cookie: 'ai_notes_session=' + (await mintToken(S, 3600, 'AM')) } }), res);
+  ok('and a request with no ticket at all is refused', res.statusCode === 403, String(res.statusCode));
+
+  // Passcode parsing — a malformed entry must be dropped, never half-accepted.
+  ok('per-user passcodes parse', parseUsers('AM:longenough1,MM:alsolongenough').length === 2);
+  ok('a too-short passcode is dropped rather than accepted', parseUsers('AM:short').length === 0);
+  ok('and a malformed label is dropped', parseUsers('A M!:longenough1').length === 0);
+}
+
 async function testAuth() {
   section('auth.mjs — passcode exchange');
   process.env.SESSION_SECRET = 'secret-for-tests';
@@ -1032,7 +1091,8 @@ try {
   await testTranscribe();
   await testExtract();
   await testMiddleware();
-  await testAuth();
+  await testMultiUser();
+await testAuth();
 } finally {
   globalThis.fetch = realFetch;
 }
