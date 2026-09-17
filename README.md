@@ -110,7 +110,8 @@ otherwise runs the same code against the same keys on a URL nobody is watching.
 
 | Variable | Notes |
 |---|---|
-| `APP_PASSCODE` | A passphrase, not four digits. The throttle is per warm instance and will not stop a determined guesser. |
+| `APP_USERS` | Per-user passcodes as `AM:passcode,SM:passcode,NOC:passcode`. The initials are how the tool identifies who is signed in. Each passcode a passphrase, not four digits — the throttle is per warm instance and will not stop a determined guesser. |
+| `APP_PASSCODE` | **Do not set.** Legacy shared code, still honoured by `api/auth.mjs` if present, but anyone using it is unidentified. Deleted from Vercel on 17 September 2026. |
 | `SESSION_SECRET` | Signs the session cookie. `openssl rand -hex 32`. |
 | `SPEECHMATICS_API_KEY` | |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | IAM user scoped to `bedrock:InvokeModel` only. |

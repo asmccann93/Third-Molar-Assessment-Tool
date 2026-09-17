@@ -142,7 +142,7 @@ function challengePage() {
       if (r.status === 429) {
         e.textContent = 'Too many attempts. Wait a minute and try again.';
       } else if (r.status === 500) {
-        e.textContent = 'Not a passcode problem \u2014 the server has no passcode set. Add APP_PASSCODE and SESSION_SECRET in Vercel (Production scope), then redeploy.';
+        e.textContent = 'Not a passcode problem \u2014 the server has no passcode set. Add APP_USERS and SESSION_SECRET in Vercel (Production scope), then redeploy.';
       } else if (r.status === 404 || r.status === 405) {
         e.textContent = 'The sign-in endpoint returned ' + r.status + '. The deployment may be mid-build.';
       } else {
