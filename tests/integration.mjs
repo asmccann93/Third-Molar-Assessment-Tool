@@ -443,6 +443,22 @@ async function testExtract() {
   ok('a checklist item with evidence is not reported', !res.body?.note?.notSaid?.includes('Not mentioned: bleeding.'), JSON.stringify(res.body?.note?.notSaid));
   ok('a checklist item reported null is reported as not said', res.body?.note?.notSaid?.includes('Not mentioned: infection or dry socket.'));
   ok('a key the checklist does not know cannot create an entry', !res.body?.note?.notSaid?.some((g) => /made-up/.test(g)));
+
+  // The prompt asks for null, but a model that writes "not discussed" instead
+  // must not have that read as evidence — the gap would silently disappear.
+  for (const negative of ['null', 'None', 'n/a', 'not discussed', 'Not mentioned.', '\u2014', 'No evidence']) {
+    bedrockReturning(JSON.stringify({ ...goodNote, checklist: { bleeding: negative, infection: 'dry socket explained' } }));
+    res = mockRes();
+    await handler(mockReq({ body: { turns, consultType: 'extraction-surgery' } }), res);
+    ok(`checklist evidence of "${negative}" counts as not said`,
+      res.body?.note?.notSaid?.includes('Not mentioned: bleeding.'), JSON.stringify(res.body?.note?.notSaid));
+  }
+  // A real quote that merely begins with a negative is still evidence.
+  bedrockReturning(JSON.stringify({ ...goodNote, checklist: { bleeding: "No, it shouldn't bleed much after the first night", infection: null } }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'extraction-surgery' } }), res);
+  ok('a quote that starts with "No" is still evidence',
+    !res.body?.note?.notSaid?.includes('Not mentioned: bleeding.'), JSON.stringify(res.body?.note?.notSaid));
   bedrockReturning(JSON.stringify(withChecklist));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'restorative' } }), res);
