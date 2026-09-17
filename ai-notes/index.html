@@ -127,7 +127,7 @@ button:disabled { opacity: .45; cursor: default; }
 @media print {
   body { background: #fff; font-size: 11pt; }
   .wrap { max-width: none; padding: 0; }
-  .masthead #lock, .storage-note, .session-note,
+  .masthead #lock, .masthead .who, .storage-note, .session-note,
   #recbar, #setup, #recording, #working, #mask, #error-actions,
   .length-picker, #edit-hint, #template-hint, .rate-note, .actions,
   .field-head .copy, .derived .actions, #ask-box, #referral-box,
@@ -205,6 +205,17 @@ button:disabled { opacity: .45; cursor: default; }
   font-size: .75rem; line-height: 1.5; color: var(--ink-muted);
 }
 .session-note { margin: 10px 0 0 !important; font-size: .75rem; min-height: 1em; }
+
+/* Whose session this is. Three clinicians share a surgery computer; the one who
+   sits down second must be able to see, without looking for it, that the tool
+   still thinks it is the first one. It sits beside Lock because that is the
+   control you reach for when it is not you. */
+.who-lock { display: flex; align-items: center; gap: 10px; }
+.who {
+  font-size: .8125rem; font-weight: 700; letter-spacing: .06em;
+  padding: 4px 9px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--muted); background: var(--paper);
+}
 .session-note.warn { color: var(--stop); font-weight: 600; }
 
 /* ===================================================================
@@ -519,7 +530,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         <h1>AI Notes</h1>
         <p class="byline">Developed by Aiden McCann &middot; Dentist with special interest in oral surgery</p>
       </div>
-      <button type="button" id="lock" title="End this session and require the passcode again">Lock</button>
+      <div class="who-lock">
+        <span id="who" class="who hidden" title="Whose session this is"></span>
+        <button type="button" id="lock" title="End this session and require the passcode again">Lock</button>
+      </div>
     </div>
     <p class="storage-note">
       Nothing is saved. The recording, the transcript and the draft exist only in
@@ -754,7 +768,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-08.8';
+  var BUILD = '2026-09-17.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1176,6 +1190,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     b.textContent = pair[1];
     b.setAttribute('aria-pressed', 'false');
     b.addEventListener('click', function () {
+      // A different type is a different prompt and a different checklist, so a
+      // retry after changing it is a new attempt, not a repeat of the last one.
+      if (S.consultType !== pair[0]) S.draftFails = 0;
       S.consultType = pair[0];
       Array.prototype.forEach.call($('types').children, function (other) {
         other.setAttribute('aria-pressed', String(other === b));
@@ -1210,11 +1227,22 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       var r = await fetch('/api/auth', { cache: 'no-store' });
       var d = await r.json();
       sessionSeconds = d.authenticated ? d.expiresIn : 0;
+      renderWho(d.authenticated ? d.who : null);
     } catch (err) {
       sessionSeconds = null; // unknown; do not block on a network blip
     }
     renderSession();
     return sessionSeconds;
+  }
+
+  // Blank for a session minted before per-user passcodes, and blank when the
+  // practice is still on the shared code. Showing nothing is honest there;
+  // showing initials nobody can be held to would be worse than showing none.
+  function renderWho(who) {
+    var el = $('who');
+    if (!who) { el.textContent = ''; el.classList.add('hidden'); return; }
+    el.textContent = who;
+    el.classList.remove('hidden');
   }
 
   function renderSession() {
@@ -1887,7 +1915,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       if (!live()) return;
       if (!res.ok) {
         if (res.status === 401) {
-          throw new Error('The session expired while drafting. Reload the page, sign in, then press Try drafting again \u2014 the recording is still held in memory.');
+          // NOT "reload": reloading this page destroys the transcript it is
+          // telling them is safe. The cookie is shared between tabs, so signing
+          // in elsewhere and coming back keeps everything.
+          throw new Error('Your sign-in expired while drafting. Do not reload this page \u2014 that would destroy the transcript. Open AI Notes in a new tab, sign in there, then come back to this tab and press Try drafting again.');
         }
         throw new Error(data.detail || data.error || ('HTTP ' + res.status));
       }
@@ -1943,7 +1974,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       fail('Could not draft the note',
         String(err.message || err) +
         (S.draftFails > 1
-          ? '  \u2014  This is attempt ' + S.draftFails + ' on the same transcript, and drafting is deterministic, so further retries will most likely fail the same way. Write the note by hand.'
+          ? '  \u2014  This is attempt ' + S.draftFails + ' on the same transcript, and drafting is deterministic, so further retries will most likely fail the same way. If the wrong consult type was selected, change it below and try again; otherwise write the note by hand.'
           : '  \u2014  The recording has been transcribed and is still held in memory, so this can be retried without recording again.'),
         true);
       return false;
