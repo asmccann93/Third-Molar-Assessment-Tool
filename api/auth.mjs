@@ -8,7 +8,7 @@
 // the threat model. Use a passphrase, not four digits.
 
 import {
-  mintToken, buildCookie, clearCookie, safeEqual, verifyToken,
+  mintToken, buildCookie, clearCookie, safeEqual, readToken,
   readCookie, secondsRemaining, DEFAULT_TTL_SECONDS
 } from './_session.mjs';
 
@@ -31,10 +31,15 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const secret = process.env.SESSION_SECRET;
     const token = readCookie(req.headers.cookie);
-    const valid = secret ? await verifyToken(secret, token) : false;
+    const claims = secret ? await readToken(secret, token) : null;
+    // `who` rides along with the check the page already makes. Three clinicians
+    // sharing a surgery computer need to see whose session is open before they
+    // start, or the second one records under the first one's identity and
+    // neither of them ever knows. Null for a pre-multi-user session.
     return res.status(200).json({
-      authenticated: valid,
-      expiresIn: valid ? secondsRemaining(token) : 0
+      authenticated: !!claims,
+      who: claims ? claims.who : null,
+      expiresIn: claims ? secondsRemaining(token) : 0
     });
   }
 
@@ -110,7 +115,17 @@ export function parseUsers(raw) {
     if (!/^[A-Za-z0-9_-]{1,16}$/.test(who) || passcode.length < 6) continue;
     out.push({ who, passcode });
   }
-  return out;
+  // Two people given the same passcode would both be signed in as whichever
+  // comes last, and every note either of them made would carry the wrong
+  // initials. Refuse the pair outright: a colleague who cannot sign in finds
+  // out at once, a misattributed record is found out never. Same for one set
+  // of initials listed twice.
+  const count = (k, v) => out.filter((u) => u[k] === v).length;
+  const clean = out.filter((u) => count('passcode', u.passcode) === 1 && count('who', u.who) === 1);
+  if (clean.length !== out.length) {
+    console.error('auth: APP_USERS has a repeated passcode or initials; those entries are ignored');
+  }
+  return clean;
 }
 
 async function digest(value) {

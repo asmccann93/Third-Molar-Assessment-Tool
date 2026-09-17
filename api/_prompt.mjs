@@ -60,9 +60,13 @@ export const CONSULT_TYPES = {
     // procedure being weighed, so there are no alternatives, no material risks
     // and no decision — those fields are INAPPLICABLE, not missing, and must not
     // demand a gap. Getting this wrong made every recall fail to draft at all.
-    notApplicable: ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'decision'],
+    // patientFactors joined in September 2026: it is defined as what makes a
+    // RISK material to this patient, and a recall names no risks. The model
+    // drew the same conclusion and left the key out altogether, which failed
+    // every such recall at parseNote, deterministically.
+    notApplicable: ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'patientFactors', 'decision'],
     emphasis:
-      'There is usually NO consent discussion in a recall: no procedure proposed, no alternatives weighed, no risks named, no decision taken. Leave those fields null and do NOT add gaps for them — they do not apply to this kind of appointment. If a treatment WAS proposed and discussed, fill them normally. ' +
+      'There is usually NO consent discussion in a recall: no procedure proposed, no alternatives weighed, no risks named, so no patient-specific factors making a risk material, and no decision taken. Leave those fields null and do NOT add gaps for them — they do not apply to this kind of appointment. If a treatment WAS proposed and discussed, fill them normally. ' +
       'Routine examination. Expect findings, oral hygiene advice, lifestyle advice ' +
       '(smoking, alcohol, diet), radiographic justification, and a recall interval.',
   },
@@ -328,6 +332,7 @@ The type is a hint about what to listen for. It is not permission to assume any 
 ## OUTPUT
 
 Return a single JSON object and nothing else. No markdown fences, no explanation.
+Every key below must appear, even where it does not apply to this appointment: use null, never leave a key out.
 
 {
   "reasonForAttendance": string | null,
@@ -413,18 +418,35 @@ export function notApplicableFields(consultTypeKey) {
   return Array.isArray(type && type.notApplicable) ? type.notApplicable : [];
 }
 
+// Valid JSON is not enough: the model can return a bare string, a number or an
+// array. A string reached `key in parsed`, and V8's TypeError for that QUOTES THE
+// STRING — so the model's prose about the patient went into the error, into the
+// Vercel log (never log payloads, R11) and onto the screen. The three secondary
+// parsers accepted a string outright and returned an all-blank document. The
+// message here deliberately carries nothing from the response.
+function parseObject(cleaned) {
+  let parsed;
+  try { parsed = JSON.parse(cleaned); } catch { throw new Error('Model did not return valid JSON'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Model returned ${parsed === null ? 'null' : Array.isArray(parsed) ? 'an array' : 'a ' + typeof parsed}, not a JSON object`);
+  }
+  return parsed;
+}
+
 export function parseNote(raw, consultTypeKey) {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
-  let parsed;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    throw new Error('Model did not return valid JSON');
-  }
+  const parsed = parseObject(cleaned);
 
+  // A field that APPLIES must be present: leaving it out is a malformed
+  // response and fails loudly. A field that does not apply to this kind of
+  // appointment may be left out — the model deciding it is irrelevant is the
+  // same answer as null, and refusing it cost the whole note at temperature 0.
+  const inapplicable = new Set(notApplicableFields(consultTypeKey));
   for (const [key] of FIELDS) {
-    if (!(key in parsed)) throw new Error(`Missing field: ${key}`);
+    if (key in parsed) continue;
+    if (inapplicable.has(key)) { parsed[key] = null; continue; }
+    throw new Error(`Missing field: ${key}`);
   }
   // Dictated fields are optional in the RESPONSE too — an older prompt, or a
   // model that omits them, must not fail the whole note. Absent means null.
@@ -529,8 +551,7 @@ Return ONLY a JSON object with exactly these keys, each a string or null:
 
 export function parseSummary(raw) {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  let parsed;
-  try { parsed = JSON.parse(cleaned); } catch { throw new Error('Model did not return valid JSON'); }
+  const parsed = parseObject(cleaned);
   const out = {};
   for (const [key, label] of SUMMARY_FIELDS) {
     const v = parsed[key];
@@ -604,8 +625,7 @@ Return ONLY a JSON object with exactly these keys:
 
 export function parsePostop(raw) {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  let parsed;
-  try { parsed = JSON.parse(cleaned); } catch { throw new Error('Model did not return valid JSON'); }
+  const parsed = parseObject(cleaned);
   const out = {};
   for (const [key, label] of POSTOP_FIELDS) {
     const v = parsed[key];
@@ -705,8 +725,7 @@ export function buildReferralUserMessage(note, context, transcriptMessage) {
 
 export function parseReferral(raw) {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  let parsed;
-  try { parsed = JSON.parse(cleaned); } catch { throw new Error('Model did not return valid JSON'); }
+  const parsed = parseObject(cleaned);
   const out = {};
   for (const [key, label] of REFERRAL_FIELDS) {
     const v = parsed[key];

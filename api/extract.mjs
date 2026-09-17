@@ -138,7 +138,11 @@ export default async function handler(req, res) {
     let sawTimes = false;
     for (const t of turns) {
       const text = String(t.text || '').trim();
-      if (text.length <= 5) continue;
+      // Skip only turns with nothing in them. A length cut-off (this was once
+      // "<= 5 characters") silently removed "Yes.", "No.", "Okay." and "Sure."
+      // — in a consent discussion, very often the patient's actual answer. A
+      // dropped "No." reads to the model as the clinician carrying straight on.
+      if (!/[\p{L}\p{N}]/u.test(text)) continue;
       if (Number.isFinite(t.start)) sawTimes = true;
       if (dictationFromS !== null && !markerPlaced && Number.isFinite(t.start) && t.start >= dictationFromS) {
         lines.push(MARKER);

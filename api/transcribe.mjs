@@ -156,7 +156,9 @@ export default async function handler(req, res) {
         // would make a broken Clear button look like a working one.
         return res.status(400).json({ error: 'missing_or_invalid_job_id' });
       }
-      await deleteJob(key, jobId);
+      if (!(await deleteJob(key, jobId))) {
+        return res.status(502).json({ error: 'delete_failed', jobId });
+      }
       return res.status(200).json({ ok: true, jobId });
     }
 
@@ -388,15 +390,23 @@ async function fetchTranscript(key, jobId) {
 }
 
 async function deleteJob(key, jobId) {
+  // Cleanup is best effort, but a persistent failure here is a DPIA problem
+  // (R4), not a cosmetic one. Worth an alert if it ever shows up in logs.
+  //
+  // fetch does not throw on an HTTP error, so a 401 or 500 from Speechmatics
+  // used to pass as a successful delete: nothing logged, and the Clear route
+  // reporting ok. 404 is success — the job is already gone.
   try {
-    await fetch(`${API_BASE}/jobs/${jobId}?force=true`, {
+    const r = await fetch(`${API_BASE}/jobs/${jobId}?force=true`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${key}` }
     });
+    if (r.ok || r.status === 404) return true;
+    console.error('job delete failed:', jobId, `HTTP ${r.status}`);
+    return false;
   } catch (err) {
-    // Cleanup is best effort, but a persistent failure here is a DPIA problem
-    // (R4), not a cosmetic one. Worth an alert if it ever shows up in logs.
     console.error('job delete failed:', jobId, err && err.message);
+    return false;
   }
 }
 
