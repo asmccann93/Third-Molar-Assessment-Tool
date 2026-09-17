@@ -1969,6 +1969,52 @@ async function testRepeatedFailureSaysRetryingWontHelp() {
     /deterministic|most likely fail the same way/i.test($(doc, 'error-body').textContent),
     $(doc, 'error-body').textContent.slice(0, 140));
   ok('and tells them to write it by hand', /by hand/i.test($(doc, 'error-body').textContent));
+  ok('or to change the consult type if it was wrong', /change it below/i.test($(doc, 'error-body').textContent));
+
+  // Changing the type is a new prompt and a new checklist, so the next failure
+  // is a first attempt again. Telling them to give up here was wrong.
+  click([...$(doc, 'types').children].find((b) => /Exam/.test(b.textContent)));
+  await tick();
+  click(retry);
+  await tick(340);
+  ok('after changing the consult type, a failure is a first attempt again',
+    /still held in memory/.test($(doc, 'error-body').textContent) && !/deterministic/.test($(doc, 'error-body').textContent),
+    $(doc, 'error-body').textContent.slice(0, 140));
+  click([...$(doc, 'types').children].find((b) => /Exam/.test(b.textContent)));
+  await tick();
+  click(retry);
+  await tick(340);
+  ok('but pressing the SAME type again does not reset the count',
+    /deterministic/.test($(doc, 'error-body').textContent));
+}
+
+/**
+ * The session can lapse while drafting. The transcript is held in this page's
+ * memory, so the advice must never be "reload" — that destroys it.
+ */
+async function testExpiredWhileDraftingKeepsTranscript() {
+  section('Session expiring mid-draft');
+  const turns = Array.from({ length: 12 }, (_, i) => ({ speaker: i % 2 ? 'S2' : 'S1', text: 'We discussed the treatment and the risks at some length today.' }));
+  const ctx = await boot({
+    onFetch: async (entry) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns }) };
+      if (entry.url.includes('/api/extract')) return { ok: false, status: 401, json: async () => ({ error: 'unauthorised' }) };
+    }
+  });
+  const { doc, win } = ctx;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(340);
+  const body = $(doc, 'error-body').textContent;
+  ok('an expired session mid-draft does not tell them to reload this page',
+    !/reload the page/i.test(body) && /do not reload/i.test(body), body.slice(0, 160));
+  ok('it tells them to sign in in another tab and come back', /new tab/i.test(body) && /come back/i.test(body));
+  ok('and a retry is still offered', !$(doc, 'error-actions').classList.contains('hidden'));
 }
 
 /**
@@ -2202,6 +2248,35 @@ async function testRedraftInvalidatesWhatCameFromTheOldNote() {
     $(doc, 'referral-text').textContent.slice(0, 80));
 }
 
+/**
+ * Three clinicians share a surgery computer. The one who sits down second must
+ * be able to see, without going looking, that the tool still thinks it is the
+ * first one — otherwise they record under a colleague's identity and neither
+ * of them ever knows, which defeats the whole point of per-user passcodes.
+ */
+async function testWhoseSession() {
+  section('Whose session is this');
+  let ctx = await boot({ session: { authenticated: true, expiresIn: 40000, who: 'SM' } });
+  let el = $(ctx.doc, 'who');
+  ok('the initials are shown', el.textContent === 'SM', el.textContent);
+  ok('and visible, not just present in the markup', !el.classList.contains('hidden'));
+  ok('beside Lock, which is what you reach for when it is not you',
+    el.parentElement === $(ctx.doc, 'lock').parentElement);
+
+  // A session from before per-user passcodes, or a practice still on the shared
+  // code. Showing initials nobody can be held to is worse than showing none.
+  ctx = await boot({ session: { authenticated: true, expiresIn: 40000, who: null } });
+  el = $(ctx.doc, 'who');
+  ok('an unidentified session shows nothing rather than guessing',
+    el.textContent === '' && el.classList.contains('hidden'));
+
+  ctx = await boot({ session: { authenticated: false, expiresIn: 0, who: null } });
+  ok('and no session shows nothing', $(ctx.doc, 'who').classList.contains('hidden'));
+
+  const src = html;
+  ok('it stays off a printed note', /\.masthead #lock, \.masthead \.who,/.test(src));
+}
+
 async function testPauseResume() {
   section('Pause and resume — the examination is not recorded, and the note knows it');
   const src = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
@@ -2407,7 +2482,9 @@ await testDerivedAndDictation();
 await testSummaryFailureIsNotCopyable();
 await testThinRecordingSaysSo();
 await testRepeatedFailureSaysRetryingWontHelp();
+await testExpiredWhileDraftingKeepsTranscript();
 await testSessionLine();
+await testWhoseSession();
 await testSiteCheck();
 await testRedraftInvalidatesWhatCameFromTheOldNote();
 await testSpeakerSwap();

@@ -217,6 +217,21 @@ async function testTranscribe() {
   ok('Clear button cleanup deletes the job', calls.some((c) => c.method === 'DELETE' && c.url.includes('abandoned9')));
   ok('cleanup returns ok', res.statusCode === 200);
 
+  // fetch does not throw on an HTTP error. A refused delete must not pass as done.
+  {
+    const errs = []; const quiet = console.error; console.error = (...a) => errs.push(a.join(' '));
+    calls = stubFetch(async () => ({ status: 500, body: {} }));
+    res = mockRes();
+    await handler(mockReq({ method: 'DELETE', url: '/api/transcribe?jobId=stuck1&ticket=' + (await ticketFor('stuck1')) }), res);
+    ok('a delete the provider refuses is reported as failed, not ok', res.statusCode === 502, `${res.statusCode}`);
+    ok('and it is logged', errs.some((e) => /job delete failed: stuck1 HTTP 500/.test(e)));
+    calls = stubFetch(async () => ({ status: 404, body: {} }));
+    res = mockRes();
+    await handler(mockReq({ method: 'DELETE', url: '/api/transcribe?jobId=gone1&ticket=' + (await ticketFor('gone1')) }), res);
+    console.error = quiet;
+    ok('a job that is already gone counts as deleted', res.statusCode === 200, `${res.statusCode}`);
+  }
+
   // --- guards ---
   calls = stubFetch(async () => ({ status: 201, body: { id: 'shouldnothappen' } }));
   res = mockRes();
@@ -511,6 +526,26 @@ async function testExtract() {
   const sys = sentSys?.system || '';
   const sys0 = sys;
 
+  // The patient's one-word answer is often the consent itself. It must reach
+  // the model; a length filter used to drop anything of five characters or less.
+  {
+    let sentUser = '';
+    stubFetch(async (c, opts) => { sentUser = JSON.parse(opts.body).messages[0].content; return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+    const shortTurns = [
+      { speaker: 'S1', text: 'Are you happy to go ahead with taking the tooth out today?' },
+      { speaker: 'S2', text: 'No.' },
+      { speaker: 'S1', text: 'Did you want to think about the alternatives first?' },
+      { speaker: 'S2', text: 'Yes.' },
+      { speaker: 'S1', text: 'Okay.' },
+      { speaker: 'S2', text: '...' }
+    ];
+    const r2 = mockRes();
+    await handler(mockReq({ body: { turns: shortTurns, consultType: 'third-molar' } }), r2);
+    ok('a patient\'s one-word "No." reaches the model', /\[S2\] No\./.test(sentUser), sentUser.slice(0, 200));
+    ok('and so do "Yes." and "Okay."', /\[S2\] Yes\./.test(sentUser) && /\[S1\] Okay\./.test(sentUser));
+    ok('while a turn with no words in it is still dropped', !/\[S2\] \.\.\./.test(sentUser));
+  }
+
   // Radiographic findings for a third molar. "Close to the nerve" is a
   // conclusion; the signs behind it are what a Montgomery challenge examines and
   // what the receiving surgeon needs.
@@ -536,7 +571,40 @@ async function testExtract() {
   ok('and the inapplicable fields stay null rather than being invented',
     res.body?.note?.risks === null && res.body?.note?.decision === null);
 
+  // Seen live, September 2026: on a recall the model LEFT OUT patientFactors
+  // rather than returning null, and every retry failed with "Missing field".
+  const { notApplicableFields } = await import('../api/_prompt.mjs');
+  const recallOmits = { ...recallNote };
+  delete recallOmits.patientFactors;
+  delete recallOmits.risks;
+  stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(recallOmits) }], stop_reason: 'end_turn' } }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'exam-recall' } }), res);
+  ok('a recall that leaves out an inapplicable field still drafts',
+    res.statusCode === 200 && res.body?.note, `${res.statusCode} ${res.body?.detail || ''}`);
+  ok('and the left-out fields come back as null, not undefined',
+    res.body?.note?.patientFactors === null && res.body?.note?.risks === null);
+  ok('patient-specific factors do not apply to a recall',
+    notApplicableFields('exam-recall').includes('patientFactors'));
+  ok('but still apply to every consult type that names risks',
+    ['third-molar', 'extraction-surgery', 'implant-consult', 'implant-surgery', 'endo', 'restorative', 'perio', 'emergency', 'treatment-plan', 'sedation']
+      .every((k) => !notApplicableFields(k).includes('patientFactors')));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'third-molar' } }), res);
+  ok('the SAME left-out fields on a surgical consultation still fail loudly',
+    res.statusCode === 502 && /Missing field/.test(JSON.stringify(res.body)), `${res.statusCode}`);
+  const recallOmitsApplicable = { ...recallNote };
+  delete recallOmitsApplicable.reasonForAttendance;
+  stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(recallOmitsApplicable) }], stop_reason: 'end_turn' } }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'exam-recall' } }), res);
+  ok('and a recall that leaves out a field that DOES apply still fails loudly',
+    res.statusCode === 502 && /Missing field: reasonForAttendance/.test(JSON.stringify(res.body)), `${res.statusCode}`);
+  ok('the model is told never to leave a key out',
+    /Every key below must appear[^\n]*never leave a key out/.test(sys0));
+
   // The rule still bites where it matters. Same payload, surgical type.
+  stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(recallNote) }], stop_reason: 'end_turn' } }));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'third-molar' } }), res);
   ok('but the SAME blanks on a surgical consultation are still refused',
@@ -1009,10 +1077,49 @@ async function testMultiUser() {
     headers: { cookie: 'ai_notes_session=' + (await mintToken(S, 3600, 'AM')) } }), res);
   ok('and a request with no ticket at all is refused', res.statusCode === 403, String(res.statusCode));
 
+  // The page has to be able to SEE whose session it is, or the initials exist
+  // only inside a signed cookie nobody can read.
+  process.env.SESSION_SECRET = S;
+  const { default: auth } = await import('../api/auth.mjs');
+  const askWho = async (cookie) => {
+    const r = mockRes();
+    await auth(mockReq({ method: 'GET', url: '/api/auth', headers: { cookie } }), r);
+    return r.body;
+  };
+  let body = await askWho('ai_notes_session=' + (await mintToken(S, 3600, 'SM')));
+  ok('the session check reports who it belongs to', body?.authenticated && body?.who === 'SM', JSON.stringify(body));
+  body = await askWho('ai_notes_session=' + (await mintToken(S, 3600)));
+  ok('a pre-multi-user session reports no identity rather than a wrong one',
+    body?.authenticated === true && body?.who === null, JSON.stringify(body));
+  body = await askWho('');
+  ok('and no session reports neither', body?.authenticated === false && body?.who === null, JSON.stringify(body));
+
   // Passcode parsing — a malformed entry must be dropped, never half-accepted.
   ok('per-user passcodes parse', parseUsers('AM:longenough1,MM:alsolongenough').length === 2);
+  {
+    const pm = await import('../api/_prompt.mjs');
+    const secret = '"Mrs Example declined removal of the lower left eight"';
+    for (const [name, fn] of [['note', (r) => pm.parseNote(r, 'third-molar')], ['summary', pm.parseSummary], ['post-op', pm.parsePostop], ['referral', pm.parseReferral]]) {
+      for (const raw of [secret, 'null', '[1,2]', '42']) {
+        let msg = null;
+        try { fn(raw); } catch (e) { msg = e.message; }
+        ok(`${name}: ${raw.slice(0, 6)} is refused as not an object, without quoting the response`,
+          msg !== null && /not a JSON object/.test(msg) && !/Example|lower left/.test(msg), String(msg).slice(0, 100));
+      }
+    }
+  }
   ok('a too-short passcode is dropped rather than accepted', parseUsers('AM:short').length === 0);
   ok('and a malformed label is dropped', parseUsers('A M!:longenough1').length === 0);
+  {
+    const quiet = console.error; console.error = () => {};
+    const shared = parseUsers('AM:samepasscode1,SM:samepasscode1,NOC:different99');
+    const twice = parseUsers('AM:firstcode11,AM:secondcode22,SM:thirdcode33');
+    console.error = quiet;
+    ok('two people given the same passcode are both refused, not misattributed',
+      shared.length === 1 && shared[0].who === 'NOC', JSON.stringify(shared.map((u) => u.who)));
+    ok('and the same initials listed twice are both refused',
+      twice.length === 1 && twice[0].who === 'SM', JSON.stringify(twice.map((u) => u.who)));
+  }
 }
 
 async function testAuth() {
