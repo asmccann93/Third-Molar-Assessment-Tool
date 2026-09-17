@@ -244,8 +244,27 @@ export function checklistGaps(consultTypeKey, report) {
   const gaps = [];
   for (const item of items) {
     const v = r[item.key];
-    const found = typeof v === 'string' && v.trim().length > 0;
+    const found = typeof v === 'string' && v.trim().length > 0 && !isNegative(v);
     if (!found) gaps.push(item.gap);
   }
   return gaps;
+}
+
+/**
+ * The prompt asks for null when an item was not found, but a model that writes
+ * "not discussed" instead would have its answer read as EVIDENCE, and the gap
+ * the clinician needs to see would disappear. This fails the safe way: a whole
+ * value that says nothing was found counts as not found.
+ *
+ * Whole-string only, deliberately. Real evidence can begin with a negative —
+ * "No, it shouldn't hurt afterwards" is the clinician answering a question —
+ * and must not be swallowed by this.
+ */
+const NEGATIVE = /^[\s"'\-—.]*(null|none|n\/?a|nil|nothing|no evidence|not (discussed|mentioned|found|said|stated|covered|addressed|raised|in the transcript))[\s"'\-—.]*$/i;
+
+const NO_CONTENT = /^[\s"'\-—.·]*$/;
+
+function isNegative(value) {
+  const v = String(value).trim();
+  return NO_CONTENT.test(v) || NEGATIVE.test(v);
 }
