@@ -1826,6 +1826,31 @@ async function testSpeakerSwap() {
   ok('and the correction can be undone',
     /Swap back/.test((doc.getElementById('swap-speakers') || {}).textContent || ''));
 
+  // Inverting two clinicians would leave a mapping with no clinician in it,
+  // and the model is told to use a confirmed mapping exactly.
+  {
+    const bothClinicians = { ...base, reasonForAttendance: 'x', proposed: 'x', decision: 'y',
+      speakers: { S1: 'clinician', S2: 'clinician' }, speakerConfidence: 'low' };
+    const c2 = await boot({
+      onFetch: async (entry) => {
+        if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+        if (entry.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ status: 'done', note: bothClinicians }) };
+      }
+    });
+    $(c2.doc, 'consent').checked = true;
+    $(c2.doc, 'consent').dispatchEvent(new c2.win.Event('change', { bubbles: true }));
+    click([...$(c2.doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+    await tick();
+    click($(c2.doc, 'start'));
+    await tick(60);
+    click($(c2.doc, 'stop'));
+    await tick(320);
+    ok('the mapping is still shown when both speakers came back as clinician',
+      /clinician/.test(c2.doc.body.textContent));
+    ok('but no swap is offered, because inverting it would leave no clinician',
+      !c2.doc.getElementById('swap-speakers'));
+  }
+
   // It belongs to this patient and must not survive into the next.
   click($(doc, 'clear'));
   await tick(80);
