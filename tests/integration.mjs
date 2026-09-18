@@ -457,6 +457,19 @@ async function testExtract() {
   bedrockReturning(JSON.stringify({ ...goodNote, checklist: { bleeding: "No, it shouldn't bleed much after the first night", infection: null } }));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'extraction-surgery' } }), res);
+  // Seen live: a real recall came back with plan: "". The page renders "" and
+  // null identically, so the guard has to treat them identically too.
+  {
+    const pm = await import('../api/_prompt.mjs');
+    const blanked = { ...goodNote, plan: '   ', gaps: ['Medical history not discussed'] };
+    const parsedBlank = pm.parseNote(JSON.stringify(blanked), 'exam-recall');
+    ok('a whitespace-only field is normalised to null', parsedBlank.plan === null);
+    let threw = null;
+    try { pm.parseNote(JSON.stringify({ ...goodNote, plan: '', gaps: [] }), 'third-molar'); } catch (e) { threw = e.message; }
+    ok('and an empty field with no gap reported fails loudly, as a null one does',
+      /null but no gaps/.test(String(threw)), String(threw).slice(0, 80));
+  }
+
   ok('a quote that starts with "No" is still evidence',
     !res.body?.note?.notSaid?.includes('Not mentioned: bleeding.'), JSON.stringify(res.body?.note?.notSaid));
   bedrockReturning(JSON.stringify(withChecklist));
