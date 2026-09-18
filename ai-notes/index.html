@@ -768,7 +768,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-17.3';
+  var BUILD = '2026-09-18.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1597,6 +1597,24 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   function meterFrame() {
     if (!S.analyser) return;
+
+    // Pause disconnects the microphone from the ENCODER, not from this meter,
+    // so the bar went on responding to the room while the label beside it said
+    // nothing was being recorded. Of the two, a moving bar is the one that gets
+    // believed: read it as live, carry on with the consent discussion, and none
+    // of it is in the file. Freeze it instead.
+    if (S.paused) {
+      $('level').style.width = '0%';
+      S.lastSoundAt = Date.now();          // silence during a pause is not a fault
+      var pausedNote = $('level-note');
+      if (pausedNote.textContent !== S.sizeNote) {
+        pausedNote.textContent = S.sizeNote;
+        pausedNote.classList.toggle('alert', !!S.sizeNote);
+      }
+      S.rafId = requestAnimationFrame(meterFrame);
+      return;
+    }
+
     var data = new Uint8Array(S.analyser.fftSize);
     S.analyser.getByteTimeDomainData(data);
 
@@ -1813,14 +1831,6 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         Math.floor(CFG.MAX_BYTES * CFG.SIZE_STOP / perSec / 60) + ' minutes.';
     } else {
       S.rateNote = '';
-    S.noteLength = 'standard';
-    S.template = 'clinical';
-    S.edited = false;
-    [].forEach.call(document.querySelectorAll('#template-picker button'), function (b) {
-      b.classList.toggle('on', b.dataset.template === 'clinical');
-    });
-    $('template-hint').textContent = TEMPLATES.clinical.hint;
-    setLengthButtons(false);
     }
 
     var blob = rec.blob();
@@ -2492,6 +2502,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       }
       if (S.edited && !confirm('Redrafting replaces the note, including your edits. Continue?')) return;
 
+      var gen = S.gen;
       var prev = S.noteLength;
       var prevEdited = S.edited;
       S.noteLength = want;
@@ -2499,10 +2510,16 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       var ok = false;
       try {
         S.edited = false;       // a successful redraft supersedes any edits
-        ok = await draft(S.gen);  // same path as the first draft; transcript unchanged
+        ok = await draft(gen);  // same path as the first draft; transcript unchanged
       } catch (err) {
         ok = false;
       }
+      // A Clear, a Lock, the idle timer or the next patient's recording may have
+      // landed while this was in flight, and all of them have already reset the
+      // length and the edit flag. Restoring `prev` now would put the LAST
+      // patient's choice on the next patient's note — the response undoing the
+      // wipe, which is the shape both wrong-patient bugs had.
+      if (gen !== S.gen) return;
       if (!ok) {
         // Nothing was replaced, so the note on screen is still the old one.
         // Leaving the button on the new length would misdescribe it.
@@ -3011,6 +3028,22 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.draftFails = 0;
     S.recBytes = 0;
     S.recSecs = 0;
+
+    // How the LAST note was asked for and laid out, and whether it was edited.
+    // These sat inside the `else` of a size check in onRecorderStop, so they
+    // were reset only after a recording UNDER a minute — never after a real
+    // consultation. S.edited then stayed true for the rest of the day, and
+    // every later redraft asked "this replaces your edits" on a note carrying
+    // none: a warning that always fires is one you learn to click through, and
+    // the time it is telling the truth you lose real corrections.
+    S.noteLength = 'standard';
+    S.template = 'clinical';
+    S.edited = false;
+    [].forEach.call(document.querySelectorAll('#template-picker button'), function (b) {
+      b.classList.toggle('on', b.dataset.template === 'clinical');
+    });
+    $('template-hint').textContent = TEMPLATES.clinical.hint;
+    setLengthButtons(false);
 
     // The rendered note. Nulling S.note stops the logic reaching for it; this
     // stops the last patient's text sitting in the DOM, hidden but present.
