@@ -768,7 +768,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-17.1';
+  var BUILD = '2026-09-17.2';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -2154,7 +2154,13 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         var keys = Object.keys(note.speakers).filter(function (k) {
           return note.speakers[k] === 'clinician' || note.speakers[k] === 'patient';
         });
-        if (keys.length === 2 && !S.busy) {
+        // Exactly one of each, or swapping is meaningless: inverting two
+        // clinicians produces a mapping with no clinician in it at all, and the
+        // model is told to use a confirmed mapping exactly.
+        var oneEach = keys.length === 2 &&
+          keys.filter(function (k) { return note.speakers[k] === 'clinician'; }).length === 1 &&
+          keys.filter(function (k) { return note.speakers[k] === 'patient'; }).length === 1;
+        if (oneEach && !S.busy) {
           var act = document.createElement('div');
           act.className = 'actions';
           act.style.marginTop = '10px';
