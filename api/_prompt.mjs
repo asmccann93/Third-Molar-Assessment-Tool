@@ -498,8 +498,17 @@ export function parseNote(raw, consultTypeKey) {
   // risks and a decision are not missing, they are irrelevant. Demanding a gap
   // for them made every exam/recall fail to draft, deterministically, with a
   // message about null fields that told the clinician nothing.
+  //
+  // An empty or whitespace-only string is the same thing as null here: the page
+  // renders both as a gap, so a response of "" used to slip past this guard and
+  // leave a silently blank field with nothing reported. Seen live on 17
+  // September, when a real recall came back with plan: "".
   const skip = new Set(notApplicableFields(consultTypeKey));
-  const nulls = FIELDS.filter(([k]) => parsed[k] == null && !skip.has(k)).length;
+  const blank = (v) => v == null || (typeof v === 'string' && v.trim() === '');
+  for (const [k] of [...FIELDS, ...DICTATED_FIELDS]) {
+    if (typeof parsed[k] === 'string' && parsed[k].trim() === '') parsed[k] = null;
+  }
+  const nulls = FIELDS.filter(([k]) => blank(parsed[k]) && !skip.has(k)).length;
   if (nulls > 0 && parsed.gaps.length === 0) {
     throw new Error('Fields are null but no gaps were reported');
   }
