@@ -1120,6 +1120,36 @@ async function testSummaryFailureIsNotCopyable() {
 
   // And the guard must not break the normal path it protects.
   ok('the failure leaves no summary behind to copy later', !/What we discussed/.test(smEl.textContent));
+
+  // A request the page itself gave up on used to report "signal is aborted
+  // without reason", which reads like a fault in the tool.
+  {
+    const c2 = await boot({
+      onFetch: async (entry, opts) => {
+        if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+        if (entry.url.includes('/api/extract')) {
+          const b2 = JSON.parse(opts.body);
+          if (b2.kind === 'summary') { const e = new Error('signal is aborted without reason'); e.name = 'AbortError'; throw e; }
+          return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+        }
+      }
+    });
+    $(c2.doc, 'consent').checked = true;
+    $(c2.doc, 'consent').dispatchEvent(new c2.win.Event('change', { bubbles: true }));
+    click([...$(c2.doc, 'types').children].find((b3) => /Third molar/.test(b3.textContent)));
+    await tick();
+    click($(c2.doc, 'start'));
+    await tick(60);
+    click($(c2.doc, 'stop'));
+    await tick(300);
+    click($(c2.doc, 'make-summary'));
+    await tick(150);
+    const t = $(c2.doc, 'summary-text').textContent;
+    ok('a timed-out request says it was stopped, in plain words',
+      /was stopped/.test(t) && /try again/i.test(t), t.slice(0, 140));
+    ok('and does not show the raw abort message', !/signal is aborted/.test(t), t.slice(0, 140));
+    ok('the button is usable again', !$(c2.doc, 'make-summary').disabled);
+  }
 }
 
 /**
