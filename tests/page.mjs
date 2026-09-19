@@ -1724,10 +1724,14 @@ async function testEveryAsyncPathHonoursTheGeneration() {
     if (!/\bawait\b/.test(fn)) continue;
     // Writes to session state (S.gen and S.busy are the bookkeeping itself).
     if (!/\bS\.(?!gen\b|busy\b)[A-Za-z_$][\w$]*\s*=/.test(fn)) continue;
-    // Two accepted forms: reading S.gen directly, or being handed a liveness
+    // Two accepted forms: COMPARING against S.gen, or being handed a liveness
     // closure by the caller that already captured it — transcribe() takes
     // live() from process(), which is the same guarantee, just passed in.
-    if (/S\.gen/.test(fn) || /\blive\(\)/.test(fn)) continue;
+    //
+    // A mere mention of S.gen is not enough, and used to be: the redraft
+    // handler passed S.gen INTO draft() and never compared it, which read as a
+    // guard and was not one. Require the comparison.
+    if (/[!=]==?\s*S\.gen\b/.test(fn) || /\bS\.gen\s*[!=]==?/.test(fn) || /\blive\(\)/.test(fn)) continue;
     offenders.push(src.slice(at, src.indexOf('(', at)).trim().slice(0, 60));
   }
   ok('every async path that writes state checks S.gen after awaiting',
@@ -2559,7 +2563,358 @@ await testWakeLock();
 await testIdleWarning();
 await testUrlSwitches();
 await testNotSaidPanel();
+
+/**
+ * Pause disconnects the microphone from the ENCODER, not from the level meter.
+ * The bar therefore went on responding to the room while the label beside it
+ * said nothing was being recorded — and of the two, a moving bar is the one
+ * that gets believed.
+ */
+async function testPausedMeterIsFrozen() {
+  section('The level bar while paused');
+  const ctx = await boot({
+    onFetch: async (entry) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ status: 'done', note: { reasonForAttendance: 'x', gaps: [] } }) };
+    }
+  });
+  const { doc, win } = ctx;
+  // Someone talking in the room, and a meter loop that actually runs.
+  win.AudioContext.prototype.createAnalyser = function () {
+    return { fftSize: 512, connect() {}, getByteTimeDomainData(a) { a.fill(200); } };
+  };
+  win.requestAnimationFrame = (fn) => win.setTimeout(fn, 4);
+  win.cancelAnimationFrame = (id) => win.clearTimeout(id);
+
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  click($(doc, 'start'));
+  await tick(80);
+  ok('the bar moves while recording', $(doc, 'level').style.width !== '0%', $(doc, 'level').style.width);
+
+  click($(doc, 'pause'));
+  await tick(60);
+  ok('and is frozen at zero while paused, so it cannot be read as still recording',
+    $(doc, 'level').style.width === '0%', $(doc, 'level').style.width);
+  ok('while the label says the same thing',
+    /Paused/.test($(doc, 'recbar-label').textContent), $(doc, 'recbar-label').textContent);
+  ok('and a pause is not reported as a muted microphone',
+    !/No sound detected/.test($(doc, 'level-note').textContent), $(doc, 'level-note').textContent);
+
+  click($(doc, 'pause'));
+  await tick(60);
+  ok('and it moves again on resume', $(doc, 'level').style.width !== '0%', $(doc, 'level').style.width);
+  click($(doc, 'stop'));
+  await tick(200);
+}
+
+/**
+ * How the last note was asked for, how it was laid out, and whether it was
+ * edited all belong to the last patient. That reset sat inside the `else` of a
+ * size check in onRecorderStop, so it ran only after a recording UNDER a
+ * minute — never after a real consultation.
+ */
+async function testNotePreferencesDoNotFollowThePatientOut() {
+  section('Length, layout and the edit flag are per patient');
+  const src = html;
+  ok('the per-patient reset lives in clearConsultation, with the rest of it',
+    /function clearConsultation\(\)[\s\S]*?S\.edited = false;[\s\S]*?\n  \}/.test(src));
+  ok('and not behind a recording-length check',
+    !/S\.rateNote = '';\s*\n\s*S\.noteLength/.test(src));
+
+  const sent = [];
+  const note = () => ({
+    reasonForAttendance: 'Pain from LL8.', medicalHistory: null, proposed: 'Surgical removal.',
+    alternatives: null, risks: 'Numbness.', benefits: null, costs: null, patientQuestions: null,
+    patientFactors: null, informationGiven: null, decision: 'Proceed.', nextStep: 'Book.',
+    gaps: [], notSaid: [], speakers: null, speakerConfidence: null
+  });
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        sent.push(JSON.parse(opts.body));
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note: note() }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  let confirms = 0;
+  win.confirm = () => { confirms++; return true; };
+
+  // Both consultations must run LONGER THAN A MINUTE of recorded time, or they
+  // take the short-recording branch the reset was hiding in and the bug cannot
+  // show. A mock recording is milliseconds long; the clock has to be moved.
+  const realNow = win.Date.now.bind(win.Date);
+  let offset = 0;
+  win.Date.now = () => realNow() + offset;
+  const longRecording = async () => {
+    click($(doc, 'start'));
+    await tick(60);
+    offset += 90 * 1000;
+    await tick(40);
+    click($(doc, 'stop'));
+    await tick(300);
+  };
+
+  // Patient one: ask for a Full note, lay it out as SOAP, and correct a field.
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  await longRecording();
+  ok('the first recording was long enough to take the real path',
+    /recorded/.test($(doc, 'fields').textContent) || sent.length > 0, String(sent.length));
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'full'));
+  await tick(300);
+  ok('the first patient got the Full note that was asked for',
+    sent[sent.length - 1]?.length === 'full', JSON.stringify(sent.map((b) => b.length)));
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap'));
+  await tick(40);
+  const pre = $(doc, 'fields').querySelector('.field pre');
+  pre.textContent = 'Corrected by hand.';
+  pre.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(40);
+
+  // Patient two.
+  confirms = 0;
+  click($(doc, 'clear'));
+  await tick(80);
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  await longRecording();
+
+  ok('the next patient is drafted at standard detail, not the last one\'s Full',
+    sent[sent.length - 1]?.length === 'standard', JSON.stringify(sent.map((b) => b.length)));
+  ok('and laid out as a clinical note again',
+    [...doc.querySelectorAll('#template-picker button')].find((b) => b.classList.contains('on'))?.dataset.template === 'clinical');
+  ok('the length buttons are usable, not left disabled by the last redraft',
+    ![...doc.querySelectorAll('.length-picker:not(#template-picker) button')].some((b) => b.disabled));
+
+  // The one that matters: a warning that always fires is one you click through.
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
+  await tick(300);
+  ok('and redrafting an untouched note does not claim it would lose your edits',
+    confirms === 0, String(confirms));
+}
+
 await testEditingAndLength();
+
+/**
+ * The redraft handler restores the previous length and edit flag when a redraft
+ * fails — correct, except that a Clear landing mid-request is also a "failure",
+ * and the restore then writes the last patient's state back AFTER the reset ran.
+ * Same shape as the two wrong-patient bugs: a response undoing a wipe.
+ */
+async function testRedraftInterruptedByClear() {
+  section('A redraft interrupted by Clear must not restore the last patient');
+  const sent = [];
+  let releaseRedraft;
+  let hang = false;
+  const note = () => ({
+    reasonForAttendance: 'Pain from LL8.', medicalHistory: null, proposed: 'Removal.',
+    alternatives: null, risks: 'Numbness.', benefits: null, costs: null, patientQuestions: null,
+    patientFactors: null, informationGiven: null, decision: 'Proceed.', nextStep: 'Book.',
+    gaps: [], notSaid: [], speakers: null, speakerConfidence: null
+  });
+  const ctx = await boot({
+    onFetch: async (entry, opts) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) {
+        sent.push(JSON.parse(opts.body));
+        if (hang) { await new Promise((r) => { releaseRedraft = r; }); }
+        return { ok: true, status: 200, json: async () => ({ status: 'done', note: note() }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  let confirms = 0;
+  win.confirm = () => { confirms++; return true; };
+
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+
+  // Patient one: a Full note, corrected by hand.
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'full'));
+  await tick(300);
+  const pre = $(doc, 'fields').querySelector('.field pre');
+  pre.textContent = 'Corrected by hand.';
+  pre.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(40);
+
+  // A redraft that is still in flight when the clinician wipes the screen.
+  hang = true;
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
+  await tick(60);
+  click($(doc, 'clear'));
+  await tick(60);
+  hang = false;
+
+  // Patient two is already in the chair and recording when the abandoned
+  // redraft finally answers. This is the window that matters: the reset has
+  // run, and the late response writes the last patient's state back over it.
+  confirms = 0;
+  const before = sent.length;
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  if (releaseRedraft) releaseRedraft();
+  await tick(200);
+  click($(doc, 'stop'));
+  await tick(300);
+
+  ok('the interrupted redraft did not restore the last patient\'s length',
+    sent[sent.length - 1]?.length === 'standard',
+    JSON.stringify(sent.slice(before).map((b) => b.length)));
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
+  await tick(300);
+  ok('nor the last patient\'s edit flag', confirms === 0, String(confirms));
+}
+
+
+/**
+ * The tab-close warning had no test at all, and it checked only 'recording'.
+ * A pause is held through the treatment it belongs to — often half an hour —
+ * so a closed or navigated tab then lost the consent discussion silently.
+ */
+async function testLeavingWarnsWhileAnythingIsHeld() {
+  section('Closing the tab warns whenever a consultation is held');
+  const note = { reasonForAttendance: 'x', gaps: [] };
+  const ctx = await boot({
+    onFetch: async (entry) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+    }
+  });
+  const { doc, win } = ctx;
+  const leaving = () => {
+    const ev = new win.Event('beforeunload', { cancelable: true });
+    win.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  };
+
+  ok('an empty page lets you leave without a prompt', leaving() === false);
+
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  click($(doc, 'start'));
+  await tick(80);
+  ok('while recording, leaving asks first', leaving() === true);
+
+  click($(doc, 'pause'));
+  await tick(40);
+  ok('and while PAUSED — the half-hour of treatment the pause exists for', leaving() === true);
+
+  click($(doc, 'pause'));
+  await tick(40);
+  click($(doc, 'stop'));
+  await tick(300);
+  ok('with a draft on screen, leaving asks first', leaving() === true);
+
+  click($(doc, 'clear'));
+  await tick(80);
+  ok('and after Clear, nothing is held, so nothing is asked', leaving() === false);
+}
+
+
+
+
+/**
+ * A long transcription is polled every few seconds for minutes. One dropped
+ * request used to throw the whole consultation away — the recording is already
+ * gone from memory by then — and leave the job running on Speechmatics with
+ * nothing left to delete it.
+ */
+async function testPollingRidesOutABlip() {
+  section('Transcription survives a failed poll, and deletes what it gives up on');
+  const note = { reasonForAttendance: 'Pain from LL8.', gaps: [] };
+  // POLL_MS is 5 s. Shrink exactly that timer, and nothing else.
+  const fast = (win) => {
+    const realST = win.setTimeout.bind(win);
+    win.setTimeout = (fn, ms, ...a) => realST(fn, ms === 5000 ? 2 : ms, ...a);
+  };
+  const scenario = async (polls) => {
+    let n = 0;
+    const seen = [];
+    const ctx = await boot({
+      onFetch: async (c) => {
+        if (c.url.includes('/api/transcribe') && c.method === 'POST') {
+          return { ok: false, status: 202, json: async () => ({ status: 'pending', jobId: 'long1', ticket: 'a'.repeat(64) }) };
+        }
+        if (c.url.includes('/api/transcribe') && c.method === 'GET') {
+          seen.push(ctx && ctx.doc ? ctx.doc.getElementById('working-text').textContent : '');
+          const step = polls[Math.min(n++, polls.length - 1)];
+          if (step === 'DROP') throw new TypeError('Failed to fetch');
+          return step;
+        }
+        if (c.url.includes('/api/transcribe') && c.method === 'DELETE') return { ok: true, status: 200, json: async () => ({ ok: true }) };
+        if (c.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+      }
+    });
+    fast(ctx.win);
+    await runConsultation(ctx, null, DEFAULT_TURNS);
+    await tick(400);
+    return { ...ctx, seen, polls: () => n };
+  };
+  const pending = { ok: false, status: 202, json: async () => ({ status: 'pending', jobId: 'long1' }) };
+  const done = { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+
+  // 1. The connection drops once, mid-transcription.
+  let r = await scenario([pending, 'DROP', pending, done]);
+  ok('a dropped poll does not lose the consultation: the draft still arrives',
+    !r.doc.getElementById('draft').classList.contains('hidden'),
+    r.doc.getElementById('error-title')?.textContent);
+  ok('while it was retrying, the clinician was told why it was waiting',
+    r.seen.some((t) => /Connection interrupted/.test(t)), JSON.stringify(r.seen));
+
+  // 2. Vercel's own error page — a 504 with no JSON from our handler.
+  r = await scenario([{ ok: false, status: 504, json: async () => { throw new Error('not json'); } }, done]);
+  ok('an infrastructure 504 is retried, not treated as the verdict',
+    !r.doc.getElementById('draft').classList.contains('hidden'));
+
+  // 3. Our handler's own 502 IS the verdict: it has already deleted the job.
+  r = await scenario([{ ok: false, status: 502, json: async () => ({ error: 'transcription_failed', detail: 'job rejected' }) }, done]);
+  ok('a failure our server reports is final, and not polled for twenty minutes',
+    /Transcription failed/.test(r.doc.getElementById('error-title').textContent) && r.polls() === 1,
+    `${r.doc.getElementById('error-title').textContent} after ${r.polls()} polls`);
+  ok('and the job is deleted by the page as well, so nothing is left behind',
+    r.calls.some((c) => c.method === 'DELETE' && c.url.includes('long1')));
+  const deletesBefore = r.calls.filter((c) => c.method === 'DELETE').length;
+  click(r.doc.getElementById('clear'));
+  await tick(80);
+  ok('and it is forgotten once deleted, so a later job cannot overwrite it undeleted',
+    r.calls.filter((c) => c.method === 'DELETE').length === deletesBefore);
+
+  // 4. Twenty minutes of nothing: give up, and delete.
+  r = await scenario([pending]);
+  await tick(1500);
+  ok('a job that never finishes is given up on',
+    /did not finish in time/.test(r.doc.getElementById('error-body').textContent),
+    r.doc.getElementById('error-body').textContent.slice(0, 80));
+  ok('and deleted when it is, rather than left running on the provider',
+    r.calls.some((c) => c.method === 'DELETE' && c.url.includes('long1')));
+}
+
+await testPausedMeterIsFrozen();
+await testPollingRidesOutABlip();
+await testLeavingWarnsWhileAnythingIsHeld();
+await testRedraftInterruptedByClear();
+await testNotePreferencesDoNotFollowThePatientOut();
 await testStyles();
 await testPolish();
 

@@ -185,18 +185,114 @@ async function testTranscribe() {
   ok('job deleted even when the transcript fetch fails',
     calls.some((c) => c.method === 'DELETE' && c.url.includes('jobA')));
 
-  // Status poll fails outright.
+  // A status check that fails TRANSIENTLY is not a failed job. This used to
+  // delete the job on any non-OK answer, so one 503 — or a 429 when several
+  // clinicians stop at once on one account — destroyed a transcription that was
+  // running perfectly well, and with it the only copy of the consultation.
+  // The clock is moved inside the stub so the 35 s budget lapses at once.
+  {
+    const realNow = Date.now;
+    let shift = 0;
+    Date.now = () => realNow() + shift;
+    const quiet = console.warn; console.warn = () => {};
+    calls = stubFetch(async (c) => {
+      if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobB' } };
+      if (c.method === 'GET') { shift += 60_000; return { status: 503, body: 'service unavailable' }; }
+      if (c.method === 'DELETE') return { status: 200, body: {} };
+      return { status: 404, body: {} };
+    });
+    res = mockRes();
+    await handler(mockReq({ headers: { 'content-type': 'audio/webm' }, body: M4A(5000) }), res);
+    Date.now = realNow; console.warn = quiet;
+    ok('a status check that keeps failing transiently hands the job back as pending',
+      res.statusCode === 202 && res.body?.jobId === 'jobB' && /^[a-f0-9]{64}$/.test(res.body?.ticket || ''),
+      `${res.statusCode} ${JSON.stringify(res.body).slice(0, 80)}`);
+    ok('and does NOT delete it: the client is coming back for it',
+      !calls.some((c) => c.method === 'DELETE'));
+  }
+
+  // A permanent answer is still final, and still cleaned up.
   calls = stubFetch(async (c) => {
-    if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobB' } };
-    if (c.method === 'GET') return { status: 503, body: 'service unavailable' };
+    if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobB4' } };
+    if (c.method === 'GET') return { status: 404, body: 'no such job' };
     if (c.method === 'DELETE') return { status: 200, body: {} };
     return { status: 404, body: {} };
   });
   res = mockRes();
   await handler(mockReq({ headers: { 'content-type': 'audio/webm' }, body: M4A(5000) }), res);
-  ok('poll failure returns an error', res.statusCode === 502);
-  ok('job deleted even when polling fails outright',
-    calls.some((c) => c.method === 'DELETE' && c.url.includes('jobB')));
+  ok('a permanent status failure still returns an error', res.statusCode === 502, `got ${res.statusCode}`);
+  ok('and the job is still deleted on that path',
+    calls.some((c) => c.method === 'DELETE' && c.url.includes('jobB4')));
+
+  // One bad check, then a good one, inside the same request: just a transcript.
+  {
+    const quiet = console.warn; console.warn = () => {};
+    let checks = 0;
+    calls = stubFetch(async (c) => {
+      if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobB5' } };
+      if (c.method === 'GET' && c.url.endsWith('/jobs/jobB5')) {
+        checks++;
+        return checks === 1 ? { status: 503, body: 'blip' } : { status: 200, body: { job: { status: 'done' } } };
+      }
+      if (c.method === 'GET' && c.url.includes('/transcript')) return { status: 200, body: TURNS_PAYLOAD };
+      if (c.method === 'DELETE') return { status: 200, body: {} };
+      return { status: 404, body: {} };
+    });
+    res = mockRes();
+    await handler(mockReq({ headers: { 'content-type': 'audio/webm' }, body: M4A(5000) }), res);
+    console.warn = quiet;
+    ok('a single failed status check no longer costs the transcript',
+      res.statusCode === 200 && Array.isArray(res.body?.turns), `got ${res.statusCode}`);
+    ok('and the finished job is deleted as usual', calls.some((c) => c.method === 'DELETE' && c.url.includes('jobB5')));
+  }
+
+  // The GET route is one check. Transient there means "still pending", too.
+  for (const [label, reply] of [['a 503', { status: 503, body: 'x' }], ['a 429', { status: 429, body: 'slow down' }], ['a network failure', 'THROW']]) {
+    const quiet = console.warn; console.warn = () => {};
+    calls = stubFetch(async (c) => {
+      if (c.method === 'GET' && c.url.endsWith('/jobs/jobG')) {
+        if (reply === 'THROW') throw new TypeError('fetch failed');
+        return reply;
+      }
+      if (c.method === 'DELETE') return { status: 200, body: {} };
+      return { status: 404, body: {} };
+    });
+    res = mockRes();
+    await handler(mockReq({ method: 'GET', url: '/api/transcribe?jobId=jobG&ticket=' + (await ticketFor('jobG')) }), res);
+    console.warn = quiet;
+    ok(`a poll that meets ${label} reports the job still pending`, res.statusCode === 202 && res.body?.jobId === 'jobG', `got ${res.statusCode}`);
+    ok(`and leaves it alone after ${label}`, !calls.some((c) => c.method === 'DELETE'));
+  }
+  calls = stubFetch(async (c) => {
+    if (c.method === 'GET' && c.url.endsWith('/jobs/jobG4')) return { status: 404, body: 'gone' };
+    if (c.method === 'DELETE') return { status: 200, body: {} };
+    return { status: 404, body: {} };
+  });
+  res = mockRes();
+  await handler(mockReq({ method: 'GET', url: '/api/transcribe?jobId=jobG4&ticket=' + (await ticketFor('jobG4')) }), res);
+  ok('but a poll that meets a 404 is final', res.statusCode === 502, `got ${res.statusCode}`);
+  ok('and that job is deleted', calls.some((c) => c.method === 'DELETE' && c.url.includes('jobG4')));
+
+  // The job is DONE and the transcript exists: one failed fetch of it must not
+  // hand the finished transcript to the delete.
+  {
+    let pulls = 0;
+    calls = stubFetch(async (c) => {
+      if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobT' } };
+      if (c.method === 'GET' && c.url.endsWith('/jobs/jobT')) return { status: 200, body: { job: { status: 'done' } } };
+      if (c.method === 'GET' && c.url.includes('/transcript')) {
+        pulls++;
+        return pulls === 1 ? { status: 502, body: 'bad gateway' } : { status: 200, body: TURNS_PAYLOAD };
+      }
+      if (c.method === 'DELETE') return { status: 200, body: {} };
+      return { status: 404, body: {} };
+    });
+    res = mockRes();
+    await handler(mockReq({ headers: { 'content-type': 'audio/webm' }, body: M4A(5000) }), res);
+    ok('a finished transcript survives one failed fetch of it',
+      res.statusCode === 200 && Array.isArray(res.body?.turns) && pulls === 2, `got ${res.statusCode}, ${pulls} fetches`);
+    ok('and is deleted once collected', calls.filter((c) => c.method === 'DELETE' && c.url.includes('jobT')).length === 1);
+  }
 
   // A body the platform handed over as a string rather than a Buffer.
   calls = stubFetch(async (c) => {
