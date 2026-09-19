@@ -768,7 +768,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-19.1';
+  var BUILD = '2026-09-19.2';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -992,7 +992,6 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     dictationFromMs: null, // recorded-time point where Dictate was pressed
     summary: null,    // the patient summary, once requested
     summaryText: null,// its rendered text, which the clinician may correct
-    summaryEdited: false,
     referral: null,   // the SBAR referral narrative, once requested
     referralText: null,
     speakerRoles: null,   // a mapping the clinician corrected; overrides the model
@@ -1009,7 +1008,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     turns: null,      // held ONLY between a failed draft and a retry
     note: null,
     busy: false,
-    bytes: 0,
+    heldAudio: null,  // the recording, until its transcript arrives; memory only
 
     // Incremented by wipe(). Every async path captures it and re-checks after
     // each await, so anything the clinician destroyed cannot come back when a
@@ -1053,6 +1052,14 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   function clearError() {
     $('error').classList.add('hidden');
     $('error-actions').classList.add('hidden');
+  }
+
+  // One error panel, two things it can offer to retry. The buttons say which,
+  // so nobody presses "Try drafting again" on a recording that never got as far
+  // as a transcript.
+  function retryLabels(what) {
+    $('retry').textContent = what === 'audio' ? 'Try transcribing again' : 'Try drafting again';
+    $('discard-transcript').textContent = what === 'audio' ? 'Discard the recording' : 'Discard the transcript';
   }
 
   var toastId = null;
@@ -1875,7 +1882,14 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     var gen = S.gen;
     var live = function () { return gen === S.gen; };
 
+    // Hold the recording until its transcript exists. A failed transcription
+    // used to be the end of the consultation — drafting could be retried from
+    // the held transcript, but a recording that never became one was simply
+    // gone. Memory only, and destroyed by everything that destroys the
+    // transcript: Clear, Lock, the idle wipe, a new recording and tab close.
+    S.heldAudio = blob;
     S.busy = true;
+    clearError();
     show('working');
     $('working-text').textContent = 'Transcribing\u2026';
     resetIdle();
@@ -1887,10 +1901,19 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       if (!live()) return;
       S.busy = false;
       show('setup');
-      return fail('Transcription failed', String(err.message || err));
+      // A 400 or 413 is about the bytes themselves: sending the same bytes
+      // again gets the same answer, so there is nothing worth holding.
+      if (err && (err.status === 400 || err.status === 413)) {
+        S.heldAudio = null;
+        return fail('Transcription failed', String(err.message || err));
+      }
+      retryLabels('audio');
+      return fail('Transcription failed', String(err.message || err) +
+        '  \u2014  The recording is still held in memory, so this can be tried again without recording again.', true);
     }
     blob = null;
     if (!live()) return;   // cleared, locked or timed out while we waited
+    S.heldAudio = null;    // the transcript supersedes it
 
     if (!turns || turns.length === 0) {
       S.busy = false;
@@ -1984,6 +2007,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       // transcript usually returns the same result. Say so rather than let the
       // retry button imply otherwise.
       S.draftFails = (S.draftFails || 0) + 1;
+      retryLabels('turns');
       fail('Could not draft the note',
         String(err.message || err) +
         (S.draftFails > 1
@@ -2008,12 +2032,16 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   }
 
   $('retry').addEventListener('click', function () {
-    if (!S.turns) { clearError(); return; }
-    draft(S.gen);
+    if (S.busy) return;
+    if (S.turns) { draft(S.gen); return; }
+    if (S.heldAudio) { process(S.heldAudio); return; }
+    clearError();
   });
 
   $('discard-transcript').addEventListener('click', function () {
-    if (!confirm('Discard the transcript? The recording is already gone, so this cannot be undone.')) return;
+    if (!confirm(S.turns
+        ? 'Discard the transcript? The recording is already gone, so this cannot be undone.'
+        : 'Discard the recording? It has not been transcribed, and it cannot be recovered.')) return;
     wipe();
     clearError();
     show('setup');
@@ -2022,6 +2050,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   async function transcribe(blob, live) {
     live = live || function () { return true; };
+    // A job left over from an earlier attempt at this recording — one whose
+    // polling stopped at an expired sign-in, say — is deleted before a new one
+    // is made, so a retry cannot leave the first copy on Speechmatics.
+    abandonJob();
     var res = await fetch('/api/transcribe', {
       method: 'POST',
       headers: { 'Content-Type': blob.type || 'application/octet-stream' },
@@ -2030,8 +2062,12 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
     var data = await res.json().catch(function () { return {}; });
 
-    if (res.status === 401) throw new Error('The session expired. Reload the page and enter the passcode again.');
-    if (!res.ok && res.status !== 202) throw new Error(data.detail || data.error || ('HTTP ' + res.status));
+    if (res.status === 401) throw new Error('Your sign-in expired. Do not reload this page \u2014 that would destroy the recording. Open AI Notes in a new tab, sign in there, then come back to this tab and press Try transcribing again.');
+    if (!res.ok && res.status !== 202) {
+      var e = new Error(data.detail || data.error || ('HTTP ' + res.status));
+      e.status = res.status;
+      throw e;
+    }
 
     if (data.status === 'done') return data.turns;
 
@@ -2065,7 +2101,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
           $('working-text').textContent = waiting;
           continue;
         }
-        if (pr && pr.status === 401) throw new Error('The session expired. Reload the page and enter the passcode again.');
+        if (pr && pr.status === 401) throw new Error('Your sign-in expired. Do not reload this page \u2014 that would destroy the recording. Open AI Notes in a new tab, sign in there, then come back to this tab and press Try transcribing again.');
         // Transient: no answer at all, a rate limit, or a 5xx that did not come
         // from our handler (Vercel's own error page carries no JSON). A 5xx WITH
         // an error from our handler is its verdict, and final — it has already
@@ -2909,7 +2945,6 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   });
 
   $('summary-text').addEventListener('input', function () {
-    S.summaryEdited = true;
     resetIdle();
   });
 
@@ -3009,7 +3044,6 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   function clearDerived() {
     S.summary = null;
     S.summaryText = null;
-    S.summaryEdited = false;
     S.referral = null;
     S.referralText = null;
     S.postop = null;
@@ -3040,6 +3074,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   function clearConsultation() {
     clearDerived();
+    S.heldAudio = null;
     S.turns = null;
     S.note = null;
     S.sizeNote = '';
@@ -3099,7 +3134,6 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   function wipe() {
     S.gen++;                      // invalidates every in-flight async path
-    S.bytes = 0;
     if (S.tickId) { clearInterval(S.tickId); S.tickId = null; }
     if (S.rafId) { cancelAnimationFrame(S.rafId); S.rafId = null; }
     if (S.idleId) { clearTimeout(S.idleId); S.idleId = null; }
@@ -3176,7 +3210,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   function showIdleWarning() {
     // Only worth interrupting for if there is something to lose.
-    if (!S.note && !S.turns) return;
+    if (!S.note && !S.turns && !S.heldAudio) return;
     var mins = Math.round(CFG.IDLE_WARN_MS / 60000);
     $('idle-warn-body').textContent =
       'This clears in about ' + mins + ' minute' + (mins === 1 ? '' : 's') +
@@ -3201,10 +3235,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       // still held. Wiping it here would destroy a consent discussion during
       // the treatment it belongs to.
       if (S.recorder && (S.recorder.state === 'recording' || S.recorder.state === 'paused')) { resetIdle(); return; }
-      var hadSomething = !!(S.note || S.turns);
+      var hadSomething = !!(S.note || S.turns || S.heldAudio);
       wipe();
       show('setup');
-      if (hadSomething) fail('Cleared after ' + Math.round(CFG.IDLE_WIPE_MS / 60000) + ' minutes idle', 'The draft was destroyed. Nothing was saved.');
+      if (hadSomething) fail('Cleared after ' + Math.round(CFG.IDLE_WIPE_MS / 60000) + ' minutes idle', 'Everything held for that consultation was destroyed. Nothing was saved.');
     }, CFG.IDLE_WIPE_MS);
   }
 
@@ -3246,7 +3280,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       e.returnValue = '';
       return '';
     }
-    if (S.note || S.busy || S.turns) {
+    if (S.note || S.busy || S.turns || S.heldAudio) {
       e.preventDefault();
       e.returnValue = '';
       return '';
