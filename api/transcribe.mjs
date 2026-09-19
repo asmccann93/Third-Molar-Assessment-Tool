@@ -343,17 +343,40 @@ async function pollOrCleanUp(key, jobId, res, budgetMs, ticket) {
   }
 }
 
+// An answer the provider may well give differently in a moment: rate
+// limiting, or a fault on their side. Anything else — a 404, a 401 — IS the
+// answer, and asking again changes nothing.
+function isTransient(status) {
+  return status === 429 || status >= 500;
+}
+
 async function pollToCompletion(key, jobId, res, budgetMs, ticket) {
   const deadline = Date.now() + budgetMs;
   let waitMs = 1500;
 
   for (;;) {
-    const r = await fetch(`${API_BASE}/jobs/${jobId}`, {
-      headers: { Authorization: `Bearer ${key}` }
-    });
-    if (!r.ok) throw new Error(`status ${r.status}: ${await shortText(r)}`);
+    // One failed status check is not a failed job. This used to throw on ANY
+    // non-OK answer, and the throw deletes the job — so a single 503 or a
+    // rate-limit from Speechmatics destroyed a transcription that was running
+    // perfectly well, and with it the only copy of the consultation. Several
+    // clinicians stopping at once share one account; that is exactly when a
+    // 429 arrives. A transient failure now leaves the job pending: the client
+    // asks again, and deletes the job itself if it finally gives up.
+    let r = null;
+    try {
+      r = await fetch(`${API_BASE}/jobs/${jobId}`, {
+        headers: { Authorization: `Bearer ${key}` }
+      });
+    } catch (err) {
+      console.warn('transcribe: status check could not reach the provider; job left pending:', jobId);
+    }
+    if (r && !r.ok && !isTransient(r.status)) throw new Error(`status ${r.status}: ${await shortText(r)}`);
+    if (r && !r.ok) {
+      await shortText(r);   // drain it; the text is not needed
+      console.warn(`transcribe: status check returned ${r.status}; job left pending:`, jobId);
+    }
 
-    const status = (await r.json())?.job?.status;
+    const status = r && r.ok ? (await r.json())?.job?.status : null;
 
     if (status === 'done') {
       // finally, not sequential. If fetchTranscript throws — a network blip, a
@@ -382,11 +405,28 @@ async function pollToCompletion(key, jobId, res, budgetMs, ticket) {
 }
 
 async function fetchTranscript(key, jobId) {
-  const r = await fetch(`${API_BASE}/jobs/${jobId}/transcript?format=json-v2`, {
-    headers: { Authorization: `Bearer ${key}` }
-  });
-  if (!r.ok) throw new Error(`transcript ${r.status}: ${await shortText(r)}`);
-  return toTurns(await r.json());
+  // The job is DONE here: the transcript exists, and this is the one moment it
+  // can be collected. A single transient failure used to fall straight through
+  // to the delete in pollToCompletion's `finally`, destroying a transcript that
+  // was sitting there finished. Ask a couple more times first. If it never
+  // arrives, the delete still follows — zero retention is unchanged.
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await sleep(1000);
+    let r;
+    try {
+      r = await fetch(`${API_BASE}/jobs/${jobId}/transcript?format=json-v2`, {
+        headers: { Authorization: `Bearer ${key}` }
+      });
+    } catch (err) {
+      lastErr = err;
+      continue;
+    }
+    if (r.ok) return toTurns(await r.json());
+    lastErr = new Error(`transcript ${r.status}: ${await shortText(r)}`);
+    if (!isTransient(r.status)) break;
+  }
+  throw lastErr;
 }
 
 async function deleteJob(key, jobId) {
