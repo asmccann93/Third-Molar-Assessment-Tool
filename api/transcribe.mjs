@@ -21,11 +21,15 @@
 // move patient audio to another jurisdiction.
 
 export const config = {
-  // Works on both Hobby (hard cap 60) and Pro. The handler never waits longer
-  // than POST_BUDGET_MS in one invocation; a long transcription is handed back
-  // to the client as a job id and finished through the GET route, one short
-  // check per request. Nothing here needs a plan upgrade.
-  maxDuration: 60
+  // 120, the same as api/extract.mjs, which already deploys on this plan. It
+  // was 60. Vercel kills a function that overruns with a 504, and its docs do
+  // not say whether receiving the request body counts against the limit. A 4 MB
+  // recording on a slow surgery upload, then resubmitted to Speechmatics, then
+  // 35 s of polling, could pass 60 — and a killed POST loses the recording AND
+  // orphans the job it had already created, since its id never reached the page.
+  // POST_BUDGET_MS is now measured from when the request arrived, so the handler
+  // hands a long job back as pending well inside this ceiling either way.
+  maxDuration: 120
 };
 
 const API_BASE = process.env.SPEECHMATICS_API_BASE || 'https://eu1.asr.api.speechmatics.com/v2';
@@ -124,6 +128,7 @@ function ticketFrom(req) {
 }
 
 export default async function handler(req, res) {
+  const arrivedAt = Date.now();
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
 
@@ -235,7 +240,10 @@ export default async function handler(req, res) {
     const contentType = contentTypeRaw.split(';')[0].trim() || 'audio/webm';
     const jobId = await submitJob(key, audio, contentType, via);
     const ticket = await mintJobTicket(sessionSecret, jobId, who);
-    return await pollOrCleanUp(key, jobId, res, POST_BUDGET_MS, ticket);
+    // The budget runs from when the request arrived, not from here: the upload
+    // and the resubmission to Speechmatics have already spent some of it.
+    const budget = Math.max(0, POST_BUDGET_MS - (Date.now() - arrivedAt));
+    return await pollOrCleanUp(key, jobId, res, budget, ticket);
   } catch (err) {
     // Never log payloads — R11. Message only.
     console.error('transcribe failed:', err && err.message);

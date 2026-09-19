@@ -1,6 +1,7 @@
 // api/auth.mjs
 //
-// Passcode in, httpOnly cookie out. Single user — deliberately not over-built.
+// Passcode in, httpOnly cookie out. One passcode per clinician, from APP_USERS;
+// which passcode matched is who is signed in.
 //
 // The throttle below is per warm instance, so it is not a real rate limiter:
 // serverless spreads attempts across instances. It is enough to make scripted
@@ -55,9 +56,16 @@ export default async function handler(req, res) {
 
   const secret = process.env.SESSION_SECRET;
   const users = parseUsers(process.env.APP_USERS);
-  const shared = process.env.APP_PASSCODE;
-  if (!secret || (!users.length && !shared)) {
-    console.error('auth: SESSION_SECRET, and one of APP_USERS or APP_PASSCODE, not set');
+  // The old single shared passcode is no longer honoured, even if someone sets
+  // it again: whoever signed in with it was nobody, and every note they made
+  // carried no initials. It was deleted from Vercel on 17 September 2026.
+  // Say so in the log, because otherwise re-adding it would look like a
+  // mistyped passcode rather than a retired one.
+  if (process.env.APP_PASSCODE) {
+    console.warn('auth: APP_PASSCODE is set but is no longer used. Sign-in is by APP_USERS only.');
+  }
+  if (!secret || !users.length) {
+    console.error('auth: SESSION_SECRET and APP_USERS must both be set');
     return res.status(500).json({ error: 'server_misconfigured' });
   }
 
@@ -82,9 +90,6 @@ export default async function handler(req, res) {
   let matched = false;
   for (const u of users) {
     if (safeEqual(suppliedDigest, await digest(u.passcode))) { matched = true; who = u.who; }
-  }
-  if (!matched && shared && safeEqual(suppliedDigest, await digest(shared))) {
-    matched = true;   // the single-passcode fallback: nobody is identified
   }
   if (!matched) {
     await new Promise((r) => setTimeout(r, 400 + Math.random() * 300));
