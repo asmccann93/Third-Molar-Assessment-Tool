@@ -768,7 +768,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-18.1';
+  var BUILD = '2026-09-19.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -2038,18 +2038,46 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     if (data.status === 'pending' && data.jobId) {
       S.jobId = data.jobId;
       S.jobTicket = data.ticket || null;
-      $('working-text').textContent = 'Transcribing\u2026 this one is taking a little longer.';
+      var waiting = 'Transcribing\u2026 this one is taking a little longer.';
+      $('working-text').textContent = waiting;
       for (var i = 0; i < CFG.POLL_MAX; i++) {
         await new Promise(function (r) { setTimeout(r, CFG.POLL_MS); });
         // Stop polling the moment the clinician has destroyed the session. The
         // Clear button has already asked the server to delete the job.
         if (!live()) return null;
-        var pr = await fetch('/api/transcribe?jobId=' + encodeURIComponent(data.jobId) +
-                             (S.jobTicket ? '&ticket=' + encodeURIComponent(S.jobTicket) : ''));
-        var pd = await pr.json().catch(function () { return {}; });
-        if (pd.status === 'done') { S.jobId = null; S.jobTicket = null; return pd.turns; }
-        if (!pr.ok && pr.status !== 202) throw new Error(pd.detail || pd.error || ('HTTP ' + pr.status));
+
+        // One failed poll is not a failed transcription. A single dropped
+        // request on surgery wifi used to throw here: the recording — already
+        // gone from memory — was lost, and the job it had become was left
+        // running on Speechmatics with nothing left to delete it.
+        var pr = null, pd = {};
+        try {
+          pr = await fetch('/api/transcribe?jobId=' + encodeURIComponent(data.jobId) +
+                           (S.jobTicket ? '&ticket=' + encodeURIComponent(S.jobTicket) : ''));
+          pd = await pr.json().catch(function () { return {}; });
+        } catch (e) {
+          pr = null;
+        }
+        if (!live()) return null;
+
+        if (pr && pd.status === 'done') { S.jobId = null; S.jobTicket = null; return pd.turns; }
+        if (pr && (pr.ok || pr.status === 202)) {
+          $('working-text').textContent = waiting;
+          continue;
+        }
+        if (pr && pr.status === 401) throw new Error('The session expired. Reload the page and enter the passcode again.');
+        // Transient: no answer at all, a rate limit, or a 5xx that did not come
+        // from our handler (Vercel's own error page carries no JSON). A 5xx WITH
+        // an error from our handler is its verdict, and final — it has already
+        // deleted the job.
+        if (!pr || pr.status === 429 || (pr.status >= 500 && !pd.error)) {
+          $('working-text').textContent = 'Connection interrupted \u2014 still trying. The recording is safe on the server for now.';
+          continue;
+        }
+        abandonJob();
+        throw new Error(pd.detail || pd.error || ('HTTP ' + pr.status));
       }
+      abandonJob();
       throw new Error('Transcription did not finish in time.');
     }
 
@@ -3087,19 +3115,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.recorder = null;
     stopTracks();
 
-    // Best-effort tidy-up of an abandoned Speechmatics job so nothing is left
-    // sitting on their side. keepalive lets it survive the page going away.
-    if (S.jobId) {
-      try {
-        fetch('/api/transcribe?jobId=' + encodeURIComponent(S.jobId) +
-              (S.jobTicket ? '&ticket=' + encodeURIComponent(S.jobTicket) : ''), {
-          method: 'DELETE',
-          keepalive: true
-        });
-      } catch (e) {}
-      S.jobId = null;
-      S.jobTicket = null;
-    }
+    abandonJob();
 
     clearConsultation();
 
@@ -3124,6 +3140,26 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     });
     refreshStart();
     unmask();
+  }
+
+  // Best-effort tidy-up of a Speechmatics job nothing is waiting for any more,
+  // so the audio is not left sitting on their side. keepalive lets it survive
+  // the page going away. One place, so every path that gives up on a job — Clear,
+  // Lock, the idle wipe, and a transcription that finally fails — deletes it the
+  // same way. A failed transcription used to leave S.jobId set, and the next
+  // patient's pending job overwrote it: the first recording was then never
+  // deleted by anyone.
+  function abandonJob() {
+    if (!S.jobId) return;
+    try {
+      fetch('/api/transcribe?jobId=' + encodeURIComponent(S.jobId) +
+            (S.jobTicket ? '&ticket=' + encodeURIComponent(S.jobTicket) : ''), {
+        method: 'DELETE',
+        keepalive: true
+      });
+    } catch (e) {}
+    S.jobId = null;
+    S.jobTicket = null;
   }
 
   $('clear').addEventListener('click', function () {
@@ -3199,7 +3235,13 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   /* ---- page going away ---- */
   window.addEventListener('pagehide', wipe);
   window.addEventListener('beforeunload', function (e) {
-    if (S.recorder && S.recorder.state === 'recording') {
+    // Any live recorder holds a consultation that exists nowhere else — while
+    // recording, while PAUSED, and while flushing its last page after Stop.
+    // Only 'recording' was checked. A pause is held through the treatment it
+    // belongs to, often for half an hour, and closing or navigating the tab in
+    // that time lost the consent discussion without a word. The idle wipe
+    // already treated paused as live; this now agrees with it.
+    if (S.recorder && S.recorder.state !== 'inactive') {
       e.preventDefault();
       e.returnValue = '';
       return '';
