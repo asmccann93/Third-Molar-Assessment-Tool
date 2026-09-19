@@ -1063,7 +1063,7 @@ async function testNotSaidPanel() {
   // no note, and that was silently closable.
   const src2 = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
   ok('closing the tab warns while a transcript is held, note or no note',
-    /if \(S\.note \|\| S\.busy \|\| S\.turns\) \{/.test(src2));
+    /if \(S\.note \|\| S\.busy \|\| S\.turns \|\| S\.heldAudio\) \{/.test(src2));
   ok('and the patient-summary request cannot hang the button for ever',
     /SUMMARY_TIMEOUT_MS/.test(src2) && /ctrl\.abort\(\)/.test(src2));
 
@@ -1434,7 +1434,7 @@ async function testIdleWarning() {
   ok('the warning fires earlier than the wipe, not alongside it',
     /CFG\.IDLE_WIPE_MS - CFG\.IDLE_WARN_MS/.test(src));
   ok('it only interrupts when there is something to lose',
-    /function showIdleWarning\(\)[\s\S]{0,200}if \(!S\.note && !S\.turns\) return;/.test(src));
+    /function showIdleWarning\(\)[\s\S]{0,200}if \(!S\.note && !S\.turns && !S\.heldAudio\) return;/.test(src));
   ok('and it offers a way to keep the draft', /id="idle-keep"/.test(src) &&
     /\$\('idle-keep'\)\.addEventListener\('click', function \(\) \{ resetIdle\(\); \}\)/.test(src));
   ok('any interaction clears the warning, because resetIdle hides it',
@@ -1762,7 +1762,7 @@ async function testOneResetPathNotTwo() {
 
   // Anything a new consultation must not inherit. Each of these caused, or
   // would have caused, a wrong-patient bug.
-  const mustClear = ['note', 'turns', 'summary', 'summaryText', 'summaryEdited',
+  const mustClear = ['note', 'turns', 'summary', 'summaryText', 'heldAudio',
                      'referral', 'referralText', 'dictationFromMs', 'pausesForDraft'];
   const missing = mustClear.filter((f) => !new RegExp('\\bS\\.' + f + '\\s*=').test(shared));
   ok('it clears every piece of the last patient\'s consultation',
@@ -1797,7 +1797,7 @@ async function testOneResetPathNotTwo() {
     /clearDerived\(\);[\s\S]{0,120}S\.note = data\.note;/.test(draftBody));
 
   // The whole point of merging them: no second list to drift.
-  const inlineResets = (src.match(/S\.summaryEdited\s*=\s*false/g) || []).length;
+  const inlineResets = (src.match(/S\.teethConfirmed\s*=\s*false/g) || []).length;
   ok('and no second copy of the reset has reappeared', inlineResets === 1, String(inlineResets));
 }
 
@@ -2910,8 +2910,140 @@ async function testPollingRidesOutABlip() {
     r.calls.some((c) => c.method === 'DELETE' && c.url.includes('long1')));
 }
 
+/**
+ * A failed transcription used to end the consultation: the transcript could be
+ * redrafted, but a recording that never became one was gone. The recording is
+ * now held — in memory only — until its transcript arrives, and destroyed by
+ * everything that destroys the transcript.
+ */
+async function testTranscriptionCanBeRetriedFromTheHeldRecording() {
+  section('A failed transcription can be retried without recording again');
+  const note = { reasonForAttendance: 'Pain from LL8.', gaps: [] };
+  const scenario = async (posts, polls = []) => {
+    let p = 0, g = 0;
+    const bodies = [];
+    const ctx = await boot({
+      onFetch: async (c, opts) => {
+        if (c.url.includes('/api/transcribe') && c.method === 'POST') {
+          bodies.push(opts.body);
+          const step = posts[Math.min(p++, posts.length - 1)];
+          if (step === 'DROP') throw new TypeError('Failed to fetch');
+          return step;
+        }
+        if (c.url.includes('/api/transcribe') && c.method === 'GET') {
+          const step = polls[Math.min(g++, polls.length - 1)];
+          if (step === 'DROP') throw new TypeError('Failed to fetch');
+          return step;
+        }
+        if (c.url.includes('/api/transcribe') && c.method === 'DELETE') return { ok: true, status: 200, json: async () => ({ ok: true }) };
+        if (c.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ status: 'done', note }) };
+      }
+    });
+    const realST = ctx.win.setTimeout.bind(ctx.win);
+    ctx.win.setTimeout = (fn, ms, ...a) => realST(fn, ms === 5000 ? 2 : ms, ...a);
+    await runConsultation(ctx, null, DEFAULT_TURNS);
+    await tick(200);
+    const leaving = () => {
+      const ev = new ctx.win.Event('beforeunload', { cancelable: true });
+      ctx.win.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    const retryOffered = () => !$(ctx.doc, 'error').classList.contains('hidden') &&
+      !$(ctx.doc, 'error-actions').classList.contains('hidden');
+    return { ...ctx, bodies, leaving, retryOffered, posts: () => p };
+  };
+  const done = { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+  const drafted = (doc) => !$(doc, 'draft').classList.contains('hidden');
+
+  // 1. The upload never arrives.
+  let r = await scenario(['DROP', done]);
+  ok('a failed upload says transcription failed, and offers to try again',
+    /Transcription failed/.test($(r.doc, 'error-title').textContent) && r.retryOffered(),
+    $(r.doc, 'error-title').textContent);
+  ok('the buttons say what they will retry — the recording, not a transcript',
+    $(r.doc, 'retry').textContent === 'Try transcribing again' &&
+    $(r.doc, 'discard-transcript').textContent === 'Discard the recording',
+    `${$(r.doc, 'retry').textContent} / ${$(r.doc, 'discard-transcript').textContent}`);
+  ok('and it says the recording is still held', /still held in memory/.test($(r.doc, 'error-body').textContent));
+  ok('closing the tab now warns, because the recording exists nowhere else', r.leaving() === true);
+  click($(r.doc, 'retry'));
+  await tick(300);
+  ok('pressing it sends the very same recording again',
+    r.bodies.length === 2 && r.bodies[1] === r.bodies[0] && r.bodies[0] && r.bodies[0].size > 0,
+    `${r.bodies.length} posts`);
+  ok('and the draft arrives', drafted(r.doc), $(r.doc, 'error-title').textContent);
+  click($(r.doc, 'clear'));
+  await tick(80);
+  ok('and once it has, and the draft is cleared, nothing is held any more', r.leaving() === false);
+
+  // 2. The bytes themselves are refused. Sending them again gets the same answer.
+  r = await scenario([{ ok: false, status: 400, json: async () => ({ error: 'audio_not_readable', detail: 'The recording could not be read.' }) }]);
+  ok('an unreadable recording is not offered for retry', !r.retryOffered() &&
+    !$(r.doc, 'error').classList.contains('hidden'));
+  ok('and it is not held on to either', r.leaving() === false);
+
+  // 3. Clear throws the held recording away.
+  r = await scenario(['DROP', done]);
+  click($(r.doc, 'clear'));
+  await tick(80);
+  ok('Clear drops the held recording: nothing warns on leaving', r.leaving() === false);
+  click($(r.doc, 'retry'));
+  await tick(150);
+  ok('and a stray retry after Clear sends nothing', r.posts() === 1, `${r.posts()} posts`);
+
+  // 4. The sign-in lapsed while it uploaded. Reloading would destroy it.
+  r = await scenario([{ ok: false, status: 401, json: async () => ({ error: 'unauthorised' }) }, done]);
+  const body = $(r.doc, 'error-body').textContent;
+  ok('an expired sign-in says NOT to reload, and how to sign in without losing it',
+    /Do not reload/.test(body) && /new tab/.test(body), body.slice(0, 120));
+  ok('and offers the retry for after that', r.retryOffered());
+  click($(r.doc, 'retry'));
+  await tick(300);
+  ok('which then works', drafted(r.doc));
+
+  // 5. The job was made, then polling stopped at an expired sign-in. The retry
+  //    must not leave that first job running on Speechmatics.
+  r = await scenario(
+    [{ ok: false, status: 202, json: async () => ({ status: 'pending', jobId: 'first1', ticket: 'b'.repeat(64) }) }, done],
+    [{ ok: false, status: 401, json: async () => ({ error: 'unauthorised' }) }]);
+  ok('a poll that hits an expired sign-in offers the retry', r.retryOffered(), $(r.doc, 'error-body').textContent.slice(0, 80));
+  click($(r.doc, 'retry'));
+  await tick(300);
+  const del = r.calls.findIndex((c) => c.method === 'DELETE' && c.url.includes('first1'));
+  const post2 = r.calls.map((c, i) => [c, i]).filter(([c]) => c.method === 'POST' && c.url.includes('/api/transcribe'))[1];
+  ok('the first job is deleted before the second is made',
+    del >= 0 && post2 && del < post2[1], `delete at ${del}, second post at ${post2 && post2[1]}`);
+  ok('and the retry still produces the draft', drafted(r.doc));
+
+  // 6. Transcribed, then drafting failed: the same panel now offers the other thing.
+  let extracts = 0;
+  const ctx6 = { dropped: false };
+  const ctx = await boot({
+    onFetch: async (c) => {
+      if (c.url.includes('/api/transcribe') && c.method === 'POST') {
+        return extracts === 0 && !ctx6.dropped ? (ctx6.dropped = true, Promise.reject(new TypeError('Failed to fetch'))) : done;
+      }
+      if (c.url.includes('/api/extract')) { extracts++; return { ok: false, status: 502, json: async () => ({ error: 'model_error' }) }; }
+    }
+  });
+  await runConsultation(ctx, null, DEFAULT_TURNS);
+  await tick(200);
+  click($(ctx.doc, 'retry'));
+  await tick(300);
+  // The recording must not outlive its transcript: the DPIA says audio is held
+  // only until it is transcribed. Nothing on screen shows this, so read it.
+  const proc = bodyAt(html, html.indexOf('async function process('));
+  ok('the recording is let go the moment its transcript arrives, before drafting starts',
+    /\n    blob = null;[\s\S]{0,200}?S\.heldAudio = null;[\s\S]{0,800}?S\.turns = turns;/.test(proc));
+  ok('when the retried transcription then fails at drafting, the button says drafting',
+    $(ctx.doc, 'retry').textContent === 'Try drafting again' &&
+    $(ctx.doc, 'discard-transcript').textContent === 'Discard the transcript',
+    `${$(ctx.doc, 'retry').textContent} / ${$(ctx.doc, 'discard-transcript').textContent}`);
+}
+
 await testPausedMeterIsFrozen();
 await testPollingRidesOutABlip();
+await testTranscriptionCanBeRetriedFromTheHeldRecording();
 await testLeavingWarnsWhileAnythingIsHeld();
 await testRedraftInterruptedByClear();
 await testNotePreferencesDoNotFollowThePatientOut();

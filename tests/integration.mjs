@@ -211,6 +211,33 @@ async function testTranscribe() {
       !calls.some((c) => c.method === 'DELETE'));
   }
 
+  // The POST's polling budget runs from when the request ARRIVED. A slow upload
+  // and resubmission used to leave the full 35 s still to spend afterwards, so
+  // the function could overrun its ceiling, be killed with a 504, and take the
+  // recording and the id of the job it had just created with it.
+  {
+    const realNow = Date.now;
+    let shift = 0;
+    Date.now = () => realNow() + shift;
+    let checks = 0;
+    calls = stubFetch(async (c) => {
+      if (c.method === 'POST' && c.url.endsWith('/jobs')) { shift += 40_000; return { status: 201, body: { id: 'jobSlow' } }; }
+      if (c.method === 'GET' && c.url.endsWith('/jobs/jobSlow')) { checks++; return { status: 200, body: { job: { status: 'running' } } }; }
+      if (c.method === 'DELETE') return { status: 200, body: {} };
+      return { status: 404, body: {} };
+    });
+    res = mockRes();
+    const t0 = realNow();
+    await handler(mockReq({ headers: { 'content-type': 'audio/webm' }, body: M4A(5000) }), res);
+    Date.now = realNow;
+    ok('after a 40 s upload and submit, the job is handed back as pending at once',
+      res.statusCode === 202 && res.body?.jobId === 'jobSlow' && checks === 1 && realNow() - t0 < 2000,
+      `${res.statusCode}, ${checks} checks, ${realNow() - t0} ms`);
+    const { config: tconfig } = await import('../api/transcribe.mjs');
+    ok('and the function\'s ceiling leaves room above the budget for the upload itself',
+      tconfig.maxDuration >= 120, String(tconfig.maxDuration));
+  }
+
   // A permanent answer is still final, and still cleaned up.
   calls = stubFetch(async (c) => {
     if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobB4' } };
@@ -489,8 +516,16 @@ async function testTranscribe() {
   ok('the prompt tells the model not to itemise checklist items in its own gaps',
     /Do not itemise individual missing risks or alternatives here/.test(sysNoDup));
 
+  // This used to pin 60 as "the Hobby plan cap". Vercel's limits have since
+  // risen (300 s with Fluid compute), and api/extract.mjs has deployed at 120
+  // on this very project throughout. The invariant worth pinning is that the
+  // transcription ceiling never exceeds one already proven to deploy here — a
+  // value the plan refused would fail the build and silently block every later
+  // deploy.
   const { config: fnConfig } = await import('../api/transcribe.mjs');
-  ok('maxDuration fits the Hobby plan cap, so no invocation can be killed mid-poll', fnConfig?.maxDuration <= 60, String(fnConfig?.maxDuration));
+  const { config: exConfig } = await import('../api/extract.mjs');
+  ok('the transcription ceiling is no higher than drafting\'s, which is known to deploy on this plan',
+    fnConfig?.maxDuration <= exConfig?.maxDuration, `${fnConfig?.maxDuration} vs ${exConfig?.maxDuration}`);
 }
 
 /* ================================================================
@@ -1250,9 +1285,33 @@ async function testMultiUser() {
 async function testAuth() {
   section('auth.mjs — passcode exchange');
   process.env.SESSION_SECRET = 'secret-for-tests';
-  process.env.APP_PASSCODE = 'correct horse battery staple';
+  process.env.APP_USERS = 'AM:correct horse battery staple';
+  delete process.env.APP_PASSCODE;
   const { default: handler } = await import('../api/auth.mjs');
-  const { verifyToken } = await import('../api/_session.mjs');
+  const { verifyToken, readToken } = await import('../api/_session.mjs');
+
+  // The old single shared passcode is retired, not merely unset. Re-adding it
+  // must not quietly bring back sign-ins that belong to nobody.
+  {
+    const warned = []; const quiet = console.warn; console.warn = (...a) => warned.push(a.join(' '));
+    const quietErr = console.error; console.error = () => {};
+    const savedUsers = process.env.APP_USERS;
+    delete process.env.APP_USERS;
+    process.env.APP_PASSCODE = 'the old shared code';
+    let r = mockRes();
+    await handler(mockReq({ body: { passcode: 'the old shared code' } }), r);
+    ok('with only the old shared passcode set, nobody can sign in',
+      r.statusCode === 500 && r.body?.error === 'server_misconfigured' && !r.headers['set-cookie'], `${r.statusCode}`);
+    process.env.APP_USERS = savedUsers;
+    r = mockRes();
+    await handler(mockReq({ body: { passcode: 'the old shared code' } }), r);
+    ok('and alongside the per-user codes, the old shared one is refused',
+      r.statusCode === 401 && !r.headers['set-cookie'], `${r.statusCode}`);
+    ok('and the log says why, rather than looking like a mistyped code',
+      warned.some((w) => /APP_PASSCODE is set but is no longer used/.test(w)));
+    delete process.env.APP_PASSCODE;
+    console.warn = quiet; console.error = quietErr;
+  }
 
   let res = mockRes();
   await handler(mockReq({ body: { passcode: 'correct horse battery staple' } }), res);
@@ -1264,6 +1323,7 @@ async function testAuth() {
 
   const token = setCookie.split('=')[1]?.split(';')[0];
   ok('issued token verifies', await verifyToken(process.env.SESSION_SECRET, token));
+  ok('and says whose it is', (await readToken(process.env.SESSION_SECRET, token))?.who === 'AM');
   ok('token is not the passcode', !setCookie.includes('correct horse'));
 
   res = mockRes();
