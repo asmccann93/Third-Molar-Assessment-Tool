@@ -42,7 +42,8 @@ const click = (el) => el.dispatchEvent(new el.ownerDocument.defaultView.MouseEve
 /* ------------------------------------------------------------------ */
 section('Preview status and the promise to store nothing');
 {
-  ok('the page is not to be indexed while it is a preview', /<meta name="robots" content="noindex, nofollow"/.test(html));
+  ok('the page is not to be indexed while it is a preview',
+    /<meta name="robots" content="noindex, nofollow"/.test(html.replace(/<!--[\s\S]*?-->/g, '')));
   ok('and it says on screen that it is not for clinical use', /Preview[^<]*not for clinical use/.test(html));
   const code = html.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
   const stores = ['localStorage', 'sessionStorage', 'indexedDB', 'document.cookie'].filter((a) => code.includes(a));
@@ -94,7 +95,7 @@ section('Clearance checks');
   ok('less is flagged', c && !c.ok);
 
   c = check({ tooth: 36, bl: '6.5', dia: '4' }, 'bl');
-  ok('1.25 mm of wall each side is flagged, and names grafting', c && !c.ok && /1\.3 mm/.test(c.text) && /Grafting/.test(c.text), c && c.text);
+  ok('1.25 mm of wall each side is flagged, shown as 1.25, and names grafting', c && !c.ok && /1\.25 mm/.test(c.text) && /Grafting/.test(c.text), c && c.text);
 
   const r = L.evaluate({ tooth: 36, dia: '4', len: '10' });
   ok('a blank measurement is never read as a pass: no check is made without it', r.checks.length === 0, JSON.stringify(r.checks));
@@ -123,6 +124,64 @@ section('Rating');
   ok('a finding that does not apply to the site is ignored by the assessment', !stale.advisories.some((x) => /sinus/i.test(x.q)) && stale.score === 0);
   const all = L.evaluate({});
   ok('unanswered questions are listed as not recorded, not treated as normal', all.unknown.length >= 10, String(all.unknown.length));
+}
+
+section('The figure shown never contradicts the verdict');
+{
+  const { L } = boot();
+  const D = L.DRAFT;
+  const check = (a, key) => L.evaluate(a).checks.find((c) => c.key === key);
+  // Exact thresholds that floating point used to fail.
+  ok('a 3.6 mm implant in a 6.6 mm gap has exactly 1.5 mm each side, and passes', check({ tooth: 36, md: '6.6', dia: '3.6' }, 'md').ok);
+  ok('11.1 mm of bone and a 9.1 mm implant leave exactly 2 mm, and pass', check({ tooth: 36, ht: '11.1', len: '9.1' }, 'ht').ok);
+  const c = check({ tooth: 36, md: '7', dia: '4.1' }, 'md');
+  ok('1.45 mm is shown as 1.45, not rounded up to the threshold it fails', !c.ok && /1\.45 mm/.test(c.text), c.text);
+  // Every one-decimal combination, both checks: the number on screen must agree with the verdict.
+  const bad = [];
+  for (let g = 50; g <= 90; g++) for (let d = 30; d <= 55; d++) {
+    const md = (g / 10).toFixed(1), dia = (d / 10).toFixed(1);
+    for (const key of ['md', 'bl']) {
+      const r = check({ tooth: 36, [key]: md, dia }, key);
+      const shown = parseFloat(r.text.match(/(-?\d+(\.\d+)?) mm/)[1]);
+      if ((shown >= 1.5) !== r.ok) bad.push(`${key} ${md}/${dia}: shows ${shown}, ${r.ok ? 'passes' : 'fails'}`);
+    }
+  }
+  for (let h = 60; h <= 180; h++) for (const len of ['6', '8', '10', '11.5', '13']) {
+    const ht = (h / 10).toFixed(1), r = check({ tooth: 36, ht, len }, 'ht');
+    const shown = parseFloat(r.text.match(/(-?\d+(\.\d+)?) mm/)[1]);
+    if ((shown >= 2) !== r.ok) bad.push(`ht ${ht}/${len}: shows ${shown}, ${r.ok ? 'passes' : 'fails'}`);
+  }
+  ok('across every one-decimal case, the figure shown agrees with pass or fail', bad.length === 0, bad.slice(0, 3).join('; '));
+  const h2 = check({ tooth: 36, ht: '11.96', len: '10' }, 'ht');
+  ok('two-decimal entries are compared and shown at two decimals', !h2.ok && /1\.96 mm/.test(h2.text), h2.text);
+}
+
+section('A nerve breach is never rated straightforward');
+{
+  const { L } = boot();
+  const r = L.evaluate({ tooth: 36, ht: '8', len: '10' });
+  ok('an implant 2 mm into the canal is "Revise the proposed implant", not Straightforward',
+    r.rating === 'Revise the proposed implant' && r.vitalBreach, `${r.rating} (score ${r.score})`);
+  ok('and a hard stop still takes precedence', L.evaluate({ tooth: 36, ht: '8', len: '10', rt: 'jaw' }).rating === 'Outside routine placement');
+  ok('an implant that clears the canal is rated normally', L.evaluate({ tooth: 36, ht: '12', len: '10' }).rating === 'Straightforward');
+  ok('a sinus excess is not a nerve breach: it scores, and is rated', L.evaluate({ tooth: 26, ht: '8', len: '10' }).rating === 'Straightforward');
+}
+
+section('Nothing entered is silently ignored');
+{
+  const { L } = boot();
+  for (const t of ['12..5', '10-12', '4.1/4.3', '6,5,1', 'about 6']) ok(`"${t}" is refused, not read as a number`, Number.isNaN(L.mm(t)));
+  ok('"6.5 mm" and ".5" are read', L.mm('6.5 mm') === 6.5 && L.mm('.5') === 0.5);
+  const r = L.evaluate({ ht: '9', len: '10' });
+  ok('with no tooth selected, the tooth is listed as not recorded', r.unknown[0] === 'Which tooth is being replaced?');
+  const t = L.planText(L.evaluate({ tooth: 36, md: '65', dia: '4' }));
+  ok('an invalid measurement is named in the copied plan', /Not used, not valid measurements: Space between the adjacent teeth/.test(t), t);
+  const t2 = L.planText(L.evaluate({ tooth: 26, ht: '8' }));
+  ok('the copied height names what it was measured to', /Available bone height, crest to the sinus floor: 8 mm/.test(t2), t2);
+  ok('and the copied plan says it came from a preview with draft figures', /PREVIEW: DRAFT FIGURES, NOT FOR CLINICAL USE/.test(t2));
+  const border = L.evaluate({ tooth: 41, ht: '10', len: '11' }).checks.find((c) => c.key === 'ht');
+  ok('a lower incisor reads "the bone above the inferior border"', /above the inferior border/.test(border.text), border.text);
+  ok('the preview banner is not hidden when printing', !/@media print\{\.preview\{display:none/.test(html));
 }
 
 section('Every advisory is complete');
@@ -175,11 +234,81 @@ section('The page, driven through its own controls');
   ok('Copy puts the plan on the clipboard', /IMPLANT CASE ASSESSMENT/.test(win.__copied || '') && /Site: 36/.test(win.__copied || ''));
 }
 
+section('Changing the tooth clears the old site');
+{
+  const { win, doc } = boot();
+  const root = () => doc.getElementById('root').textContent;
+  const setTooth = (t) => { const sel = $(doc, '#tooth'); sel.value = t; sel.dispatchEvent(new win.Event('change', { bubbles: true })); };
+  const type = (id, v) => { const el = $(doc, '#in-' + id); el.value = v; el.dispatchEvent(new win.Event('input', { bubbles: true })); };
+  click($(doc, '[data-act="begin"]'));
+  setTooth('46');
+  click($(doc, '[data-q="timing"][data-v="healed"]'));
+  click($(doc, '[data-act="next"]'));
+  click($(doc, '[data-q="smoking"][data-v="heavy"]'));
+  click($(doc, '[data-act="next"]'));
+  type('ht', '11');
+  click($(doc, '[data-act="next"]'));
+  type('len', '10');
+  click($(doc, '[data-act="next"]'));
+  ok('at 46, 11 mm of bone and a 10 mm implant is a nerve breach', /Revise the proposed implant/.test(root()));
+  // back to the site, and change the tooth
+  for (let i = 0; i < 4; i++) click($(doc, '[data-act="back"]'));
+  setTooth('16');
+  ok('changing the tooth says the old site\'s findings were cleared', /previous tooth were cleared/.test(root()));
+  ok('and the healing answer for 46 is gone', !$(doc, '[data-q="timing"][aria-pressed="true"]'));
+  click($(doc, '[data-act="next"]'));
+  ok('patient factors are kept', !!$(doc, '[data-q="smoking"][data-v="heavy"][aria-pressed="true"]'));
+  click($(doc, '[data-act="next"]'));
+  ok('the height measured to the canal did not become a height to the sinus floor', $(doc, '#in-ht').value === '');
+  click($(doc, '[data-act="next"]'));
+  ok('nor did the implant planned for 46 carry over', $(doc, '#in-len').value === '');
+}
+
+section('The plan page surfaces what it could not use');
+{
+  const { win, doc } = boot();
+  const root = () => doc.getElementById('root').textContent;
+  const type = (id, v) => { const el = $(doc, '#in-' + id); el.value = v; el.dispatchEvent(new win.Event('input', { bubbles: true })); };
+  click($(doc, '[data-act="begin"]'));
+  click($(doc, '[data-act="next"]')); click($(doc, '[data-act="next"]'));
+  type('md', '65');
+  click($(doc, '[data-act="next"]'));
+  type('dia', '4');
+  click($(doc, '[data-act="next"]'));
+  ok('an invalid entry is named on the plan page', /Not used:.*Space between the adjacent teeth \("65"\)/.test(root()), root().slice(0, 300));
+  ok('and no tooth is called out', /No tooth was selected/.test(root()));
+  ok('the measurements are listed on the page, so a printout has them', /Measurements recorded/.test(root()) && /Implant diameter: 4 mm/.test(root()));
+}
+
+section('Copy never fails silently');
+{
+  const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://oralsurgeryassess.com/implant/',
+    beforeParse(win) { win.scrollTo = () => {}; win.print = () => {}; } });   // no clipboard API at all
+  const win = dom.window, doc = win.document;
+  click($(doc, '[data-act="begin"]'));
+  for (let i = 0; i < 4; i++) click($(doc, '[data-act="next"]'));
+  click($(doc, '[data-act="copy"]'));
+  await tick();
+  const box = doc.getElementById('copy-fallback'), area = doc.getElementById('plan-text');
+  ok('without a clipboard, the plan is shown to copy by hand', box && !box.hidden && /IMPLANT CASE ASSESSMENT/.test(area.value));
+}
+
+section('Keyboard focus survives an answer');
+{
+  const { win, doc } = boot();
+  click($(doc, '[data-act="begin"]'));
+  const b = $(doc, '[data-q="timing"][data-v="early"]');
+  b.focus(); click(b);
+  const a = doc.activeElement;
+  ok('after answering, focus is on the answer just chosen, not the top of the page',
+    a && a.dataset && a.dataset.q === 'timing' && a.dataset.v === 'early');
+}
+
 /* ------------------------------------------------------------------ */
 section('CBCT viewer core, on a synthetic phantom');
 
 // A minimal DICOM writer: Explicit VR Little Endian, one slice per file.
-function dicomSlice({ rows, cols, ipp, iop, ps, raw, slope, intercept, instance, extra = {}, ts = '1.2.840.10008.1.2.1' }) {
+function dicomSlice({ rows, cols, ipp, iop, ps, raw, slope, intercept, instance, extra = {}, ts = '1.2.840.10008.1.2.1', bare = false, bits = 16, samples = 1 }) {
   const chunks = [];
   const enc = new TextEncoder();
   const el = (group, elem, vr, value) => {
@@ -188,6 +317,12 @@ function dicomSlice({ rows, cols, ipp, iop, ps, raw, slope, intercept, instance,
     else if (vr === 'US') { bytes = new Uint8Array(2); new DataView(bytes.buffer).setUint16(0, value, true); }
     else if (vr === 'UL') { bytes = new Uint8Array(4); new DataView(bytes.buffer).setUint32(0, value, true); }
     else { bytes = enc.encode(String(value)); if (bytes.length % 2) bytes = Uint8Array.from([...bytes, vr === 'UI' ? 0 : 32]); }
+    if (bare && group !== 2) {
+      // implicit VR: tag, then a 4-byte length, no VR
+      const head = new Uint8Array(8), dv = new DataView(head.buffer);
+      dv.setUint16(0, group, true); dv.setUint16(2, elem, true); dv.setUint32(4, bytes.length, true);
+      return [head, bytes];
+    }
     const long = ['OB', 'OW', 'UN', 'SQ', 'UT'].includes(vr);
     const head = new Uint8Array(long ? 12 : 8), dv = new DataView(head.buffer);
     dv.setUint16(0, group, true); dv.setUint16(2, elem, true);
@@ -198,15 +333,15 @@ function dicomSlice({ rows, cols, ipp, iop, ps, raw, slope, intercept, instance,
   const meta = [el(2, 1, 'OB', Uint8Array.from([0, 1])), el(2, 2, 'UI', '1.2.840.10008.5.1.4.1.1.2'),
     el(2, 3, 'UI', '1.2.3.' + instance), el(2, 0x10, 'UI', ts)].flat();
   const metaLen = meta.reduce((n, b) => n + b.length, 0);
-  chunks.push(new Uint8Array(128), enc.encode('DICM'), ...el(2, 0, 'UL', metaLen), ...meta);
+  if (!bare) chunks.push(new Uint8Array(128), enc.encode('DICM'), ...el(2, 0, 'UL', metaLen), ...meta);
   const ds = [
     [8, 0x16, 'UI', '1.2.840.10008.5.1.4.1.1.2'], [8, 0x60, 'CS', 'CT'],
     [0x10, 0x10, 'PN', 'SENTINEL^MUST-NOT-DISPLAY'], [0x10, 0x20, 'LO', 'SENTINEL-ID'], [0x10, 0x30, 'DA', '19000101'],
     [0x20, 0x0e, 'UI', '1.2.3.999'], [0x20, 0x13, 'IS', String(instance)],
     [0x20, 0x32, 'DS', ipp.join('\\')], [0x20, 0x37, 'DS', iop.join('\\')],
     ...(extra.frames ? [[0x28, 0x08, 'IS', String(extra.frames)]] : []),
-    [0x28, 0x02, 'US', 1], [0x28, 0x04, 'CS', 'MONOCHROME2'], [0x28, 0x10, 'US', rows], [0x28, 0x11, 'US', cols],
-    [0x28, 0x30, 'DS', ps.join('\\')], [0x28, 0x100, 'US', 16], [0x28, 0x101, 'US', 16], [0x28, 0x102, 'US', 15], [0x28, 0x103, 'US', 1],
+    [0x28, 0x02, 'US', samples], [0x28, 0x04, 'CS', samples === 3 ? 'RGB' : 'MONOCHROME2'], [0x28, 0x10, 'US', rows], [0x28, 0x11, 'US', cols],
+    [0x28, 0x30, 'DS', ps.join('\\')], [0x28, 0x100, 'US', bits], [0x28, 0x101, 'US', bits], [0x28, 0x102, 'US', bits - 1], [0x28, 0x103, 'US', bits === 16 ? 1 : 0],
     [0x28, 0x1052, 'DS', String(intercept)], [0x28, 0x1053, 'DS', String(slope)],
     [0x7fe0, 0x10, 'OW', new Uint8Array(raw.buffer)]
   ];
@@ -285,7 +420,38 @@ function phantom() {
     [dicomSlice({ rows: 2, cols: 2, ipp: [0, 0, 0], iop: [1, 0, 0, 0, 1, 0], ps: [1, 1], raw, slope: 1, intercept: 0, instance: 1, ts: '1.2.840.10008.1.2.4.90' })], /compressed/i);
   refuse('a multi-frame export is refused with a reason',
     [dicomSlice({ rows: 2, cols: 2, ipp: [0, 0, 0], iop: [1, 0, 0, 0, 1, 0], ps: [1, 1], raw, slope: 1, intercept: 0, instance: 1, extra: { frames: 2 } })], /multi-frame/i);
-  refuse('files that are not DICOM are refused', [new TextEncoder().encode('not a scan')], /No CBCT image slices/i);
+  refuse('files that are not DICOM are refused, and the reason given', [new TextEncoder().encode('not a scan')], /No usable CBCT slices.*not DICOM/i);
+
+  // Small hand-made series for the edge cases: 4 x 4 pixels, n slices.
+  const small = (n, { iop = [1, 0, 0, 0, 1, 0], shift = 0, bare = false } = {}) =>
+    [...Array(n).keys()].map((k) => dicomSlice({ rows: 4, cols: 4, ipp: [k * shift, 0, k * 0.5], iop, ps: [0.5, 0.5],
+      raw: new Int16Array(16).fill(1024), slope: 1, intercept: -1024, instance: k + 1, bare }));
+
+  ok('the volume is held as 16-bit, not 32 (half the memory for a large scan)', vol.hu instanceof Int16Array);
+
+  const thumb = dicomSlice({ rows: 2, cols: 2, ipp: [0, 0, 0], iop: [1, 0, 0, 0, 1, 0], ps: [1, 1],
+    raw: new Int16Array(6), slope: 1, intercept: 0, instance: 999, bits: 8, samples: 3 });
+  let v2 = null;
+  try { v2 = V.loadSeries([...files, thumb], V.dicomParser); } catch (e) { v2 = e; }
+  ok('a colour thumbnail in the folder is set aside, not fatal',
+    v2 && v2.nz === 110 && v2.warnings.some((w) => /set aside/.test(w)), v2 && (v2.message || JSON.stringify(v2.warnings)));
+
+  let v3 = null;
+  try { v3 = V.loadSeries(small(3, { bare: true }), V.dicomParser); } catch (e) { v3 = e; }
+  ok('files with no DICOM preamble are read', v3 && v3.nz === 3, v3 && v3.message);
+
+  let v4 = null;
+  try { v4 = V.loadSeries(small(3, { iop: [0.999, 0.017, 0, -0.017, 0.999, 0] }), V.dicomParser); } catch (e) { v4 = e; }
+  ok('an orientation written to three decimals still loads', v4 && v4.nz === 3, v4 && v4.message);
+
+  refuse('a sheared series (slices drifting sideways) is refused, not measured short', small(4, { shift: 1 }), /offset sideways/i);
+
+  const deg = (dir) => { try { V.crossSection(vol, [0, 0, 17.5], dir, 20, 40, 0.1); return 'drew'; } catch (e) { return e instanceof V.ScanError ? e.message : 'crashed: ' + e.message; } };
+  ok('two clicks on the same spot are refused, saying what to do, not drawn as NaN', /two different points/.test(deg([0, 0, 0])), deg([0, 0, 0]));
+  ok('and so is a direction straight up and down', /two different points/.test(deg([0, 0, 1])), deg([0, 0, 1]));
+  let rs = 'drew';
+  try { V.reslice(vol, [0, 0, 17.5], [0, 0, 0], [0, 0, 1], 10, 10, 0.1); } catch (e) { rs = e instanceof V.ScanError ? 'refused' : 'crashed'; }
+  ok('a plane with no direction is refused by the reslicer itself too', rs === 'refused', rs);
 }
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
