@@ -112,6 +112,11 @@
   .tool-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;}
   .tool-name{font-family:var(--serif);font-size:20px;font-weight:600;color:var(--ink);line-height:1.25;}
   .tool-desc{display:block;font-size:14.5px;line-height:1.65;color:var(--soft);margin:8px 0 0;}
+  /* A card can carry one short tag: what a clinician needs to know before they
+     tap it (a sign-in, or draft figures). tool-top already spaces it right. */
+  .tool-tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--navy);background:var(--chip-bg);border:1px solid var(--chip-line);border-radius:999px;padding:3px 9px;white-space:nowrap;}
+  .tool-tag.preview{color:#8A5200;background:#FDF3E3;border-color:#EBD3A8;}
 
   .infobox{background:var(--tint-soft);border:1px solid var(--chip-line);border-radius:8px;padding:16px 18px;margin:0;}
   .infobox p{margin:0;font-size:14px;line-height:1.65;color:var(--soft);}
@@ -274,7 +279,7 @@
     <div class="byline">Developed by Aiden McCann &middot; Dentist with special interest in oral surgery</div>
   </header>
 
-  <p class="lede">A set of four tools for use at the chairside. Each works through a structured
+  <p class="lede">A set of tools for use at the chairside. Each works through a structured
     assessment and produces a summary you can act on. They support clinical judgement and do not
     replace it, a full history and examination, or the consent process.</p>
 
@@ -315,10 +320,34 @@
           the confirmed grade to the appropriate sedation setting.</span>
       </a>
     </li>
+    <li>
+      <a class="tool" href="/implant/">
+        <span class="tool-top">
+          <span class="tool-name">Implant Case Assessment</span>
+          <span class="tool-tag preview">Preview</span>
+        </span>
+        <span class="tool-desc">Records the site, the patient factors and the measurements taken from
+          the scan, and sets out the case as straightforward, advanced or complex. Every clinical
+          figure in it is a draft awaiting review, so it is not for clinical use yet.</span>
+      </a>
+    </li>
+    <li>
+      <a class="tool" href="/ai-notes/">
+        <span class="tool-top">
+          <span class="tool-name">AI Notes</span>
+          <span class="tool-tag">Sign-in required</span>
+        </span>
+        <span class="tool-desc">Records a consent discussion and drafts a structured note from it for
+          the clinician to check and correct before it goes in the record.</span>
+      </a>
+    </li>
   </ul>
 
   <div class="infobox">
-    <p>None of the tools store patient identifiers, and nothing you enter leaves your device.</p>
+    <p>None of the tools store patient identifiers, and none of them keep what you enter.
+      In the four assessment tools and the implant preview, nothing you enter leaves your
+      device at all. AI Notes is the exception: the recording is sent away to be turned into
+      text, which is why it asks you to sign in.</p>
   </div>
 </main>
 </body>

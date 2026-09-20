@@ -212,6 +212,20 @@ for (const tool of TOOLS) {
   }
 }
 
+/* --- 4b. both extra tools have a card on the hub ------------------------------
+   The bar is easy to miss on a phone, where it scrolls. Since 20 September 2026
+   the hub lists AI Notes and the preview tool as cards too, at the clinical
+   lead's request. A card is a promise about what the tool is: the preview one
+   must say so on its face. */
+const hub = read(path.join(root, "index.html"));
+function hubCard(href) {
+  const m = hub && hub.match(new RegExp(`<a class="tool" href="${href.replace(/\//g, "\\/")}"[\\s\\S]*?<\\/a>`));
+  return m ? m[0] : null;
+}
+if (hub && !hubCard(GATED.href)) {
+  problems.push(`${GATED.name}: has no card on the hub. It is in the bar only, which scrolls out of sight on a phone.`);
+}
+
 /* --- 5. tools in preview ----------------------------------------------------
    A tool being built lives at its final path but is not yet a member of TOOLS.
    Since 20 September 2026 a preview tool IS linked from every switcher, at the
@@ -263,7 +277,13 @@ for (const tool of PREVIEW) {
   if (!banner || !/not for clinical use/i.test(banner[1]) || !/draft/i.test(banner[1])) {
     problems.push(`${tool.name}: is linked from every bar but its preview banner is gone. Restore it, or launch the tool properly (move it into TOOLS).`);
   }
-  notes.push(`${tool.name}: in preview (noindex, not in the sitemap, linked from every bar), cache "${cache}"`);
+  const card = hubCard(tool.href);
+  if (hub && !card) {
+    problems.push(`${tool.name}: has no card on the hub. It is in the bar only, which scrolls out of sight on a phone.`);
+  } else if (card && !/class="tool-tag preview"/.test(card)) {
+    problems.push(`${tool.name}: its hub card does not carry the Preview tag, so it reads as a finished tool.`);
+  }
+  notes.push(`${tool.name}: in preview (noindex, not in the sitemap, linked from every bar, tagged on the hub), cache "${cache}"`);
 }
 
 /* --- report --- */
@@ -287,5 +307,5 @@ if (problems.length) {
   process.exit(1);
 }
 
-console.log("\n  Site check passed: hub and four tools, switchers complete, caches in step,\n  AI Notes and the implant preview linked from every bar, gated and storing nothing.\n");
+console.log("\n  Site check passed: hub and four tools, switchers complete, caches in step,\n  AI Notes and the implant preview listed on the hub and in every bar, gated and storing nothing.\n");
 process.exit(0);
