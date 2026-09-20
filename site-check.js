@@ -212,6 +212,41 @@ for (const tool of TOOLS) {
   }
 }
 
+/* --- 5. tools in preview ----------------------------------------------------
+   A tool being built lives at its final path but is not yet a member of TOOLS:
+   it is not in the other pages' switchers, not in the sitemap, and must not be
+   indexed. Absent is fine. Present means: noindex on, out of the sitemap, its
+   own cache with its own prefix, nothing stored, and a complete bar of its own.
+   At launch, move the entry into TOOLS and delete it from here. */
+const PREVIEW = [{ name: "Implant", dir: "implant", href: "/implant/", prefix: "imp-" }];
+for (const tool of PREVIEW) {
+  const index = read(path.join(root, tool.dir, "index.html"));
+  if (!index) { notes.push(`${tool.name}: not present in this tree, skipped`); continue; }
+  if (!/<meta name="robots" content="noindex/.test(index)) {
+    problems.push(`${tool.name}: is in preview but has no noindex meta tag. It would be indexed before its content is reviewed.`);
+  }
+  if (sitemap && sitemap.includes(tool.href)) {
+    problems.push(`${tool.name}: is in preview but listed in sitemap.xml.`);
+  }
+  const cache = cacheNameOf(read(path.join(root, tool.dir, "sw.js")));
+  if (!cache) problems.push(`${tool.name}: could not read the CACHE name from sw.js`);
+  else if (cache.indexOf(tool.prefix) !== 0) {
+    problems.push(`${tool.name}: cache "${cache}" does not start with "${tool.prefix}". Another tool's activate step could delete it, or it could delete theirs.`);
+  }
+  const code = stripComments(index);
+  for (const api of ["localStorage", "sessionStorage", "indexedDB"]) {
+    if (new RegExp(`\\b${api}\\b`).test(code)) problems.push(`${tool.name}: index.html references ${api}. It promises to store nothing.`);
+  }
+  for (const other of TOOLS.concat([GATED, tool])) {
+    if (!new RegExp(`href="${other.href.replace(/\//g, "\\/")}"`).test(index)) {
+      problems.push(`${tool.name}: its switcher has no link to ${other.name} (${other.href}).`);
+    }
+  }
+  const marked = index.match(/href="([^"]+)"\s+aria-current="page"/);
+  if (!marked || marked[1] !== tool.href) problems.push(`${tool.name}: its own switcher link is not marked aria-current="page".`);
+  notes.push(`${tool.name}: in preview (noindex, unlisted), cache "${cache}"`);
+}
+
 /* --- report --- */
 console.log("");
 for (const n of notes) console.log("  " + n);
