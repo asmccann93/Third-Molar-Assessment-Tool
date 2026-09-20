@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- PREVIEW: not linked from the site and not to be indexed until the clinical
+     content has been reviewed. At launch: remove this robots line, add the
+     og/twitter tags, add the page to the switcher on every page, to TOOLS in
+     site-check.js, to the sitemap and to the hub. -->
+<meta name="robots" content="noindex, nofollow" />
+<meta name="description" content="Structured assessment for a single-tooth dental implant: site, patient factors, the clinician's own CBCT measurements and clearance checks, ending in a plan summary." />
+<link rel="canonical" href="https://oralsurgeryassess.com/implant/" />
+<meta name="author" content="Aiden McCann" />
+<meta name="theme-color" content="#0F2F63" />
+<meta name="color-scheme" content="light only" />
+<title>PREVIEW — Implant Case Assessment</title>
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<style>
+  /* Self-hosted fonts, added 21 Aug 2026. Previously these came from Google's
+     servers, so on a first visit without a connection the headings fell back to
+     Georgia and the body to the system sans - the site looked different in exactly
+     the situation the offline support exists for. Same files, same licence (OFL),
+     now served from this origin and cached by each tool's service worker. */
+  @font-face{font-family:"Source Serif 4";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/source-serif-4-500.woff2") format("woff2");}
+  @font-face{font-family:"Source Serif 4";font-style:normal;font-weight:600;font-display:swap;
+    src:url("/fonts/source-serif-4-600.woff2") format("woff2");}
+  @font-face{font-family:"Source Serif 4";font-style:normal;font-weight:700;font-display:swap;
+    src:url("/fonts/source-serif-4-700.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-400.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-500.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:600;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-600.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:700;font-display:swap;
+    src:url("/fonts/ibm-plex-sans-700.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/fonts/ibm-plex-mono-400.woff2") format("woff2");}
+  @font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:500;font-display:swap;
+    src:url("/fonts/ibm-plex-mono-500.woff2") format("woff2");}
+</style>
+<style>
+  :root{
+    --navy:#0F2F63; --ink:#0F2F63; --accent:#1E4D9B; --soft:#3F5A8A; --muted:#4A6FA5;
+    --line:#D6DCE8; --tint:#E8EEF9; --tint-soft:#F2F7FE; --chip-bg:#E7EEF9; --chip-line:#C9D9F0;
+    --bg:#FFFFFF; --surface:#FFFFFF; --clay:#A11D2E; --amber:#C43A32; --alert-bg:#FDF2F2;
+    --disabled:#9FB0CC;
+    --sans:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    --serif:"Source Serif 4","Iowan Old Style",Georgia,ui-serif,serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);}
+  body{font-family:var(--sans);font-size:16px;line-height:1.55;-webkit-text-size-adjust:100%;}
+
+  /* switcher */
+  .ostb{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:8px clamp(16px,4vw,32px);background:#FFFFFF;border-bottom:1px solid #D6DCE8;}
+  .ostb-label{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:10px;}
+  .ostb a{font-size:13px;font-weight:600;color:var(--soft);text-decoration:none;padding:6px 12px;border-radius:7px;border:1px solid transparent;line-height:1.2;}
+  .ostb a:hover{color:var(--navy);background:#EDF3FC;}
+  .ostb a[aria-current="page"]{color:var(--navy);background:var(--tint);border-color:var(--chip-line);}
+  .ostb a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  @media print{.ostb{display:none !important;}}
+  @media (max-width:480px){.ostb{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;}.ostb::-webkit-scrollbar{display:none;}.ostb-label{display:none;}.ostb a{white-space:nowrap;}}
+
+  .shell{max-width:700px;margin:0 auto;padding:30px 20px 72px;}
+  header.app{margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--line);}
+  .eyebrow-top{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+  h1.app{font-family:var(--serif);font-size:28px;margin:6px 0 0;color:var(--ink);line-height:1.2;}
+  .byline{font-size:13px;color:var(--soft);margin-top:5px;}
+
+  /* cover */
+  .lede{font-size:16px;line-height:1.7;color:var(--soft);margin:0 0 20px;}
+  .lede strong{color:var(--ink);font-weight:600;}
+  .infobox{background:var(--tint-soft);border:1px solid var(--chip-line);border-radius:8px;padding:16px 18px;margin:0 0 22px;}
+  .infobox p{margin:0;font-size:14px;line-height:1.65;color:var(--soft);}
+  .disclaim{font-size:12.5px;line-height:1.65;color:var(--soft);margin-top:28px;padding-top:18px;border-top:1px solid var(--line);}
+
+  h2.q{font-family:var(--serif);font-size:23px;margin:0 0 6px;color:var(--ink);line-height:1.25;}
+  .helper{font-size:14px;color:var(--soft);margin:0 0 20px;line-height:1.65;}
+  h3.block{font-family:var(--serif);font-size:19px;margin:32px 0 6px;color:var(--ink);}
+
+  .field{margin:24px 0 0;padding-top:20px;border-top:1px solid #EEF2F8;}
+  .field:first-of-type{border-top:none;padding-top:0;margin-top:20px;}
+  .label{font-size:15px;font-weight:600;color:var(--ink);margin-bottom:10px;display:block;line-height:1.45;}
+  .opts{display:flex;flex-direction:column;gap:8px;}
+  .opt{display:flex;align-items:center;gap:11px;text-align:left;font-family:var(--sans);font-size:15px;
+    padding:13px 15px;border-radius:8px;cursor:pointer;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);width:100%;line-height:1.4;}
+  .opt:hover{background:var(--tint-soft);border-color:var(--chip-line);}
+  .opt[aria-pressed="true"]{border-color:var(--accent);background:var(--tint);font-weight:600;}
+  .opt:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--disabled);flex-shrink:0;}
+  .opt[aria-pressed="true"] .dot{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px #fff;}
+
+  .num{display:flex;gap:10px;flex-wrap:wrap;}
+  .num input{font-family:var(--sans);font-size:16px;padding:12px 13px;border:1.5px solid var(--line);border-radius:8px;width:150px;color:var(--ink);background:var(--surface);}
+  .num input:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  .bmiout{font-family:var(--mono);font-size:15px;color:var(--ink);margin-top:10px;font-weight:500;}
+
+  .nav{display:flex;gap:10px;flex-wrap:wrap;margin-top:34px;padding-top:22px;border-top:1px solid var(--line);}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-family:var(--sans);font-size:15px;font-weight:600;
+    padding:13px 22px;border-radius:8px;cursor:pointer;border:1.5px solid var(--line);background:var(--surface);color:var(--soft);}
+  .btn:hover{background:var(--tint-soft);}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .btn.primary:hover{background:#17407F;}
+
+  .progress{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
+  .rail{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:26px;}
+  .rail span{font-family:var(--mono);font-size:10.5px;padding:5px 10px;border-radius:999px;background:#F2F5FA;color:var(--muted);border:1px solid transparent;}
+  .rail span.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .rail span.done{background:var(--tint);color:var(--soft);border-color:var(--chip-line);}
+
+  .card{border:1.5px solid var(--chip-line);background:var(--tint-soft);border-radius:12px;padding:20px;margin:20px 0;}
+  .card.alert{border-color:#E9C2C2;background:var(--alert-bg);}
+  .card.warn{border-color:#E8D5A8;background:#FDF9EF;}
+  .grade{font-family:var(--serif);font-size:36px;color:var(--navy);margin:0;line-height:1.1;}
+  .gradesub{font-size:14.5px;color:var(--soft);margin-top:6px;line-height:1.55;}
+  .because{margin:16px 0 0;padding:0;list-style:none;}
+  .because li{font-size:15px;color:var(--ink);padding:6px 0 6px 18px;position:relative;line-height:1.55;}
+  .because li:before{content:"";position:absolute;left:0;top:14px;width:6px;height:6px;border-radius:50%;background:var(--accent);}
+  .defn{font-size:14.5px;line-height:1.65;color:var(--ink);margin:12px 0 0;}
+  .setting{font-size:15.5px;line-height:1.65;color:var(--ink);margin:0;}
+  .flaglist{margin:12px 0 0;padding-left:20px;}
+  .flaglist li{font-size:14.5px;line-height:1.65;margin-bottom:8px;}
+  .attrib{font-size:12.5px;color:var(--soft);line-height:1.65;margin-top:30px;padding-top:18px;border-top:1px solid var(--line);}
+  .warnrow{font-size:14.5px;color:var(--clay);font-weight:600;margin-top:12px;}
+  .note{font-size:13.5px;color:var(--soft);line-height:1.65;margin-top:12px;padding-top:12px;border-top:1px solid var(--chip-line);}
+  h2.res{font-family:var(--serif);font-size:27px;margin:6px 0 4px;color:var(--ink);line-height:1.25;}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);}
+
+  @media (max-width:520px){
+    .shell{padding:22px 16px 60px;}
+    h1.app{font-size:24px;} h2.q{font-size:20px;} .grade{font-size:30px;}
+    .btn{width:100%;justify-content:center;}
+    .num input{width:100%;}
+  }
+
+  /* printing: the result is the only thing worth putting on paper */
+  @media print{
+    .noprint{display:none !important;}
+    body{font-size:11pt;}
+    .shell{max-width:none;padding:0;}
+    .card{break-inside:avoid;border:1px solid #999;background:#fff !important;}
+    .because li, .flaglist li{break-inside:avoid;}
+    h3.block{break-after:avoid;}
+  }
+
+  #root h2[tabindex="-1"]:focus{outline:none;}
+</style>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
+<script defer src="/_vercel/insights/script.js"></script>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<style>
+  /* Offline notice. Self-contained and independent of the tool's own code, so it
+     works the same on every page and survives a rebuild. */
+  .osoff{position:fixed;left:0;right:0;bottom:0;z-index:9999;display:none;
+    font-family:"IBM Plex Sans",ui-sans-serif,-apple-system,"Segoe UI",sans-serif;
+    font-size:13.5px;line-height:1.45;text-align:center;
+    color:#FFFFFF;background:#0F2F63;padding:10px 16px;}
+  @media print{.osoff{display:none !important;}}
+</style>
+<script>
+  // The service worker keeps these tools usable without a connection, but nothing
+  // on screen said so - a clinician could not tell a live page from a cached one.
+  // navigator.onLine reports whether the device has a network interface, not
+  // whether the server is reachable, so this is deliberately worded as "offline"
+  // rather than claiming the content is stale.
+  (function () {
+    var el = null;
+    function ensure() {
+      if (el || !document.body) return el;
+      el = document.createElement("div");
+      el.className = "osoff";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      el.textContent = "Offline \u2014 you are seeing the saved copy of this page. It stays fully usable.";
+      document.body.appendChild(el);
+      return el;
+    }
+    function update() {
+      var n = ensure();
+      if (n) n.style.display = navigator.onLine ? "none" : "block";
+    }
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", update);
+    } else {
+      update();
+    }
+  })();
+</script>
+<style>
+  /* Interaction polish. Self-contained like the offline notice above, so it
+     applies identically on all five pages without touching any tool's own code.
+
+     This block sits after each page's own stylesheet, so where it repeats a
+     property the page already sets, it wins. The transition below therefore
+     names background-color and border-color as well as transform, so it adds
+     the press feedback without discarding hover behaviour the pages already had. */
+
+  a, button, [role="button"], input, select, textarea, label, summary {
+    -webkit-tap-highlight-color: rgba(15, 47, 99, 0.08);
+  }
+
+  button, [role="button"], a.tool, .ostb a {
+    transition: transform 80ms ease, background-color 120ms ease, border-color 120ms ease;
+  }
+  /* Nothing on the site acknowledged a touch until the next screen appeared.
+     One pixel of travel is enough to feel like the tap registered. */
+  button:not(:disabled):active,
+  [role="button"]:active,
+  a.tool:active,
+  .ostb a:active {
+    transform: translateY(1px);
+  }
+
+  /* Switcher links were about 29px tall. Touch devices get a full 44px target;
+     pointer devices keep the compact bar. */
+  .ostb a { display: inline-flex; align-items: center; }
+  @media (pointer: coarse) {
+    .ostb a { min-height: 44px; padding-left: 14px; padding-right: 14px; }
+  }
+
+  /* Figures should not change width as they change value. */
+  input[type="number"], input[inputmode="decimal"], input[inputmode="numeric"],
+  table, td, th, output {
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1, h2, h3 { text-wrap: balance; }
+  p { text-wrap: pretty; }
+
+  /* The switcher is sticky now, so an in-page jump would land under it.
+     The third molar tool alone has 26 anchor links. */
+  html { scroll-padding-top: 56px; }
+  @media (pointer: coarse) { html { scroll-padding-top: 72px; } }
+
+  ::selection { background: #E8EEF9; color: #0F2F63; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+</style>
+<style>
+  /* Implant tool additions, on the same tokens as ASA. */
+  .preview{background:#FDF9EF;border-bottom:1px solid #E8D5A8;color:#5A4300;font-size:13.5px;line-height:1.5;padding:9px clamp(16px,4vw,32px);}
+  .preview strong{color:#3D2E00;}
+  .sel{font-family:var(--sans);font-size:16px;padding:11px 13px;border:1.5px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);min-width:200px;}
+  .sel:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  .num{align-items:center;}
+  .num input{width:120px;}
+  .unit{font-family:var(--mono);font-size:14px;color:var(--soft);}
+  .err{font-size:13.5px;color:var(--clay);min-height:0;margin-top:6px;}
+  .err:empty{display:none;}
+  .adv{margin-top:12px;border-left:3px solid var(--accent);background:var(--tint-soft);border-radius:0 8px 8px 0;padding:10px 14px;}
+  .adv p{margin:0;font-size:14.5px;line-height:1.6;color:var(--ink);}
+  .adv p + p{margin-top:6px;color:var(--soft);}
+  .adv.hard{border-left-color:var(--clay);background:var(--alert-bg);}
+  .pts{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:6px;}
+  .checks{list-style:none;margin:10px 0 0;padding:0;}
+  .checks li{font-size:15px;line-height:1.55;padding:8px 0 8px 28px;position:relative;border-bottom:1px solid #EEF2F8;}
+  .checks li:before{position:absolute;left:0;top:8px;font-family:var(--mono);font-size:12px;font-weight:600;}
+  .checks li.ok:before{content:"OK";color:#1C6B3A;}
+  .checks li.flag:before{content:"!";color:var(--clay);font-size:15px;left:6px;}
+  @media print{.preview{display:none !important;}}
+</style>
+</head>
+<body>
+<nav class="ostb" aria-label="Assessment tools">
+  <span class="ostb-label">Oral Surgery Tools</span>
+  <a href="/">Overview</a>
+  <a href="/third-molar/">Third Molar</a>
+  <a href="/sedation/">Sedation</a>
+  <a href="/local-anaesthetic/">Local Anaesthetic</a>
+  <a href="/asa-assessment/">ASA Assessment</a>
+  <a href="/implant/" aria-current="page">Implant</a>
+  <a href="/ai-notes/">AI Notes</a>
+</nav>
+<div class="preview" role="note"><strong>Preview — not for clinical use.</strong> Every clinical figure and piece of advice in this tool is a draft awaiting review.</div>
+<div id="root"></div>
+<script>
+/* ============================================================
+   Implant Case Assessment — oralsurgeryassess.com/implant/
+   Developed by Aiden McCann.
+
+   PREVIEW. Not linked from the site, not indexed, and every clinical
+   figure in it is a DRAFT awaiting the clinical lead's review. Nothing
+   here is to be used for a real patient until that review is done and
+   this banner is gone.
+
+   A structured assessment for a single-tooth implant: the site, the
+   patient, the measurements the clinician took from their own CBCT,
+   and — optionally — a check of a proposed implant against clearance
+   margins. It ends in a plan summary to copy into the notes.
+
+   It does not read images. The measurements are the clinician's.
+   Deliberately holds no patient identifiers, writes nothing to
+   storage, and sends nothing anywhere.
+   ============================================================ */
+var VERSION = "0.1.0-preview";
+
+/* ---------- Sites. Single teeth, FDI, third molars excluded. ---------- */
+var SITES = [17,16,15,14,13,12,11,21,22,23,24,25,26,27,47,46,45,44,43,42,41,31,32,33,34,35,36,37];
+
+function siteInfo(t) {
+  t = +t;
+  var q = Math.floor(t / 10), n = t % 10, upper = q === 1 || q === 2;
+  var posterior = n >= 4;
+  var info = { tooth: t, upper: upper, posterior: posterior };
+  // DRAFT: aesthetic zone = upper 14 to 24.
+  info.aesthetic = upper && n <= 4;
+  // What limits available height at this site, and whether it is a structure
+  // that must not be reached (a nerve) or one that can be augmented (a floor).
+  if (upper && posterior) info.limit = { key: "sinus", label: "the sinus floor", vital: false };
+  else if (upper) info.limit = { key: "nasal", label: "the nasal floor", vital: false };
+  else if (posterior) info.limit = { key: "canal", label: n <= 5 ? "the mental foramen or canal" : "the inferior alveolar canal", vital: true };
+  else info.limit = { key: "border", label: "the inferior border", vital: false };
+  return info;
+}
+
+/* ---------- DRAFT clinical figures. Every number the tool uses is here, in
+   one place, so the review is one list and a change is one line. ---------- */
+var DRAFT = {
+  toothClearance: 1.5,       // implant surface to adjacent root, each side, mm
+  wallClearance: 1.5,        // bone remaining buccal and lingual, each side, mm (implant assumed centred)
+  vitalClearance: 2.0,       // apex to a nerve, mm
+  restorativeMin: 7.0,       // crest to opposing tooth for a single crown, mm
+  bands: [                   // complexity score -> rating
+    { max: 3, label: "Straightforward" },
+    { max: 7, label: "Advanced" },
+    { max: Infinity, label: "Complex" }
+  ]
+};
+
+/* ---------- Questions.
+   `pts` is what an answer adds to the complexity score. `adv` is an advisory
+   in risk-then-action form. `hard` marks a finding that takes the case out of
+   routine primary-care placement regardless of score. `when` limits a
+   question to the sites it applies to. ---------- */
+var SECTIONS = [
+  { id: "site", title: "The site", chip: "Site",
+    helper: "One missing tooth, or one about to be removed. Spans and full arches are outside this version.",
+    qs: [
+      { id: "tooth", label: "Which tooth is being replaced?", type: "tooth" },
+      { id: "timing", label: "Where is the site in its healing?", opts: [
+          { v: "present", t: "Tooth still present — immediate placement being considered", pts: 2,
+            adv: { risk: "Immediate placement depends on an intact socket and primary stability, and is less forgiving of a thin buccal wall.",
+                   action: "Confirm the buccal plate on the CBCT and have a delayed placement plan ready if stability is not reached." } },
+          { v: "early", t: "Recently extracted — soft tissue healed, bone still remodelling", pts: 1 },
+          { v: "healed", t: "Healed ridge" } ] },
+      { id: "smile", label: "Smile line", when: function (s) { return s.aesthetic; }, opts: [
+          { v: "low", t: "Low — gingival margin not shown" },
+          { v: "avg", t: "Average" },
+          { v: "high", t: "High — gingiva shown when smiling", pts: 1,
+            adv: { risk: "A high smile line shows any recession, grey show-through or papilla loss around the implant crown.",
+                   action: "Discuss the aesthetic risk explicitly and record it; consider whether soft-tissue augmentation will be needed." } } ] },
+      { id: "phenotype", label: "Soft-tissue phenotype at the site", opts: [
+          { v: "thick", t: "Thick" },
+          { v: "thin", t: "Thin", pts: 1,
+            adv: { risk: "Thin tissue is more prone to recession and to showing the implant through the mucosa.",
+                   action: "Plan for this in the aesthetic zone, and include recession in the consent discussion." } },
+          { v: "na", t: "Not assessed", unknown: true } ] },
+      { id: "km", label: "Band of keratinised mucosa at the site", opts: [
+          { v: "adequate", t: "2 mm or more" },
+          { v: "narrow", t: "Less than 2 mm", pts: 1,
+            adv: { risk: "A narrow band of keratinised mucosa makes cleaning around the implant harder and is associated with more soft-tissue problems.",
+                   action: "Consider whether soft-tissue grafting is needed, and emphasise maintenance." } },
+          { v: "none", t: "None", pts: 1,
+            adv: { risk: "No keratinised mucosa makes cleaning around the implant harder and is associated with more soft-tissue problems.",
+                   action: "Consider whether soft-tissue grafting is needed, and emphasise maintenance." } } ] }
+    ] },
+
+  { id: "pt", title: "Patient factors", chip: "Patient",
+    helper: "Each factor is recorded as found. An advisory appears where it changes the plan.",
+    qs: [
+      { id: "growth", label: "Is jaw growth complete?", opts: [
+          { v: "yes", t: "Yes" },
+          { v: "no", t: "No, or uncertain", hard: true,
+            adv: { risk: "An implant does not move with continuing growth, and ends up out of line with the teeth around it.",
+                   action: "Defer implant placement until growth is complete; consider an interim replacement." } } ] },
+      { id: "smoking", label: "Smoking", opts: [
+          { v: "no", t: "Non-smoker, or stopped" },
+          { v: "light", t: "Smokes, fewer than 10 a day", pts: 1,
+            adv: { risk: "Smoking raises the risk of the implant failing and of bone loss around it.",
+                   action: "Advise stopping, record that the advice was given, and include the raised risk in the consent discussion." } },
+          { v: "heavy", t: "Smokes 10 or more a day", pts: 2,
+            adv: { risk: "Heavy smoking substantially raises the risk of the implant failing and of bone loss around it.",
+                   action: "Advise stopping and consider deferring until the patient has; include the raised risk in the consent discussion." } } ] },
+      { id: "diabetes", label: "Diabetes", opts: [
+          { v: "none", t: "None" },
+          { v: "ctrl", t: "Well controlled", pts: 1 },
+          { v: "poor", t: "Poorly controlled, or control unknown", pts: 2,
+            adv: { risk: "Poor glycaemic control impairs healing and raises the risk of infection and failure.",
+                   action: "Defer until control is established; liaise with the patient’s GP." } } ] },
+      { id: "antires", label: "Antiresorptive or antiangiogenic drugs (bisphosphonates, denosumab, others)", opts: [
+          { v: "none", t: "None, now or in the past" },
+          { v: "osteo", t: "For osteoporosis", pts: 2,
+            adv: { risk: "Antiresorptive drugs carry a risk of medication-related osteonecrosis of the jaw after surgery.",
+                   action: "Assess the individual risk before planning, discuss it with the patient, and consider specialist advice." } },
+          { v: "cancer", t: "For cancer, or high dose", hard: true,
+            adv: { risk: "At these doses the risk of osteonecrosis of the jaw after implant surgery is high.",
+                   action: "Do not place in primary care. Refer for specialist assessment." } } ] },
+      { id: "rt", label: "Radiotherapy to the head and neck", opts: [
+          { v: "none", t: "None" },
+          { v: "notjaw", t: "Yes, field did not include the jaws", pts: 1,
+            adv: { risk: "The exact radiation field matters, and is not always as the patient remembers it.",
+                   action: "Confirm the field with the treating oncology team before planning." } },
+          { v: "jaw", t: "Yes, including the jaws, or field unknown", hard: true,
+            adv: { risk: "Surgery in irradiated bone carries a risk of osteoradionecrosis.",
+                   action: "Do not place in primary care. Refer for specialist assessment." } } ] },
+      { id: "immuno", label: "Immunosuppression (drugs or condition)", opts: [
+          { v: "no", t: "No" },
+          { v: "yes", t: "Yes", pts: 1,
+            adv: { risk: "Immunosuppression raises the risk of infection and impaired healing.",
+                   action: "Liaise with the patient’s physician before planning." } } ] },
+      { id: "anticoag", label: "Anticoagulant or antiplatelet medication", opts: [
+          { v: "none", t: "None" },
+          { v: "ap", t: "Antiplatelet" },
+          { v: "ac", t: "Anticoagulant",
+            adv: { risk: "Bleeding after surgery is more likely.",
+                   action: "Plan bleeding management in line with current guidance, including local measures." } } ] },
+      { id: "perio", label: "Periodontal status", opts: [
+          { v: "healthy", t: "Healthy, no history of periodontitis" },
+          { v: "stable", t: "History of periodontitis, treated and stable", pts: 1,
+            adv: { risk: "A history of periodontitis raises the risk of peri-implantitis.",
+                   action: "Include this in the consent discussion and arrange regular periodontal maintenance." } },
+          { v: "active", t: "Active, untreated periodontitis", hard: true,
+            adv: { risk: "Placing an implant into a mouth with active periodontitis puts it at high risk of peri-implantitis.",
+                   action: "Treat and stabilise the periodontitis before planning an implant." } } ] },
+      { id: "oh", label: "Oral hygiene", opts: [
+          { v: "good", t: "Good" },
+          { v: "fair", t: "Fair" },
+          { v: "poor", t: "Poor", pts: 1,
+            adv: { risk: "Poor plaque control is a major risk for peri-implant disease.",
+                   action: "Improve and demonstrate hygiene before committing to an implant." } } ] },
+      { id: "brux", label: "Bruxism or heavy parafunction", opts: [
+          { v: "no", t: "No" },
+          { v: "yes", t: "Yes", pts: 1,
+            adv: { risk: "Parafunction raises the risk of screw loosening, chipping and fracture.",
+                   action: "Plan for protection, such as a night guard, and include mechanical complications in the consent discussion." } } ] },
+      { id: "expect", label: "Patient expectations", opts: [
+          { v: "realistic", t: "Realistic" },
+          { v: "high", t: "Very high aesthetic demand, or unrealistic", pts: 1,
+            adv: { risk: "An outcome that is clinically good may still disappoint.",
+                   action: "Discuss likely outcomes and limitations explicitly, and record the discussion." } } ] }
+    ] },
+
+  { id: "bone", title: "Bone and space", chip: "Bone",
+    helper: "Enter what you measured on the CBCT cross-section at the site, and clinically. Leave a box empty if it was not measured.",
+    qs: [
+      { id: "md", label: "Space between the adjacent teeth, at the crest", type: "mm" },
+      { id: "bl", label: "Bone width, buccal to lingual, at the crest", type: "mm" },
+      { id: "ht", label: "Available bone height, crest to ", type: "mm", limit: true },
+      { id: "rest", label: "Restorative space, crest to opposing tooth", type: "mm" },
+      { id: "undercut", label: "Lingual concavity or undercut", when: function (s) { return !s.upper; }, opts: [
+          { v: "no", t: "None" },
+          { v: "yes", t: "Present", pts: 1,
+            adv: { risk: "A lingual concavity can be perforated by a drill following the ridge, with a risk of floor-of-mouth bleeding.",
+                   action: "Plan the angle on the cross-section, not the ridge alone." } } ] },
+      { id: "sinus", label: "Sinus appearance on the CBCT", when: function (s) { return s.limit.key === "sinus"; }, opts: [
+          { v: "clear", t: "Clear" },
+          { v: "thick", t: "Mucosal thickening", pts: 1,
+            adv: { risk: "Sinus pathology complicates any procedure near the sinus floor.",
+                   action: "Assess the sinus before any augmentation, and consider ENT opinion if there are symptoms." } },
+          { v: "opaque", t: "Opacified, or fluid level", pts: 2,
+            adv: { risk: "An opacified sinus suggests active disease.",
+                   action: "Investigate and treat the sinus before planning surgery near it." } } ] }
+    ] },
+
+  { id: "impl", title: "Proposed implant", chip: "Implant",
+    helper: "Optional. Enter the implant you have in mind, and it is checked against the clearances you set. Leave both empty to skip.",
+    qs: [
+      { id: "dia", label: "Implant diameter", type: "mm" },
+      { id: "len", label: "Implant length", type: "mm" }
+    ] }
+];
+
+/* ---------- state ---------- */
+var answers = {};     // qid -> option value, or text for mm/tooth
+var step = 0, started = false, showResult = false, firstRender = true;
+
+function esc(s) { return String(s).replace(/[&<>"']/g, function (c) {
+  return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+
+/* A measurement in mm, or null. Accepts "6,5". Anything outside 0-40 mm is
+   refused rather than guessed at: nobody measured a 65 mm ridge. */
+function mm(v) {
+  if (v === undefined || v === null || String(v).trim() === "") return null;
+  var x = parseFloat(String(v).replace(",", "."));
+  if (!isFinite(x) || x <= 0 || x > 40) return NaN;
+  return x;
+}
+
+function currentSite() { return answers.tooth ? siteInfo(answers.tooth) : null; }
+function applies(q, s) { return !q.when || (s && q.when(s)); }
+
+/* ---------- the assessment: pure, so it can be tested without the page ---------- */
+function evaluate(a) {
+  var s = a.tooth ? siteInfo(a.tooth) : null;
+  var out = { site: s, score: 0, reasons: [], advisories: [], hard: [], unknown: [], checks: [], invalid: [] };
+
+  SECTIONS.forEach(function (sec) {
+    sec.qs.forEach(function (q) {
+      if (!applies(q, s) || q.type) return;
+      var v = a[q.id];
+      if (v === undefined) { out.unknown.push(q.label); return; }
+      var o = q.opts.filter(function (x) { return x.v === v; })[0];
+      if (!o) return;
+      if (o.unknown) out.unknown.push(q.label);
+      if (o.pts) { out.score += o.pts; out.reasons.push({ pts: o.pts, text: q.label + ": " + o.t }); }
+      if (o.hard) out.hard.push({ q: q.label, t: o.t, adv: o.adv });
+      else if (o.adv) out.advisories.push({ q: q.label, t: o.t, adv: o.adv });
+    });
+  });
+
+  if (s && s.aesthetic) { out.score += 2; out.reasons.push({ pts: 2, text: "Site in the aesthetic zone" }); }
+
+  var m = {};
+  ["md", "bl", "ht", "rest", "dia", "len"].forEach(function (k) {
+    m[k] = mm(a[k]);
+    if (m[k] !== null && isNaN(m[k])) { out.invalid.push(k); m[k] = null; }
+  });
+  out.measures = m;
+
+  if (m.rest !== null && m.rest < DRAFT.restorativeMin) {
+    out.checks.push({ ok: false, key: "rest", text: "Restorative space " + m.rest + " mm is under " + DRAFT.restorativeMin + " mm.", pts: 1 });
+  }
+
+  // The proposed implant, against each measurement that was taken. A check is
+  // only made when both numbers exist: a blank is never read as a pass.
+  if (m.dia !== null) {
+    if (m.md !== null) {
+      var side = (m.md - m.dia) / 2;
+      out.checks.push({ ok: side >= DRAFT.toothClearance, key: "md", pts: 2,
+        text: "Clearance to each adjacent tooth: " + fmt(side) + " mm (needs " + DRAFT.toothClearance + " mm)." });
+    }
+    if (m.bl !== null) {
+      var wall = (m.bl - m.dia) / 2;
+      out.checks.push({ ok: wall >= DRAFT.wallClearance, key: "bl", pts: 2,
+        text: "Bone left buccally and lingually, implant centred: " + fmt(wall) + " mm each side (needs " + DRAFT.wallClearance + " mm)." +
+          (wall < DRAFT.wallClearance ? " Grafting, or a narrower implant, would be needed." : "") });
+    }
+  }
+  if (m.len !== null && m.ht !== null && s) {
+    if (s.limit.vital) {
+      var spare = m.ht - m.len;
+      out.checks.push({ ok: spare >= DRAFT.vitalClearance, key: "ht", pts: 3,
+        text: "Apex to " + s.limit.label + ": " + fmt(spare) + " mm (needs " + DRAFT.vitalClearance + " mm)." +
+          (spare < DRAFT.vitalClearance ? " Choose a shorter implant." : "") });
+    } else {
+      var over = m.len - m.ht;
+      out.checks.push({ ok: over <= 0, key: "ht", pts: over > 0 ? 3 : 0,
+        text: over > 0
+          ? "The implant is " + fmt(over) + " mm longer than the bone below " + s.limit.label + "." +
+            (s.limit.key === "sinus" ? " Sinus floor elevation, or a shorter implant, would be needed." : " A shorter implant would be needed.")
+          : "The implant fits within the bone below " + s.limit.label + "." });
+    }
+  }
+  out.checks.forEach(function (c) { if (!c.ok) { out.score += c.pts; out.reasons.push({ pts: c.pts, text: c.text }); } });
+
+  var band = DRAFT.bands.filter(function (b) { return out.score <= b.max; })[0];
+  out.rating = out.hard.length ? "Outside routine placement" : band.label;
+  return out;
+}
+function fmt(x) { return (Math.round(x * 10) / 10).toFixed(1); }
+
+/* ---------- consent points: the 20 implant-consult items AI Notes checks for,
+   so the conversation this plan leads to is the one that tool listens for. ---------- */
+var CONSENT = [
+  "The implant may fail to integrate, or be lost later",
+  "Peri-implantitis, and the need for lifelong maintenance",
+  "Nerve injury (lower posterior) or sinus involvement (upper posterior), as relevant to this site",
+  "Possible damage to adjacent teeth or roots",
+  "Recession, bone loss, or an appearance not as expected",
+  "Whether grafting or a sinus lift may be needed",
+  "Screw loosening, chipping, and the crown needing replacement in time",
+  "The stages, and how long the whole process takes",
+  "The full cost, including the restoration and any grafting",
+  "What happens if it fails, and any guarantee",
+  "Alternatives: leaving the space, a denture, a bridge",
+  "Oral hygiene and gum health as a condition of success"
+];
+
+var PLANNING_CHECKS = [
+  "Confirm the nerve canal on the cross-sections yourself; do not rely on an automatic trace.",
+  "If the CBCT is fused with an intraoral scan, check the fit on the teeth before planning on it.",
+  "Confirm that the implant library entry matches the system and size you will place.",
+  "If a guide is used, check its seating on the model before surgery."
+];
+
+/* ---------- rendering ---------- */
+function h(html) { document.getElementById("root").innerHTML = html; }
+
+function headerHTML() {
+  return '<header class="app">' +
+    '<div class="eyebrow-top">Oral Surgery · Implant planning</div>' +
+    '<h1 class="app" tabindex="-1">Implant Case Assessment</h1>' +
+    '<div class="byline">Developed by Aiden McCann · v' + VERSION + '</div>' +
+    '</header>';
+}
+
+function coverHTML() {
+  return headerHTML() +
+    '<p class="lede">A structured assessment for a <strong>single-tooth implant</strong>: the site, the patient, the ' +
+      'measurements you took from your CBCT, and an optional check of the implant you have in mind. It ends in a plan ' +
+      'summary to copy into your notes.</p>' +
+    '<div class="infobox"><p>It does not read images. Every measurement is yours; the tool records it and checks it ' +
+      'against the clearances set out in the summary.</p></div>' +
+    '<div class="infobox"><p>Nothing is saved. This tool holds no patient identifiers, stores nothing on the device, and ' +
+      'sends nothing anywhere.</p></div>' +
+    '<div class="nav" style="border-top:none;padding-top:0;">' +
+      '<button type="button" class="btn primary" data-act="begin">Begin assessment</button></div>' +
+    '<p class="disclaim">This tool supports the treating clinician’s assessment and does not replace it, a full ' +
+      'history and examination, or the clinician’s own interpretation of the imaging.</p>';
+}
+
+function railHTML() {
+  var out = '<div class="rail">';
+  SECTIONS.forEach(function (s, i) {
+    var cls = i === step && !showResult ? "on" : (i < step || showResult ? "done" : "");
+    out += '<span class="' + cls + '">' + esc(s.chip) + '</span>';
+  });
+  return out + '<span class="' + (showResult ? "on" : "") + '">Plan</span></div>';
+}
+
+function questionHTML(q, s) {
+  var out = '<div class="field">';
+  if (q.type === "tooth") {
+    out += '<label class="label" for="tooth">' + esc(q.label) + '</label>';
+    out += '<select id="tooth" class="sel"><option value="">Select tooth (FDI)</option>';
+    SITES.forEach(function (t) {
+      out += '<option value="' + t + '"' + (String(answers.tooth) === String(t) ? " selected" : "") + '>' + t + '</option>';
+    });
+    out += '</select>';
+    if (s) out += '<p class="helper" style="margin:10px 0 0;">' + esc(siteLine(s)) + '</p>';
+  } else if (q.type === "mm") {
+    var label = q.label + (q.limit ? (s ? s.limit.label : "the limiting structure") : "");
+    var val = answers[q.id] === undefined ? "" : answers[q.id];
+    var bad = val !== "" && isNaN(mm(val));
+    out += '<label class="label" for="in-' + q.id + '">' + esc(label) + '</label>';
+    out += '<div class="num"><input id="in-' + q.id + '" data-mm="' + q.id + '" type="text" inputmode="decimal" ' +
+      'autocomplete="off" placeholder="mm" value="' + esc(val) + '" aria-describedby="err-' + q.id + '" /><span class="unit">mm</span></div>';
+    out += '<div class="err" id="err-' + q.id + '">' + (bad ? "Enter a measurement between 0 and 40 mm." : "") + '</div>';
+  } else {
+    out += '<span class="label">' + esc(q.label) + '</span><div class="opts">';
+    q.opts.forEach(function (o) {
+      var on = answers[q.id] === o.v;
+      out += '<button type="button" class="opt" aria-pressed="' + (on ? "true" : "false") +
+        '" data-q="' + esc(q.id) + '" data-v="' + esc(o.v) + '"><span class="dot"></span>' + esc(o.t) + '</button>';
+    });
+    out += '</div>';
+    var chosen = q.opts.filter(function (o) { return o.v === answers[q.id]; })[0];
+    if (chosen && chosen.adv) out += advHTML(chosen.adv, chosen.hard);
+  }
+  return out + '</div>';
+}
+
+function siteLine(s) {
+  return (s.upper ? "Upper" : "Lower") + " " + (s.posterior ? "posterior" : "anterior") +
+    (s.aesthetic ? ", in the aesthetic zone" : "") + ". Height is limited by " + s.limit.label + ".";
+}
+
+function advHTML(adv, hard) {
+  return '<div class="adv' + (hard ? " hard" : "") + '"><p><strong>' + (hard ? "Outside routine placement. " : "") +
+    '</strong>' + esc(adv.risk) + '</p><p>' + esc(adv.action) + '</p></div>';
+}
+
+function sectionHTML() {
+  var sec = SECTIONS[step], s = currentSite();
+  var out = headerHTML() + '<div class="progress">Section ' + (step + 1) + ' of ' + SECTIONS.length + '</div>' + railHTML();
+  out += '<h2 class="q" tabindex="-1">' + esc(sec.title) + '</h2>';
+  if (sec.helper) out += '<p class="helper">' + esc(sec.helper) + '</p>';
+  if (sec.id !== "site" && !s) out += '<div class="card warn"><p class="setting">No tooth selected yet. Some questions depend on the site.</p></div>';
+  sec.qs.forEach(function (q) { if (applies(q, s)) out += questionHTML(q, s); });
+  out += '<div class="nav noprint">';
+  if (step > 0) out += '<button type="button" class="btn" data-act="back">Back</button>';
+  out += '<button type="button" class="btn primary" data-act="next">' + (step === SECTIONS.length - 1 ? "See the plan" : "Continue") + '</button></div>';
+  return out;
+}
+
+function planText(r) {
+  var L = [];
+  L.push("IMPLANT CASE ASSESSMENT (v" + VERSION + ")");
+  if (r.site) L.push("Site: " + r.site.tooth + " — " + siteLine(r.site));
+  L.push("Complexity: " + r.rating + (r.hard.length ? "" : " (score " + r.score + ")"));
+  r.hard.forEach(function (x) { L.push("OUTSIDE ROUTINE PLACEMENT: " + x.q + " — " + x.t + ". " + x.adv.action); });
+  var m = r.measures, names = { md: "Mesiodistal space", bl: "Ridge width", ht: "Available height", rest: "Restorative space", dia: "Proposed implant diameter", len: "Proposed implant length" };
+  var took = Object.keys(names).filter(function (k) { return m[k] !== null; });
+  if (took.length) {
+    L.push("Measurements (clinician, from CBCT and clinical):");
+    took.forEach(function (k) { L.push("  " + names[k] + ": " + m[k] + " mm"); });
+  }
+  if (r.checks.length) {
+    L.push("Checks:");
+    r.checks.forEach(function (c) { L.push("  " + (c.ok ? "OK  " : "FLAG ") + c.text); });
+  }
+  if (r.advisories.length) {
+    L.push("Advisories:");
+    r.advisories.forEach(function (x) { L.push("  " + x.q + " — " + x.t + ". " + x.adv.action); });
+  }
+  if (r.unknown.length) L.push("Not recorded: " + r.unknown.join("; "));
+  return L.join("\n");
+}
+
+function resultHTML() {
+  var r = evaluate(answers);
+  var out = headerHTML() + railHTML();
+  out += '<span class="eyebrow">Plan summary</span><h2 class="res" tabindex="-1">' +
+    (r.site ? "Implant at " + r.site.tooth : "Implant plan") + '</h2>';
+
+  if (r.hard.length) {
+    out += '<div class="card alert"><p class="grade">Outside routine placement</p><div class="gradesub">One or more findings mean this case should not go ahead as a routine placement. What each one needs:</div><ul class="because">';
+    r.hard.forEach(function (x) { out += '<li><strong>' + esc(x.t) + '.</strong> ' + esc(x.adv.action) + '</li>'; });
+    out += '</ul></div>';
+  } else {
+    out += '<div class="card"><p class="grade">' + esc(r.rating) + '</p>' +
+      '<div class="gradesub">Complexity score ' + r.score + ' (draft bands: up to 3 straightforward, 4 to 7 advanced, 8 or more complex).</div>';
+    if (r.reasons.length) {
+      out += '<ul class="because">';
+      r.reasons.forEach(function (x) { out += '<li>' + esc(x.text) + ' <span class="pts">+' + x.pts + '</span></li>'; });
+      out += '</ul>';
+    }
+    out += '</div>';
+  }
+
+  if (r.unknown.length) {
+    out += '<div class="card warn"><p class="setting"><strong>' + r.unknown.length + ' item' + (r.unknown.length === 1 ? ' was' : 's were') +
+      ' not recorded.</strong> The rating reflects only what was recorded.</p><ul class="flaglist">';
+    r.unknown.forEach(function (u) { out += '<li>' + esc(u) + '</li>'; });
+    out += '</ul></div>';
+  }
+
+  out += '<h3 class="block">Checks against the proposed implant</h3>';
+  if (!r.checks.length) out += '<p class="helper">No proposed implant, or no measurements to check it against.</p>';
+  else {
+    out += '<ul class="checks">';
+    r.checks.forEach(function (c) { out += '<li class="' + (c.ok ? "ok" : "flag") + '">' + esc(c.text) + '</li>'; });
+    out += '</ul>';
+  }
+
+  if (r.advisories.length) {
+    out += '<h3 class="block">Advisories</h3>';
+    r.advisories.forEach(function (x) { out += advHTML(x.adv, false); });
+  }
+
+  out += '<h3 class="block">Cover in the consent discussion</h3><ul class="flaglist">';
+  CONSENT.forEach(function (c) { out += '<li>' + esc(c) + '</li>'; });
+  out += '</ul>';
+
+  out += '<h3 class="block">Check in your planning software</h3><ul class="flaglist">';
+  PLANNING_CHECKS.forEach(function (c) { out += '<li>' + esc(c) + '</li>'; });
+  out += '</ul>';
+
+  out += '<div class="nav noprint">' +
+    '<button type="button" class="btn primary" data-act="copy">Copy plan to notes</button>' +
+    '<button type="button" class="btn" data-act="print">Print</button>' +
+    '<button type="button" class="btn" data-act="back">Back to questions</button>' +
+    '<button type="button" class="btn" data-act="restart">Start again</button></div>';
+  out += '<p class="attrib">Draft clearances used: ' + DRAFT.toothClearance + ' mm to adjacent roots, ' + DRAFT.wallClearance +
+    ' mm of bone buccally and lingually, ' + DRAFT.vitalClearance + ' mm from the apex to a nerve, ' + DRAFT.restorativeMin +
+    ' mm restorative space. This summary supports the treating clinician’s plan and does not replace it. It records no patient identifiers and stores nothing.</p>';
+  return out;
+}
+
+function viewKey() { return !started ? "cover" : (showResult ? "result" : "step-" + step); }
+var lastView = null;
+
+function render() {
+  var scrollBefore = window.scrollY;
+  h('<div class="shell">' + (!started ? coverHTML() : (showResult ? resultHTML() : sectionHTML())) + '</div>');
+  var view = viewKey(), changed = view !== lastView;
+  lastView = view;
+  if (firstRender) { firstRender = false; return; }
+  if (changed) {
+    var head = document.querySelector('#root h2[tabindex="-1"], #root h1[tabindex="-1"]');
+    if (head) head.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  } else window.scrollTo(0, scrollBefore);
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click", function (e) {
+  var t = e.target.closest ? e.target.closest("button") : null;
+  if (!t) return;
+  if (t.dataset.q) { answers[t.dataset.q] = t.dataset.v; render(); return; }
+  var act = t.dataset.act;
+  if (act === "begin") { started = true; render(); }
+  else if (act === "next") { if (step === SECTIONS.length - 1) showResult = true; else step++; render(); }
+  else if (act === "back") { if (showResult) { showResult = false; step = SECTIONS.length - 1; } else if (step > 0) step--; render(); }
+  else if (act === "restart") { answers = {}; step = 0; started = false; showResult = false; render(); }
+  else if (act === "print") { window.print(); }
+  else if (act === "copy") {
+    var text = planText(evaluate(answers));
+    var done = function () { t.textContent = "Copied"; setTimeout(function () { t.textContent = "Copy plan to notes"; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { t.textContent = "Copy failed — select and copy by hand"; });
+  }
+});
+
+document.addEventListener("change", function (e) {
+  if (e.target.id === "tooth") {
+    answers.tooth = e.target.value || undefined;
+    // Answers to questions that no longer apply to the new site are dropped,
+    // so a sinus finding cannot follow the plan to a lower tooth.
+    var s = currentSite();
+    SECTIONS.forEach(function (sec) { sec.qs.forEach(function (q) { if (!applies(q, s)) delete answers[q.id]; }); });
+    render();
+  }
+});
+
+document.addEventListener("input", function (e) {
+  var k = e.target.dataset && e.target.dataset.mm;
+  if (!k) return;
+  answers[k] = e.target.value;
+  var err = document.getElementById("err-" + k);
+  if (err) err.textContent = e.target.value !== "" && isNaN(mm(e.target.value)) ? "Enter a measurement between 0 and 40 mm." : "";
+});
+
+render();
+
+/* Nothing is stored, so leaving discards the assessment. Warn while one is in progress. */
+window.addEventListener("beforeunload", function (e) {
+  if (!started || !Object.keys(answers).length) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+// For the test suite: the assessment logic, with no access to anything else.
+window.__implant = { evaluate: evaluate, siteInfo: siteInfo, mm: mm, planText: planText, DRAFT: DRAFT, SECTIONS: SECTIONS };
+
+if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
+  window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+}
+</script>
+</body>
+</html>
