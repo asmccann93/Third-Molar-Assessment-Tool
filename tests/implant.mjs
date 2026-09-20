@@ -418,8 +418,8 @@ function phantom() {
   const raw = new Int16Array(4);
   refuse('a compressed export is refused with a reason',
     [dicomSlice({ rows: 2, cols: 2, ipp: [0, 0, 0], iop: [1, 0, 0, 0, 1, 0], ps: [1, 1], raw, slope: 1, intercept: 0, instance: 1, ts: '1.2.840.10008.1.2.4.90' })], /compressed/i);
-  refuse('a multi-frame export is refused with a reason',
-    [dicomSlice({ rows: 2, cols: 2, ipp: [0, 0, 0], iop: [1, 0, 0, 0, 1, 0], ps: [1, 1], raw, slope: 1, intercept: 0, instance: 1, extra: { frames: 2 } })], /multi-frame/i);
+  refuse('a multi-frame file with no per-frame positions is refused, saying why',
+    [dicomSlice({ rows: 2, cols: 2, ipp: [0, 0, 0], iop: [1, 0, 0, 0, 1, 0], ps: [1, 1], raw: new Int16Array(8), slope: 1, intercept: 0, instance: 1, extra: { frames: 2 } })], /position and spacing/i);
   refuse('files that are not DICOM are refused, and the reason given', [new TextEncoder().encode('not a scan')], /No usable CBCT slices.*not DICOM/i);
 
   // Small hand-made series for the edge cases: 4 x 4 pixels, n slices.
@@ -452,6 +452,218 @@ function phantom() {
   let rs = 'drew';
   try { V.reslice(vol, [0, 0, 17.5], [0, 0, 0], [0, 0, 1], 10, 10, 0.1); } catch (e) { rs = e instanceof V.ScanError ? 'refused' : 'crashed'; }
   ok('a plane with no direction is refused by the reslicer itself too', rs === 'refused', rs);
+}
+
+/* ------------------------------------------------------------------ */
+section('Single-file (multi-frame) and lossless JPEG scans, as the CS 8100 3D exports');
+
+// A lossless JPEG encoder (ITU T.81 process 14, predictor 1, one component),
+// written here from the standard so the decoder in viewer.js is checked
+// against an independent writer. One Huffman table: 17 categories, 5 bits each.
+function jpegLossless(values, rows, cols, precision = 16) {
+  const out = [];
+  const seg = (m, body) => out.push(0xff, m, (body.length + 2) >> 8, (body.length + 2) & 255, ...body);
+  out.push(0xff, 0xd8);
+  seg(0xc3, [precision, rows >> 8, rows & 255, cols >> 8, cols & 255, 1, 1, 0x11, 0]);
+  const bits = new Array(16).fill(0); bits[4] = 17;
+  seg(0xc4, [0x00, ...bits, ...[...Array(17).keys()]]);
+  seg(0xda, [1, 1, 0x00, 1, 0, 0]);
+  let acc = 0, nb = 0;
+  const put = (v, n) => {
+    for (let i = n - 1; i >= 0; i--) {
+      acc = (acc << 1) | ((v >> i) & 1); nb++;
+      if (nb === 8) { out.push(acc); if (acc === 0xff) out.push(0); acc = 0; nb = 0; }
+    }
+  };
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const i = x + cols * y;
+    const pred = y === 0 && x === 0 ? 1 << (precision - 1) : x === 0 ? values[i - cols] : values[i - 1];
+    let d = (values[i] - pred) % 65536; if (d < 0) d += 65536;
+    if (d > 32768) d -= 65536;                       // range -32767 .. 32768
+    const mag = Math.abs(d), s = mag === 0 ? 0 : Math.floor(Math.log2(mag)) + 1;
+    put(s, 5);
+    if (s && s < 16) put(d > 0 ? d : d - 1 + (1 << s), s);
+  }
+  if (nb) put((1 << (8 - nb)) - 1, 8 - nb);
+  out.push(0xff, 0xd9);
+  return Uint8Array.from(out);
+}
+
+// An enhanced multi-frame DICOM, laid out as the CS 8100 3D writes it:
+// orientation, pixel size and rescale shared by all frames; each frame's
+// position in its own group; pixels either uncompressed or lossless JPEG with
+// an empty offset table and one fragment per frame.
+function dicomMulti({ rows, cols, frames, iop = [1, 0, 0, 0, 1, 0], ps, slope = 1, intercept = -1000, lossless = false,
+  splitFragments = false, withOffsets = false, perFrameRescale = null, sharedRescaleToo = false, corrupt = -1, perFrameIop = null, signed = false }) {
+  const enc = new TextEncoder();
+  const cat = (arrs) => { const n = arrs.reduce((a, b) => a + b.length, 0), o = new Uint8Array(n); let k = 0; arrs.forEach((b) => { o.set(b, k); k += b.length; }); return o; };
+  const pad = (b, vr) => (b.length % 2 ? Uint8Array.from([...b, vr === 'UI' || vr === 'OB' ? 0 : 32]) : b);
+  const el = (g, e, vr, v) => {
+    let b;
+    if (v instanceof Uint8Array) b = v;
+    else if (vr === 'US') { b = new Uint8Array(2); new DataView(b.buffer).setUint16(0, v, true); }
+    else if (vr === 'UL') { b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, v, true); }
+    else b = enc.encode(String(v));
+    b = pad(b, vr);
+    const long = ['OB', 'OW', 'UN', 'SQ', 'UT'].includes(vr);
+    const h = new Uint8Array(long ? 12 : 8), dv = new DataView(h.buffer);
+    dv.setUint16(0, g, true); dv.setUint16(2, e, true); h[4] = vr.charCodeAt(0); h[5] = vr.charCodeAt(1);
+    if (long) dv.setUint32(8, b.length, true); else dv.setUint16(6, b.length, true);
+    return cat([h, b]);
+  };
+  const tagHead = (g, e, n) => { const h = new Uint8Array(8), dv = new DataView(h.buffer); dv.setUint16(0, g, true); dv.setUint16(2, e, true); dv.setUint32(4, n, true); return h; };
+  const item = (els) => { const body = cat(els); return cat([tagHead(0xfffe, 0xe000, body.length), body]); };
+  const sq = (g, e, items) => el(g, e, 'SQ', cat(items));
+  const one = (g, e, els) => sq(g, e, [item(els)]);
+
+  const shared = item([
+    one(0x0020, 0x9116, perFrameIop ? [] : [el(0x20, 0x37, 'DS', iop.join('\\'))]),
+    one(0x0028, 0x9110, [el(0x18, 0x50, 'DS', '0.3'), el(0x28, 0x30, 'DS', ps.join('\\'))]),
+    one(0x0028, 0x9145, perFrameRescale && !sharedRescaleToo ? [] : [el(0x28, 0x1052, 'DS', String(intercept)), el(0x28, 0x1053, 'DS', String(slope)), el(0x28, 0x1054, 'LO', 'HU')])
+  ]);
+  const perFrame = frames.map((fr, f) => item([
+    one(0x0020, 0x9111, [el(0x20, 0x9157, 'UL', f + 1)]),
+    one(0x0020, 0x9113, [el(0x20, 0x32, 'DS', fr.ipp.join('\\'))]),
+    ...(perFrameIop ? [one(0x0020, 0x9116, [el(0x20, 0x37, 'DS', perFrameIop[f].join('\\'))])] : []),
+    ...(perFrameRescale ? [one(0x0028, 0x9145, [el(0x28, 0x1052, 'DS', String(perFrameRescale[f][1])), el(0x28, 0x1053, 'DS', String(perFrameRescale[f][0]))])] : [])
+  ]));
+
+  let pixelEl;
+  if (!lossless) {
+    const T = signed ? Int16Array : Uint16Array, all = new T(rows * cols * frames.length);
+    frames.forEach((fr, f) => all.set(fr.raw, f * rows * cols));
+    pixelEl = el(0x7fe0, 0x10, 'OW', new Uint8Array(all.buffer));
+  } else {
+    const jpegs = frames.map((fr, f) => {
+      let j = jpegLossless(signed ? Uint16Array.from(fr.raw, (v) => v & 0xffff) : fr.raw, rows, cols);
+      if (f === corrupt) j = Uint8Array.from(j.subarray(0, 40));
+      return j.length % 2 ? Uint8Array.from([...j, 0]) : j;
+    });
+    const frags = [], offsets = []; let pos = 0;
+    jpegs.forEach((j) => {
+      offsets.push(pos);
+      const parts = splitFragments ? [j.subarray(0, j.length / 2 & ~1), j.subarray(j.length / 2 & ~1)] : [j];
+      parts.forEach((p) => { frags.push(cat([tagHead(0xfffe, 0xe000, p.length), p])); pos += 8 + p.length; });
+    });
+    const bot = new Uint8Array(withOffsets ? offsets.length * 4 : 0);
+    if (withOffsets) offsets.forEach((o, i) => new DataView(bot.buffer).setUint32(i * 4, o, true));
+    const h = new Uint8Array(12), dv = new DataView(h.buffer);
+    dv.setUint16(0, 0x7fe0, true); dv.setUint16(2, 0x10, true); h[4] = 79; h[5] = 66; dv.setUint32(8, 0xffffffff, true);
+    pixelEl = cat([h, tagHead(0xfffe, 0xe000, bot.length), bot, ...frags, tagHead(0xfffe, 0xe0dd, 0)]);
+  }
+  const ts = lossless ? '1.2.840.10008.1.2.4.70' : '1.2.840.10008.1.2.1';
+  const meta = cat([el(2, 1, 'OB', Uint8Array.from([0, 1])), el(2, 2, 'UI', '1.2.840.10008.5.1.4.1.1.13.1.3'),
+    el(2, 3, 'UI', '1.2.3.77'), el(2, 0x10, 'UI', ts)]);
+  const body = cat([
+    el(8, 0x16, 'UI', '1.2.840.10008.5.1.4.1.1.13.1.3'), el(8, 0x60, 'CS', 'DX'),
+    el(0x10, 0x10, 'PN', 'SENTINEL^MUST-NOT-DISPLAY'), el(0x10, 0x20, 'LO', 'SENTINEL-ID'), el(0x10, 0x30, 'DA', '19000101'),
+    el(0x20, 0x0e, 'UI', '1.2.3.998'),
+    el(0x28, 0x02, 'US', 1), el(0x28, 0x04, 'CS', 'MONOCHROME2'), el(0x28, 0x08, 'IS', String(frames.length)),
+    el(0x28, 0x10, 'US', rows), el(0x28, 0x11, 'US', cols),
+    el(0x28, 0x100, 'US', 16), el(0x28, 0x101, 'US', 16), el(0x28, 0x102, 'US', 15), el(0x28, 0x103, 'US', signed ? 1 : 0),
+    sq(0x5200, 0x9229, [shared]), sq(0x5200, 0x9230, perFrame),
+    pixelEl
+  ]);
+  return cat([new Uint8Array(128), enc.encode('DICM'), el(2, 0, 'UL', meta.length), meta, body]);
+}
+
+{
+  const V = await import('data:text/javascript;base64,' + Buffer.from(viewerSrc).toString('base64'));
+  const load = (list) => { try { return V.loadSeries(list, V.dicomParser, V.Lossless); } catch (e) { return e; } };
+
+  // The encoder and decoder agree exactly, including the extremes: jumps of the
+  // full 16-bit range, and the difference of exactly 32768 the standard codes specially.
+  {
+    const R = 7, C = 9, vals = new Uint16Array(R * C);
+    let seed = 7; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    vals.forEach((_, i) => { vals[i] = [0, 65535, 32768, 1, 65534][i % 5] ^ (rnd() < 0.3 ? Math.floor(rnd() * 65536) : 0); });
+    vals[1] = vals[0] ^ 0x8000;   // a difference of exactly 32768
+    const j = jpegLossless(vals, R, C), dec = new V.Lossless(), back = dec.decode(j.buffer, 0, j.length, 2);
+    ok('lossless JPEG decodes to exactly the values encoded, extremes included',
+      back.length === vals.length && back.every((v, i) => v === vals[i]), [...back.slice(0, 6)].join(',') + ' vs ' + [...vals.slice(0, 6)].join(','));
+  }
+
+  // The phantom again, now as ONE file of frames: small enough to run quickly.
+  const NX = 64, NY = 64, NZ = 60, PX = 0.25, PZ = 0.3, O = [-8, -8, 3];
+  const A = Math.PI / 6, nrm = [-Math.sin(A), Math.cos(A)];
+  const order = [...Array(NZ).keys()].sort((a, b) => ((a * 7919) % 97) - ((b * 7919) % 97));  // frames not in spatial order
+  const frames = order.map((k) => {
+    const raw = new Uint16Array(NX * NY);
+    for (let jy = 0; jy < NY; jy++) for (let ix = 0; ix < NX; ix++) {
+      let accv = 0;
+      for (const ox of [-0.25, 0.25]) for (const oy of [-0.25, 0.25]) for (const oz of [-0.25, 0.25]) {
+        const x = O[0] + (ix + ox) * PX, y = O[1] + (jy + oy) * PX, z = O[2] + (k + oz) * PZ;
+        const across = x * nrm[0] + y * nrm[1];
+        const ridge = Math.abs(across) <= 3.5 && z >= 5 && z <= 17;
+        const canal = across * across + (z - 9) ** 2 <= 2.25;
+        accv += ridge ? (canal ? 0 : 1200) : -1000;
+      }
+      raw[ix + NX * jy] = Math.round(accv / 8 + 1000);
+    }
+    return { ipp: [O[0], O[1], O[2] + k * PZ], raw };
+  });
+  const plain = dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX] });
+  const jpeg = dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], lossless: true });
+
+  const vp = load([plain]), vj = load([jpeg]);
+  ok('a single multi-frame file loads as a volume, frames placed by position', vp.nz === NZ && Math.abs(vp.spacing[2] - PZ) < 1e-9, vp.message);
+  ok('the same scan as lossless JPEG loads identically, voxel for voxel',
+    vj.nz === NZ && vj.hu.length === vp.hu.length && vj.hu.every((v, i) => v === vp.hu[i]), vj.message || (() => { let n = 0, f = -1; vj.hu.forEach((v, i) => { if (v !== vp.hu[i]) { n++; if (f < 0) f = i; } }); return n + ' differ, first ' + f + ': ' + vp.hu[f] + ' vs ' + vj.hu[f] + ' z' + Math.floor(f / (NX * NY)); })());
+  ok('shared rescale is applied (air reads -1000, bone 1200)',
+    Math.abs(V.sampleMm(vj, [0, 0, 11]) - 1200) < 1 && Math.abs(V.sampleMm(vj, [-7, 7, 4]) + 1000) < 1,
+    V.sampleMm(vj, [0, 0, 11]) + ' / ' + V.sampleMm(vj, [-7, 7, 4]));
+  const crossingsJ = (a, b, thr) => {
+    const L = V.distanceMm(a, b), n = Math.round(L / 0.01), out = [];
+    let prev = V.sampleMm(vj, a) >= thr;
+    for (let i = 1; i <= n; i++) {
+      const tt = i / n, v = V.sampleMm(vj, a.map((x, k) => x + (b[k] - x) * tt)) >= thr;
+      if (v !== prev) out.push(tt * L);
+      prev = v;
+    }
+    return out;
+  };
+  const acr = [-Math.sin(A), Math.cos(A), 0];
+  const wj = crossingsJ([0, 0, 14].map((c, k) => c - acr[k] * 6), [0, 0, 14].map((c, k) => c + acr[k] * 6), 100);
+  ok('on the JPEG scan, ridge width reads 7.0 mm (within 0.1)', wj.length === 2 && Math.abs(wj[1] - wj[0] - 7) < 0.1, JSON.stringify(wj));
+  const crestJ = crossingsJ([0, 0, 20], [0, 0, 6], 100)[0], roofJ = crossingsJ([0, 0, 20], [0, 0, 6], 600)[1];
+  ok('on the JPEG scan, crest to canal reads 6.5 mm (within 0.1)', Math.abs(roofJ - crestJ - 6.5) < 0.1, (roofJ - crestJ).toFixed(3));
+  ok('no identifying value from a multi-frame file reaches anything returned',
+    !/SENTINEL|19000101/.test(JSON.stringify({ ...vj, hu: undefined })));
+
+  const same = (v) => v && v.hu && v.hu.length === vp.hu.length && v.hu.every((x, i) => x === vp.hu[i]);
+  ok('a frame split across two fragments, with an offset table, still loads identically',
+    same(load([dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], lossless: true, splitFragments: true, withOffsets: true })])));
+  ok('split fragments with no offset table: frames are found from their JPEG markers',
+    same(load([dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], lossless: true, splitFragments: true })])));
+
+  const per = load([dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], perFrameRescale: frames.map(() => [1, -1000]) })]);
+  ok('rescale given per frame, not shared, is found', same(per), per && per.message);
+  const over = load([dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], sharedRescaleToo: true, perFrameRescale: frames.map(() => [1, -1024]) })]);
+  ok('a per-frame rescale overrides the shared one', over && over.hu && over.hu.every((v, i) => v === vp.hu[i] - 24), over && over.message);
+  const perIop = load([dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], perFrameIop: frames.map(() => [1, 0, 0, 0, 1, 0]) })]);
+  ok('orientation given per frame, not shared, is found', same(perIop), perIop && perIop.message);
+  const tilted = load([dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], perFrameIop: frames.map((_, f) => f === 5 ? [0.9, 0.43589, 0, -0.43589, 0.9, 0] : [1, 0, 0, 0, 1, 0]) })]);
+  ok('one frame tilted differently from the rest is refused', tilted instanceof V.ScanError && /tilted/.test(tilted.message), tilted && tilted.message);
+
+  const bad = load([dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], lossless: true, corrupt: 17 })]);
+  ok('a damaged compressed frame is refused, saying so, not drawn as noise',
+    bad instanceof V.ScanError && /could not be decompressed/.test(bad.message), bad && bad.message);
+
+  const gap = load([dicomMulti({ rows: NY, cols: NX, frames: frames.filter((_, i) => i !== 11), ps: [PX, PX], lossless: true })]);
+  ok('a multi-frame scan with a missing frame is refused as uneven, not stretched', gap instanceof V.ScanError && /uneven/.test(gap.message), gap && gap.message);
+
+  const noDecoder = (() => { try { return V.loadSeries([jpeg], V.dicomParser); } catch (e) { return e; } })();
+  ok('without the decoder, a JPEG file is set aside as compressed, not misread', noDecoder instanceof V.ScanError && /compressed in a format/.test(noDecoder.message), noDecoder && noDecoder.message);
+
+  // Single-frame lossless JPEG files, one per slice (another common export).
+  const perSlice = frames.filter((fr) => fr.ipp[2] < O[2] + 8 * PZ - 1e-6)
+    .map((fr) => dicomMulti({ rows: NY, cols: NX, frames: [fr], ps: [PX, PX], lossless: true }));
+  const vs = load(perSlice);
+  ok('lossless JPEG exported one file per slice also loads', vs && vs.nz === 8, vs && vs.message);
+
+  const signedScan = load([dicomMulti({ rows: 4, cols: 4, lossless: true, signed: true, intercept: 0,
+    frames: [0, 1, 2].map((k) => ({ ipp: [0, 0, k * 0.5], raw: new Int16Array(16).fill(-700) })), ps: [0.5, 0.5] })]);
+  ok('signed pixel values survive lossless JPEG (-700 stays -700)', signedScan && signedScan.hu && signedScan.hu.every((v) => v === -700), signedScan && (signedScan.message || signedScan.hu[0]));
 }
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
