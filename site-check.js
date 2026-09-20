@@ -222,7 +222,9 @@ const PREVIEW = [{ name: "Implant", dir: "implant", href: "/implant/", prefix: "
 for (const tool of PREVIEW) {
   const index = read(path.join(root, tool.dir, "index.html"));
   if (!index) { notes.push(`${tool.name}: not present in this tree, skipped`); continue; }
-  if (!/<meta name="robots" content="noindex/.test(index)) {
+  // HTML comments removed first: a robots tag that has been commented out is not a robots tag.
+  const live = index.replace(/<!--[\s\S]*?-->/g, "");
+  if (!/<meta name="robots" content="noindex/.test(live)) {
     problems.push(`${tool.name}: is in preview but has no noindex meta tag. It would be indexed before its content is reviewed.`);
   }
   if (sitemap && sitemap.includes(tool.href)) {
@@ -244,6 +246,13 @@ for (const tool of PREVIEW) {
   }
   const marked = index.match(/href="([^"]+)"\s+aria-current="page"/);
   if (!marked || marked[1] !== tool.href) problems.push(`${tool.name}: its own switcher link is not marked aria-current="page".`);
+  // Unlisted means unlisted: no other page may link to it until it launches.
+  for (const other of TOOLS.concat([GATED])) {
+    const page = read(path.join(root, other.dir, "index.html"));
+    if (page && page.includes(`href="${tool.href}"`)) {
+      problems.push(`${other.name}: links to ${tool.href}, which is still in preview. Remove the link, or launch it (move it into TOOLS).`);
+    }
+  }
   notes.push(`${tool.name}: in preview (noindex, unlisted), cache "${cache}"`);
 }
 
