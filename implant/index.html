@@ -270,7 +270,9 @@
   .checks li:before{position:absolute;left:0;top:8px;font-family:var(--mono);font-size:12px;font-weight:600;}
   .checks li.ok:before{content:"OK";color:#1C6B3A;}
   .checks li.flag:before{content:"!";color:var(--clay);font-size:15px;left:6px;}
-  @media print{.preview{display:none !important;}}
+  .plantext{width:100%;font-family:var(--mono);font-size:13px;line-height:1.5;border:1.5px solid var(--line);border-radius:8px;padding:10px;color:var(--ink);}
+  /* The preview banner prints: a plan on paper must say it came from a draft tool. */
+  @media print{.preview{border:1px solid #999;}}
 </style>
 </head>
 <body>
@@ -319,10 +321,11 @@ function siteInfo(t) {
   info.aesthetic = upper && n <= 4;
   // What limits available height at this site, and whether it is a structure
   // that must not be reached (a nerve) or one that can be augmented (a floor).
-  if (upper && posterior) info.limit = { key: "sinus", label: "the sinus floor", vital: false };
-  else if (upper) info.limit = { key: "nasal", label: "the nasal floor", vital: false };
+  // `bone` is how the bone between the crest and that structure is described.
+  if (upper && posterior) info.limit = { key: "sinus", label: "the sinus floor", bone: "the bone below the sinus floor", vital: false };
+  else if (upper) info.limit = { key: "nasal", label: "the nasal floor", bone: "the bone below the nasal floor", vital: false };
   else if (posterior) info.limit = { key: "canal", label: n <= 5 ? "the mental foramen or canal" : "the inferior alveolar canal", vital: true };
-  else info.limit = { key: "border", label: "the inferior border", vital: false };
+  else info.limit = { key: "border", label: "the inferior border", bone: "the bone above the inferior border", vital: false };
   return info;
 }
 
@@ -486,18 +489,34 @@ var SECTIONS = [
 /* ---------- state ---------- */
 var answers = {};     // qid -> option value, or text for mm/tooth
 var step = 0, started = false, showResult = false, firstRender = true;
+var siteCleared = false;  // show, once, that changing the tooth cleared the old site's findings
+
+/* Everything that belongs to one site rather than to the patient. A bone height
+   measured to the canal is not a height to the sinus floor, and a phenotype seen
+   at 46 is not the phenotype at 16: when the tooth changes, all of it goes. */
+var SITE_KEYS = ["timing", "smile", "phenotype", "km", "md", "bl", "ht", "rest", "undercut", "sinus", "dia", "len"];
 
 function esc(s) { return String(s).replace(/[&<>"']/g, function (c) {
   return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
 
-/* A measurement in mm, or null. Accepts "6,5". Anything outside 0-40 mm is
-   refused rather than guessed at: nobody measured a 65 mm ridge. */
+/* A measurement in mm, or null when the box is empty. Accepts "6,5" and
+   "6.5 mm". Anything else is refused rather than guessed at: "12..5", "10-12"
+   and "4.1/4.3" are not measurements, and nobody measured a 65 mm ridge. */
 function mm(v) {
   if (v === undefined || v === null || String(v).trim() === "") return null;
-  var x = parseFloat(String(v).replace(",", "."));
-  if (!isFinite(x) || x <= 0 || x > 40) return NaN;
+  var t = String(v).trim().replace(/\s*mm$/i, "").replace(",", ".");
+  if (!/^(\d+(\.\d+)?|\.\d+)$/.test(t)) return NaN;
+  var x = parseFloat(t);
+  if (!(x > 0) || x > 40) return NaN;
   return x;
 }
+
+/* Clearances are compared at 0.01 mm, and shown at the same precision, so the
+   figure on screen can never disagree with the verdict beside it. Unrounded,
+   (6.6 - 3.6) / 2 is 1.4999999999999998 and would fail a 1.5 mm check. */
+var MM_ERROR = "Enter one measurement in millimetres, above 0 and up to 40, such as 6.5.";
+function r2(x) { return Math.round(x * 100) / 100; }
+function fmt(x) { return r2(x).toFixed(2).replace(/(\.\d)0$/, "$1"); }
 
 function currentSite() { return answers.tooth ? siteInfo(answers.tooth) : null; }
 function applies(q, s) { return !q.when || (s && q.when(s)); }
@@ -521,6 +540,7 @@ function evaluate(a) {
     });
   });
 
+  if (!s) out.unknown.unshift("Which tooth is being replaced?");
   if (s && s.aesthetic) { out.score += 2; out.reasons.push({ pts: 2, text: "Site in the aesthetic zone" }); }
 
   var m = {};
@@ -531,46 +551,61 @@ function evaluate(a) {
   out.measures = m;
 
   if (m.rest !== null && m.rest < DRAFT.restorativeMin) {
-    out.checks.push({ ok: false, key: "rest", text: "Restorative space " + m.rest + " mm is under " + DRAFT.restorativeMin + " mm.", pts: 1 });
+    out.checks.push({ ok: false, key: "rest", text: "Restorative space " + fmt(m.rest) + " mm is under " + fmt(DRAFT.restorativeMin) + " mm.", pts: 1 });
   }
 
   // The proposed implant, against each measurement that was taken. A check is
   // only made when both numbers exist: a blank is never read as a pass.
   if (m.dia !== null) {
     if (m.md !== null) {
-      var side = (m.md - m.dia) / 2;
+      var side = r2((m.md - m.dia) / 2);
       out.checks.push({ ok: side >= DRAFT.toothClearance, key: "md", pts: 2,
-        text: "Clearance to each adjacent tooth: " + fmt(side) + " mm (needs " + DRAFT.toothClearance + " mm)." });
+        text: "Clearance to each adjacent tooth: " + fmt(side) + " mm (needs " + fmt(DRAFT.toothClearance) + " mm)." +
+          (side < DRAFT.toothClearance ? " A narrower implant would be needed." : "") });
     }
     if (m.bl !== null) {
-      var wall = (m.bl - m.dia) / 2;
+      var wall = r2((m.bl - m.dia) / 2);
       out.checks.push({ ok: wall >= DRAFT.wallClearance, key: "bl", pts: 2,
-        text: "Bone left buccally and lingually, implant centred: " + fmt(wall) + " mm each side (needs " + DRAFT.wallClearance + " mm)." +
+        text: "Bone left buccally and lingually, implant centred: " + fmt(wall) + " mm each side (needs " + fmt(DRAFT.wallClearance) + " mm)." +
           (wall < DRAFT.wallClearance ? " Grafting, or a narrower implant, would be needed." : "") });
     }
   }
   if (m.len !== null && m.ht !== null && s) {
     if (s.limit.vital) {
-      var spare = m.ht - m.len;
-      out.checks.push({ ok: spare >= DRAFT.vitalClearance, key: "ht", pts: 3,
-        text: "Apex to " + s.limit.label + ": " + fmt(spare) + " mm (needs " + DRAFT.vitalClearance + " mm)." +
+      var spare = r2(m.ht - m.len);
+      out.checks.push({ ok: spare >= DRAFT.vitalClearance, key: "ht", pts: 3, vital: true,
+        text: "Apex to " + s.limit.label + ": " + fmt(spare) + " mm (needs " + fmt(DRAFT.vitalClearance) + " mm)." +
           (spare < DRAFT.vitalClearance ? " Choose a shorter implant." : "") });
     } else {
-      var over = m.len - m.ht;
+      var over = r2(m.len - m.ht);
       out.checks.push({ ok: over <= 0, key: "ht", pts: over > 0 ? 3 : 0,
         text: over > 0
-          ? "The implant is " + fmt(over) + " mm longer than the bone below " + s.limit.label + "." +
+          ? "The implant is " + fmt(over) + " mm longer than " + s.limit.bone + "." +
             (s.limit.key === "sinus" ? " Sinus floor elevation, or a shorter implant, would be needed." : " A shorter implant would be needed.")
-          : "The implant fits within the bone below " + s.limit.label + "." });
+          : "The implant fits within " + s.limit.bone + "." });
     }
   }
   out.checks.forEach(function (c) { if (!c.ok) { out.score += c.pts; out.reasons.push({ pts: c.pts, text: c.text }); } });
 
   var band = DRAFT.bands.filter(function (b) { return out.score <= b.max; })[0];
-  out.rating = out.hard.length ? "Outside routine placement" : band.label;
+  // A proposed implant that reaches into the nerve clearance is not a case to
+  // rate: it is a plan to change. No score may call it straightforward.
+  out.vitalBreach = out.checks.some(function (c) { return c.vital && !c.ok; });
+  out.rating = out.hard.length ? "Outside routine placement"
+    : (out.vitalBreach ? "Revise the proposed implant" : band.label);
   return out;
 }
-function fmt(x) { return (Math.round(x * 10) / 10).toFixed(1); }
+
+var MEASURE_NAMES = { md: "Space between the adjacent teeth", bl: "Bone width", ht: "Available bone height",
+  rest: "Restorative space", dia: "Implant diameter", len: "Implant length" };
+function bandsText() {
+  var lo = 0;
+  return DRAFT.bands.map(function (b) {
+    var t = b.max === Infinity ? lo + " or more " + b.label.toLowerCase()
+      : (lo === b.max ? String(lo) : (lo === 0 ? "up to " + b.max : lo + " to " + b.max)) + " " + b.label.toLowerCase();
+    lo = b.max + 1; return t;
+  }).join(", ");
+}
 
 /* ---------- consent points: the 20 implant-consult items AI Notes checks for,
    so the conversation this plan leads to is the one that tool listens for. ---------- */
@@ -648,7 +683,7 @@ function questionHTML(q, s) {
     out += '<label class="label" for="in-' + q.id + '">' + esc(label) + '</label>';
     out += '<div class="num"><input id="in-' + q.id + '" data-mm="' + q.id + '" type="text" inputmode="decimal" ' +
       'autocomplete="off" placeholder="mm" value="' + esc(val) + '" aria-describedby="err-' + q.id + '" /><span class="unit">mm</span></div>';
-    out += '<div class="err" id="err-' + q.id + '">' + (bad ? "Enter a measurement between 0 and 40 mm." : "") + '</div>';
+    out += '<div class="err" id="err-' + q.id + '">' + (bad ? MM_ERROR : "") + '</div>';
   } else {
     out += '<span class="label">' + esc(q.label) + '</span><div class="opts">';
     q.opts.forEach(function (o) {
@@ -679,6 +714,8 @@ function sectionHTML() {
   out += '<h2 class="q" tabindex="-1">' + esc(sec.title) + '</h2>';
   if (sec.helper) out += '<p class="helper">' + esc(sec.helper) + '</p>';
   if (sec.id !== "site" && !s) out += '<div class="card warn"><p class="setting">No tooth selected yet. Some questions depend on the site.</p></div>';
+  if (sec.id === "site" && siteCleared) out += '<div class="card warn" role="status"><p class="setting">The tooth changed, so the site ' +
+    'findings, measurements and proposed implant recorded for the previous tooth were cleared. They do not apply to this one.</p></div>';
   sec.qs.forEach(function (q) { if (applies(q, s)) out += questionHTML(q, s); });
   out += '<div class="nav noprint">';
   if (step > 0) out += '<button type="button" class="btn" data-act="back">Back</button>';
@@ -686,17 +723,28 @@ function sectionHTML() {
   return out;
 }
 
+/* The height is only meaningful with the structure it was measured to. */
+function measureName(k, s) {
+  return k === "ht" ? "Available bone height, crest to " + (s ? s.limit.label : "the limiting structure (no tooth selected)")
+    : MEASURE_NAMES[k];
+}
+
 function planText(r) {
   var L = [];
   L.push("IMPLANT CASE ASSESSMENT (v" + VERSION + ")");
+  L.push("PREVIEW: DRAFT FIGURES, NOT FOR CLINICAL USE");
   if (r.site) L.push("Site: " + r.site.tooth + " — " + siteLine(r.site));
+  else L.push("Site: not selected");
   L.push("Complexity: " + r.rating + (r.hard.length ? "" : " (score " + r.score + ")"));
   r.hard.forEach(function (x) { L.push("OUTSIDE ROUTINE PLACEMENT: " + x.q + " — " + x.t + ". " + x.adv.action); });
-  var m = r.measures, names = { md: "Mesiodistal space", bl: "Ridge width", ht: "Available height", rest: "Restorative space", dia: "Proposed implant diameter", len: "Proposed implant length" };
-  var took = Object.keys(names).filter(function (k) { return m[k] !== null; });
+  var m = r.measures;
+  var took = Object.keys(MEASURE_NAMES).filter(function (k) { return m[k] !== null; });
   if (took.length) {
     L.push("Measurements (clinician, from CBCT and clinical):");
-    took.forEach(function (k) { L.push("  " + names[k] + ": " + m[k] + " mm"); });
+    took.forEach(function (k) { L.push("  " + measureName(k, r.site) + ": " + m[k] + " mm"); });
+  }
+  if (r.invalid.length) {
+    L.push("Not used, not valid measurements: " + r.invalid.map(function (k) { return measureName(k, r.site); }).join("; "));
   }
   if (r.checks.length) {
     L.push("Checks:");
@@ -720,9 +768,13 @@ function resultHTML() {
     out += '<div class="card alert"><p class="grade">Outside routine placement</p><div class="gradesub">One or more findings mean this case should not go ahead as a routine placement. What each one needs:</div><ul class="because">';
     r.hard.forEach(function (x) { out += '<li><strong>' + esc(x.t) + '.</strong> ' + esc(x.adv.action) + '</li>'; });
     out += '</ul></div>';
+  } else if (r.vitalBreach) {
+    out += '<div class="card alert"><p class="grade">Revise the proposed implant</p><div class="gradesub">As entered, the implant ' +
+      'reaches into the clearance to ' + esc(r.site.limit.label) + '. Change the implant before rating the case. ' +
+      'Complexity score so far ' + r.score + '.</div></div>';
   } else {
     out += '<div class="card"><p class="grade">' + esc(r.rating) + '</p>' +
-      '<div class="gradesub">Complexity score ' + r.score + ' (draft bands: up to 3 straightforward, 4 to 7 advanced, 8 or more complex).</div>';
+      '<div class="gradesub">Complexity score ' + r.score + ' (draft bands: ' + esc(bandsText()) + ').</div>';
     if (r.reasons.length) {
       out += '<ul class="because">';
       r.reasons.forEach(function (x) { out += '<li>' + esc(x.text) + ' <span class="pts">+' + x.pts + '</span></li>'; });
@@ -731,11 +783,27 @@ function resultHTML() {
     out += '</div>';
   }
 
+  if (!r.site) {
+    out += '<div class="card warn"><p class="setting"><strong>No tooth was selected.</strong> The questions that depend on the ' +
+      'site were not asked, and the implant length could not be checked against the bone height.</p></div>';
+  }
+  if (r.invalid.length) {
+    out += '<div class="card warn"><p class="setting"><strong>Not used:</strong> ' +
+      esc(r.invalid.map(function (k) { return measureName(k, r.site) + ' ("' + answers[k] + '")'; }).join("; ")) +
+      '. These are not valid measurements, so nothing was checked against them. Go back and correct them.</p></div>';
+  }
   if (r.unknown.length) {
     out += '<div class="card warn"><p class="setting"><strong>' + r.unknown.length + ' item' + (r.unknown.length === 1 ? ' was' : 's were') +
       ' not recorded.</strong> The rating reflects only what was recorded.</p><ul class="flaglist">';
     r.unknown.forEach(function (u) { out += '<li>' + esc(u) + '</li>'; });
     out += '</ul></div>';
+  }
+
+  var took = Object.keys(MEASURE_NAMES).filter(function (k) { return r.measures[k] !== null; });
+  if (took.length) {
+    out += '<h3 class="block">Measurements recorded</h3><ul class="flaglist">';
+    took.forEach(function (k) { out += '<li>' + esc(measureName(k, r.site)) + ': ' + esc(String(r.measures[k])) + ' mm</li>'; });
+    out += '</ul>';
   }
 
   out += '<h3 class="block">Checks against the proposed implant</h3>';
@@ -764,8 +832,10 @@ function resultHTML() {
     '<button type="button" class="btn" data-act="print">Print</button>' +
     '<button type="button" class="btn" data-act="back">Back to questions</button>' +
     '<button type="button" class="btn" data-act="restart">Start again</button></div>';
-  out += '<p class="attrib">Draft clearances used: ' + DRAFT.toothClearance + ' mm to adjacent roots, ' + DRAFT.wallClearance +
-    ' mm of bone buccally and lingually, ' + DRAFT.vitalClearance + ' mm from the apex to a nerve, ' + DRAFT.restorativeMin +
+  out += '<div id="copy-fallback" class="noprint" hidden><p class="helper">Copying is not available in this browser. ' +
+    'The plan is below: select it and copy it by hand.</p><textarea id="plan-text" readonly rows="12" class="plantext"></textarea></div>';
+  out += '<p class="attrib">Draft clearances used: ' + fmt(DRAFT.toothClearance) + ' mm to adjacent roots, ' + fmt(DRAFT.wallClearance) +
+    ' mm of bone buccally and lingually, ' + fmt(DRAFT.vitalClearance) + ' mm from the apex to a nerve, ' + fmt(DRAFT.restorativeMin) +
     ' mm restorative space. This summary supports the treating clinician’s plan and does not replace it. It records no patient identifiers and stores nothing.</p>';
   return out;
 }
@@ -773,8 +843,18 @@ function resultHTML() {
 function viewKey() { return !started ? "cover" : (showResult ? "result" : "step-" + step); }
 var lastView = null;
 
+/* Which control has focus, as a selector that finds its replacement after a
+   re-render. Without this, every answer threw keyboard focus back to the top. */
+function focusKey() {
+  var a = document.activeElement;
+  if (!a || a === document.body) return null;
+  if (a.dataset && a.dataset.q) return '[data-q="' + a.dataset.q + '"][data-v="' + a.dataset.v + '"]';
+  if (a.id) return "#" + a.id;
+  return null;
+}
+
 function render() {
-  var scrollBefore = window.scrollY;
+  var scrollBefore = window.scrollY, keep = focusKey();
   h('<div class="shell">' + (!started ? coverHTML() : (showResult ? resultHTML() : sectionHTML())) + '</div>');
   var view = viewKey(), changed = view !== lastView;
   lastView = view;
@@ -783,7 +863,18 @@ function render() {
     var head = document.querySelector('#root h2[tabindex="-1"], #root h1[tabindex="-1"]');
     if (head) head.focus({ preventScroll: true });
     window.scrollTo(0, 0);
-  } else window.scrollTo(0, scrollBefore);
+  } else {
+    var again = keep && document.querySelector("#root " + keep);
+    if (again) again.focus({ preventScroll: true });
+    window.scrollTo(0, scrollBefore);
+  }
+}
+
+function copyByHand(text) {
+  var box = document.getElementById("copy-fallback"), area = document.getElementById("plan-text");
+  if (!box || !area) return;
+  area.value = text; box.hidden = false;
+  area.focus(); area.select();
 }
 
 /* ---------- events ---------- */
@@ -792,6 +883,7 @@ document.addEventListener("click", function (e) {
   if (!t) return;
   if (t.dataset.q) { answers[t.dataset.q] = t.dataset.v; render(); return; }
   var act = t.dataset.act;
+  if (act === "begin" || act === "next" || act === "back" || act === "restart") siteCleared = false;
   if (act === "begin") { started = true; render(); }
   else if (act === "next") { if (step === SECTIONS.length - 1) showResult = true; else step++; render(); }
   else if (act === "back") { if (showResult) { showResult = false; step = SECTIONS.length - 1; } else if (step > 0) step--; render(); }
@@ -800,15 +892,27 @@ document.addEventListener("click", function (e) {
   else if (act === "copy") {
     var text = planText(evaluate(answers));
     var done = function () { t.textContent = "Copied"; setTimeout(function () { t.textContent = "Copy plan to notes"; }, 1600); };
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { t.textContent = "Copy failed — select and copy by hand"; });
+    // Never fail silently: an unchanged clipboard would paste the previous
+    // patient's plan, or whatever was copied last.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { copyByHand(text); });
+    } else copyByHand(text);
   }
 });
 
 document.addEventListener("change", function (e) {
   if (e.target.id === "tooth") {
-    answers.tooth = e.target.value || undefined;
-    // Answers to questions that no longer apply to the new site are dropped,
-    // so a sinus finding cannot follow the plan to a lower tooth.
+    var before = answers.tooth, after = e.target.value || undefined;
+    if (after === before) return;
+    answers.tooth = after;
+    // A different tooth is a different site: everything recorded for the old
+    // one goes, and the clinician is told. Patient factors stay.
+    if (before !== undefined) {
+      var had = SITE_KEYS.some(function (k) { return answers[k] !== undefined && answers[k] !== ""; });
+      SITE_KEYS.forEach(function (k) { delete answers[k]; });
+      siteCleared = had;
+    }
+    // And no answer survives to a question the new site does not ask.
     var s = currentSite();
     SECTIONS.forEach(function (sec) { sec.qs.forEach(function (q) { if (!applies(q, s)) delete answers[q.id]; }); });
     render();
@@ -820,7 +924,7 @@ document.addEventListener("input", function (e) {
   if (!k) return;
   answers[k] = e.target.value;
   var err = document.getElementById("err-" + k);
-  if (err) err.textContent = e.target.value !== "" && isNaN(mm(e.target.value)) ? "Enter a measurement between 0 and 40 mm." : "";
+  if (err) err.textContent = e.target.value !== "" && isNaN(mm(e.target.value)) ? MM_ERROR : "";
 });
 
 render();
@@ -833,7 +937,7 @@ window.addEventListener("beforeunload", function (e) {
 });
 
 // For the test suite: the assessment logic, with no access to anything else.
-window.__implant = { evaluate: evaluate, siteInfo: siteInfo, mm: mm, planText: planText, DRAFT: DRAFT, SECTIONS: SECTIONS };
+window.__implant = { evaluate: evaluate, siteInfo: siteInfo, mm: mm, fmt: fmt, planText: planText, DRAFT: DRAFT, SECTIONS: SECTIONS };
 
 if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
   window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
