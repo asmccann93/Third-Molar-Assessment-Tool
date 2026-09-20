@@ -10,14 +10,14 @@ figure in it is a draft awaiting the clinical lead's review. `site-check.js`
 | --- | --- |
 | `index.html` | The assessment. Self-contained, no build step, like ASA. |
 | `sw.js` | Offline cache, prefix `imp-`. Bump `CACHE` whenever `index.html` or `viewer.js` changes (CI checks both). |
-| `viewer.js` | CBCT viewer core plus dicom-parser, built from `src/`. Loaded only when a scan is opened. |
-| `src/viewer-core.js` | Source of the viewer core: loads a DICOM series in the browser, cuts planes through it, converts image points to millimetres. It never reads the scan for the clinician. |
+| `viewer.js` | CBCT viewer core plus dicom-parser and a lossless JPEG decoder, built from `src/`. Loaded only when a scan is opened. |
+| `src/viewer-core.js` | Source of the viewer core: loads a DICOM series in the browser (a folder of slices, or one multi-frame file; uncompressed or lossless JPEG), cuts planes through it, converts image points to millimetres. It never reads the scan for the clinician. |
 | `src/viewer-entry.js` | Build entry. |
 
 ## Building `viewer.js`
 
 ```
-npm install dicom-parser@1.8.21 esbuild --no-save
+npm install dicom-parser@1.8.21 jpeg-lossless-decoder-js@2.1.2 esbuild --no-save
 npx esbuild implant/src/viewer-entry.js --bundle --format=esm --platform=browser \
   --minify --legal-comments=inline --outfile=implant/viewer.js
 ```
@@ -29,12 +29,21 @@ Then bump `CACHE` in `sw.js` and run `node tests/implant.mjs`.
 `tests/implant.mjs` covers the assessment logic and the page in jsdom. It also
 builds a synthetic CBCT phantom with known geometry and measures it through
 `viewer.js`: a 7.0 mm ridge at 30° to the scanner axes and a canal 13.5 mm
-below the crest. No scan of any person is used or needed.
+below the crest. The same phantom is also written as one multi-frame file,
+uncompressed and as lossless JPEG (by an encoder in the test, written from
+T.81), laid out as the Carestream CS 8100 3D exports. No scan of any person is
+used or needed.
 
 ## Third-party
 
 `viewer.js` includes [dicom-parser](https://github.com/cornerstonejs/dicomParser)
-(MIT licence, © Chris Hafey). Its licence banner is kept in the bundle.
+(MIT licence, © Chris Hafey) and
+[jpeg-lossless-decoder-js](https://github.com/rii-mango/JPEGLosslessDecoderJS)
+(MIT licence, © RII-UTHSCSA). Their licence banners are kept in the bundle.
+
+The decoder stops a pixel or two early when the image's end marker falls inside
+its read-ahead. `padBeforeEnd()` in the viewer core puts fill bits before the
+marker so it never does; the tests fail without it.
 
 ## Launch checklist
 

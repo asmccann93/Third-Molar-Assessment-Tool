@@ -2,7 +2,7 @@
    Bump CACHE whenever index.html changes, or installed browsers keep serving
    the old copy. Only this tool's caches are removed on activate: the other
    tools share this origin and own their own. */
-const CACHE = "imp-v0-2";
+const CACHE = "imp-v0-3";
 const ASSETS = ["./", "./index.html", "./viewer.js"];
 
 self.addEventListener("install", (e) => {
