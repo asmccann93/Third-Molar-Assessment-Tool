@@ -213,10 +213,13 @@ for (const tool of TOOLS) {
 }
 
 /* --- 5. tools in preview ----------------------------------------------------
-   A tool being built lives at its final path but is not yet a member of TOOLS:
-   it is not in the other pages' switchers, not in the sitemap, and must not be
-   indexed. Absent is fine. Present means: noindex on, out of the sitemap, its
-   own cache with its own prefix, nothing stored, and a complete bar of its own.
+   A tool being built lives at its final path but is not yet a member of TOOLS.
+   Since 20 September 2026 a preview tool IS linked from every switcher, at the
+   clinical lead's request, so colleagues can reach it; it stays out of the
+   sitemap and out of the search engines, and it keeps its preview banner, so
+   nobody arrives at draft figures from a search. Absent is fine. Present
+   means: noindex on, out of the sitemap, its own cache with its own prefix,
+   nothing stored, a complete bar of its own, and a link in every other bar.
    At launch, move the entry into TOOLS and delete it from here. */
 const PREVIEW = [{ name: "Implant", dir: "implant", href: "/implant/", prefix: "imp-" }];
 for (const tool of PREVIEW) {
@@ -246,14 +249,21 @@ for (const tool of PREVIEW) {
   }
   const marked = index.match(/href="([^"]+)"\s+aria-current="page"/);
   if (!marked || marked[1] !== tool.href) problems.push(`${tool.name}: its own switcher link is not marked aria-current="page".`);
-  // Unlisted means unlisted: no other page may link to it until it launches.
+  // Linked from every other bar, exactly like a launched tool: the same
+  // failure mode as check 4, so it is checked the same way.
   for (const other of TOOLS.concat([GATED])) {
     const page = read(path.join(root, other.dir, "index.html"));
-    if (page && page.includes(`href="${tool.href}"`)) {
-      problems.push(`${other.name}: links to ${tool.href}, which is still in preview. Remove the link, or launch it (move it into TOOLS).`);
+    if (page && !page.includes(`href="${tool.href}"`)) {
+      problems.push(`${other.name}: the switcher has no link to ${tool.name} (${tool.href}). That tool will vanish from the bar on this page only.`);
     }
   }
-  notes.push(`${tool.name}: in preview (noindex, unlisted), cache "${cache}"`);
+  // The banner is what tells a colleague the figures are drafts. It is the
+  // whole reason the tool can be listed at all while it is in preview.
+  const banner = live.match(/<div class="preview"[^>]*>([\s\S]*?)<\/div>/);
+  if (!banner || !/not for clinical use/i.test(banner[1]) || !/draft/i.test(banner[1])) {
+    problems.push(`${tool.name}: is linked from every bar but its preview banner is gone. Restore it, or launch the tool properly (move it into TOOLS).`);
+  }
+  notes.push(`${tool.name}: in preview (noindex, not in the sitemap, linked from every bar), cache "${cache}"`);
 }
 
 /* --- report --- */
@@ -277,5 +287,5 @@ if (problems.length) {
   process.exit(1);
 }
 
-console.log("\n  Site check passed: hub and four tools, switchers complete, caches in step,\n  AI Notes linked from every bar, gated and storing nothing.\n");
+console.log("\n  Site check passed: hub and four tools, switchers complete, caches in step,\n  AI Notes and the implant preview linked from every bar, gated and storing nothing.\n");
 process.exit(0);
