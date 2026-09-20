@@ -64,6 +64,12 @@ jobs:
           npm install jsdom --no-save --silent
           node tests/page.mjs
 
+      # The implant tool (in preview) and its CBCT viewer core. The viewer is
+      # proved on a synthetic phantom the test builds itself, so no scan of any
+      # person is needed here or anywhere in the repo.
+      - name: Implant tool, in jsdom, and the viewer on a phantom
+        run: node tests/implant.mjs
+
       - name: Cache names must move when a tool changes
         run: |
           before=$(git rev-parse HEAD~1 2>/dev/null || echo "")
@@ -75,7 +81,7 @@ jobs:
           # time the page is edited, because the matching sw.js has no reason to
           # change. site-check.js asserts the inverse for that path instead:
           # that no cache exists. Do not "fix" this by adding it.
-          for dir in "." "third-molar" "sedation" "local-anaesthetic" "asa-assessment"; do
+          for dir in "." "third-molar" "sedation" "local-anaesthetic" "asa-assessment" "implant"; do
             if [ "$dir" = "." ]; then idx="index.html"; sw="sw.js";
             else idx="$dir/index.html"; sw="$dir/sw.js"; fi
             if [ ! -f "$idx" ]; then continue; fi
@@ -90,6 +96,13 @@ jobs:
               fi
             fi
           done
+          # The implant worker also caches viewer.js, so that file moving needs a bump too.
+          if [ -f implant/viewer.js ] && ! git diff --quiet "$before" HEAD -- implant/viewer.js; then
+            if git diff --quiet "$before" HEAD -- implant/sw.js; then
+              echo "FAIL  implant/viewer.js changed but implant/sw.js did not."
+              fail=1
+            fi
+          fi
           exit $fail
 
   canary:
