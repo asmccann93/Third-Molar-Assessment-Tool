@@ -21,12 +21,13 @@
    module has no import to resolve.
    ========================================================================== */
 
-// Uncompressed transfer syntaxes. Anything else is refused with a message that
-// says so, rather than drawn as noise.
+// Uncompressed transfer syntaxes. Anything else is set aside with a reason,
+// rather than drawn as noise.
 var SUPPORTED_TS = {
   "1.2.840.10008.1.2": "Implicit VR Little Endian",
   "1.2.840.10008.1.2.1": "Explicit VR Little Endian"
 };
+var IMPLICIT_LE = "1.2.840.10008.1.2";
 
 function num(ds, tag, i) {
   var s = ds.string(tag);
@@ -45,41 +46,57 @@ function cross(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[
 function dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
 function sub(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
 function len(a) { return Math.sqrt(dot(a, a)); }
+function unit(a) { var l = len(a); return l > 0 && isFinite(l) ? [a[0]/l, a[1]/l, a[2]/l] : null; }
 
 export class ScanError extends Error {}
 
-/* One file -> the geometry and pixels of one slice, or null if it is not an
-   image slice (a DICOMDIR, a report, a thumbnail). */
+// Why a file was set aside, in words for the clinician. The first reason that
+// accounts for the files is what they are told if nothing usable is left.
+var SKIP = {
+  notDicom: "not DICOM files",
+  noImage: "DICOM files without an image (a directory or report)",
+  compressed: "compressed images, which this viewer does not read yet",
+  multiframe: "a single multi-frame file, which this viewer does not read yet",
+  format: "images in a format other than 16-bit greyscale (a thumbnail, a colour preview)",
+  noGeometry: "images without position and spacing information"
+};
+
+function parse(bytes, dicomParser) {
+  try { return dicomParser.parseDicom(bytes); }
+  catch (e) {
+    // Some exports write bare datasets with no 128-byte preamble and no DICM
+    // prefix. Those are almost always implicit little endian.
+    // Anything parses as *something* this way, so only trust it if it holds a
+    // tag every image slice has: the SOP class, the modality, or the rows.
+    try {
+      var ds = dicomParser.parseDicom(bytes, { TransferSyntaxUID: IMPLICIT_LE });
+      var e = ds.elements;
+      return e.x00080016 || e.x00080060 || e.x00280010 ? ds : null;
+    } catch (e2) { return null; }
+  }
+}
+
+/* One file -> the geometry and pixels of one slice, or { skip: reason } if it
+   is not an image slice this viewer can use. A stray thumbnail or report in the
+   folder is set aside, never fatal. */
 function readSlice(buffer, dicomParser) {
   var bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  var ds;
-  try { ds = dicomParser.parseDicom(bytes); } catch (e) { return { skip: "not DICOM" }; }
+  var ds = parse(bytes, dicomParser);
+  if (!ds) return { skip: "notDicom" };
 
   var pixel = ds.elements.x7fe00010;
-  if (!pixel) return { skip: "no image" };
+  if (!pixel) return { skip: "noImage" };
 
   var ts = ds.string("x00020010");
-  if (ts && !SUPPORTED_TS[ts.trim()]) {
-    throw new ScanError(
-      "This scan was exported compressed (transfer syntax " + ts.trim() + "). " +
-      "Export it again uncompressed from your CBCT software, or ask for compressed support to be added.");
-  }
-  var frames = parseInt(ds.string("x00280008") || "1", 10);
-  if (frames > 1) {
-    throw new ScanError(
-      "This scan was exported as a single multi-frame file. Export it as one file per slice, " +
-      "or ask for multi-frame support to be added.");
-  }
-  var bits = ds.uint16("x00280100");
-  var samples = ds.uint16("x00280002") || 1;
-  if (bits !== 16 || samples !== 1) {
-    throw new ScanError("Unsupported pixel format (" + samples + " sample(s), " + bits + " bits).");
-  }
+  if (ts && !SUPPORTED_TS[ts.trim()]) return { skip: "compressed" };
+  if (parseInt(ds.string("x00280008") || "1", 10) > 1) return { skip: "multiframe" };
+  var bits = ds.uint16("x00280100"), samples = ds.uint16("x00280002") || 1;
+  if (bits !== 16 || samples !== 1) return { skip: "format" };
 
-  var ipp = nums(ds, "x00200032");
-  var iop = nums(ds, "x00200037");
-  var ps = nums(ds, "x00280030");
-  if (!ipp || !iop || iop.length !== 6 || !ps) return { skip: "no geometry" };
+  var ipp = nums(ds, "x00200032"), iop = nums(ds, "x00200037"), ps = nums(ds, "x00280030");
+  if (!ipp || ipp.length !== 3 || !iop || iop.length !== 6 || !ps || ps.length < 2) return { skip: "noGeometry" };
+  var row = unit(iop.slice(0, 3)), col = unit(iop.slice(3, 6));
+  if (!row || !col || !(ps[0] > 0) || !(ps[1] > 0)) return { skip: "noGeometry" };
 
   var rows = ds.uint16("x00280010"), cols = ds.uint16("x00280011");
   var signed = ds.uint16("x00280103") === 1;
@@ -87,16 +104,15 @@ function readSlice(buffer, dicomParser) {
   var intercept = num(ds, "x00281052"); if (intercept === null) intercept = 0;
 
   var n = rows * cols;
-  if (pixel.length < n * 2) throw new ScanError("A slice is shorter than its own header says.");
-  // Copy out: the parser's view points into a buffer we are about to drop.
-  var raw = signed
-    ? new Int16Array(bytes.buffer.slice(bytes.byteOffset + pixel.dataOffset, bytes.byteOffset + pixel.dataOffset + n * 2))
-    : new Uint16Array(bytes.buffer.slice(bytes.byteOffset + pixel.dataOffset, bytes.byteOffset + pixel.dataOffset + n * 2));
+  if (!(n > 0) || pixel.length < n * 2) throw new ScanError("A slice is shorter than its own header says. The export may be incomplete.");
+  // A view into the file's own bytes, not a copy: the volume is the only other
+  // thing in memory. An odd offset cannot be viewed as 16-bit, so that one case copies.
+  var off = bytes.byteOffset + pixel.dataOffset, T = signed ? Int16Array : Uint16Array;
+  var raw = off % 2 === 0 ? new T(bytes.buffer, off, n) : new T(bytes.buffer.slice(off, off + n * 2));
 
   return {
     series: ds.string("x0020000e") || "",
-    rows: rows, cols: cols,
-    ipp: ipp, row: iop.slice(0, 3), col: iop.slice(3, 6),
+    rows: rows, cols: cols, ipp: ipp, row: row, col: col,
     // DICOM PixelSpacing is [between rows, between columns].
     rowSpacing: ps[0], colSpacing: ps[1],
     slope: slope, intercept: intercept, raw: raw
@@ -104,18 +120,25 @@ function readSlice(buffer, dicomParser) {
 }
 
 /* Many files -> one volume.
-   Returns { nx, ny, nz, spacing:[sx,sy,sz], origin, xDir, yDir, zDir, hu, warnings }.
-   hu is a Float32Array in Hounsfield-like units, index = x + nx*(y + ny*z). */
+   Returns { nx, ny, nz, spacing:[sx,sy,sz], origin, xDir, yDir, zDir, hu, warnings, skipped }.
+   hu is an Int16Array of Hounsfield-like units, index = x + nx*(y + ny*z).
+   16-bit, not 32: a large-field dental CBCT (800 x 800 x 600) is 0.77 GB this
+   way and would be twice that as floats, on top of the files themselves. */
 export function loadSeries(buffers, dicomParser) {
-  var slices = [], skipped = 0;
+  var slices = [], skipped = {};
   for (var i = 0; i < buffers.length; i++) {
     var s = readSlice(buffers[i], dicomParser);
-    if (s.skip) { skipped++; continue; }
+    if (s.skip) { skipped[s.skip] = (skipped[s.skip] || 0) + 1; continue; }
     slices.push(s);
   }
-  if (!slices.length) throw new ScanError("No CBCT image slices were found in those files.");
+  var skippedTotal = Object.keys(skipped).reduce(function (a, k) { return a + skipped[k]; }, 0);
+  if (!slices.length) {
+    var why = Object.keys(skipped).sort(function (a, b) { return skipped[b] - skipped[a]; })[0];
+    throw new ScanError("No usable CBCT slices were found" + (why ? ": the files are " + SKIP[why] + "." : "."));
+  }
 
   var warnings = [];
+  if (skippedTotal) warnings.push(skippedTotal + " file" + (skippedTotal === 1 ? " was" : "s were") + " set aside as not part of the scan.");
   // Several series in one folder: take the one with the most slices, and say so.
   var bySeries = {};
   slices.forEach(function (s) { (bySeries[s.series] = bySeries[s.series] || []).push(s); });
@@ -128,10 +151,13 @@ export function loadSeries(buffers, dicomParser) {
   if (slices.length < 2) throw new ScanError("Only one slice was found. A CBCT needs the whole series.");
 
   var first = slices[0];
-  var xDir = first.row, yDir = first.col, zDir = cross(xDir, yDir);
+  var xDir = first.row, yDir = first.col, zDir = unit(cross(xDir, yDir));
+  if (!zDir || Math.abs(dot(xDir, yDir)) > 1e-3) throw new ScanError("The slice orientation in this scan is not valid.");
   slices.forEach(function (s) {
     if (s.rows !== first.rows || s.cols !== first.cols) throw new ScanError("Slices in this series are different sizes.");
-    if (Math.abs(dot(s.row, xDir) - 1) > 1e-4 || Math.abs(dot(s.col, yDir) - 1) > 1e-4)
+    // Normalised, and a tolerance of 1e-3: exports that write the orientation
+    // to three decimals must still compare equal to themselves.
+    if (dot(s.row, xDir) < 1 - 1e-3 || dot(s.col, yDir) < 1 - 1e-3)
       throw new ScanError("Slices in this series are tilted differently from each other.");
     if (Math.abs(s.rowSpacing - first.rowSpacing) > 1e-4 || Math.abs(s.colSpacing - first.colSpacing) > 1e-4)
       throw new ScanError("Slices in this series have different pixel spacing.");
@@ -150,12 +176,25 @@ export function loadSeries(buffers, dicomParser) {
     throw new ScanError("Slice spacing is uneven (from " + Math.min.apply(null, gaps).toFixed(3) + " to " +
       Math.max.apply(null, gaps).toFixed(3) + " mm). Measurements would not be reliable, so this scan was not loaded.");
   }
+  // Each slice must sit straight on top of the last. A sheared stack (a tilted
+  // gantry, a reformatted series) keeps even spacing along the normal while
+  // drifting sideways, and every vertical measurement would come out short.
+  var last = slices[slices.length - 1], drift = sub(last.ipp, first.ipp);
+  var along = dot(drift, zDir), sideways = len(sub(drift, [zDir[0]*along, zDir[1]*along, zDir[2]*along]));
+  if (sideways > Math.min(first.rowSpacing, first.colSpacing) / 2) {
+    throw new ScanError("The slices are offset sideways from one another (a tilted or sheared series). " +
+      "Measurements would not be reliable, so this scan was not loaded. Export it again as a straight axial series.");
+  }
 
   var nx = first.cols, ny = first.rows, nz = slices.length;
-  var hu = new Float32Array(nx * ny * nz);
+  var hu = new Int16Array(nx * ny * nz);
   slices.forEach(function (s, z) {
-    var base = z * nx * ny, raw = s.raw;
-    for (var p = 0; p < raw.length; p++) hu[base + p] = raw[p] * s.slope + s.intercept;
+    var base = z * nx * ny, raw = s.raw, sl = s.slope, ic = s.intercept;
+    for (var p = 0; p < raw.length; p++) {
+      var v = Math.round(raw[p] * sl + ic);
+      hu[base + p] = v < -32768 ? -32768 : (v > 32767 ? 32767 : v);
+    }
+    s.raw = null;   // the file's bytes are the caller's to drop now
   });
 
   return {
@@ -163,7 +202,7 @@ export function loadSeries(buffers, dicomParser) {
     // x steps along a row (between columns), y steps down a column (between rows)
     spacing: [first.colSpacing, first.rowSpacing, sz],
     origin: slices[0].ipp.slice(), xDir: xDir, yDir: yDir, zDir: zDir,
-    hu: hu, warnings: warnings, skipped: skipped
+    hu: hu, warnings: warnings, skipped: skippedTotal
   };
 }
 
@@ -192,9 +231,9 @@ export function sampleVoxel(vol, fx, fy, fz) {
    centre: patient mm. u: direction of image columns (left to right). v:
    direction of image rows (bottom to top, so "up" on screen is +v). */
 export function reslice(vol, centre, u, v, widthMm, heightMm, step) {
-  var lu = len(u), lv = len(v);
-  u = [u[0]/lu, u[1]/lu, u[2]/lu]; v = [v[0]/lv, v[1]/lv, v[2]/lv];
-  if (Math.abs(dot(u, v)) > 1e-6) throw new Error("reslice: u and v must be perpendicular");
+  u = unit(u); v = unit(v);
+  if (!u || !v || Math.abs(dot(u, v)) > 1e-6) throw new ScanError("reslice: u and v must be non-zero and perpendicular");
+  if (!(step > 0) || !(widthMm > 0) || !(heightMm > 0)) throw new ScanError("reslice: size and step must be positive");
   var w = Math.round(widthMm / step), h = Math.round(heightMm / step);
   var data = new Float32Array(w * h);
   for (var j = 0; j < h; j++) {
@@ -228,9 +267,11 @@ export function distanceMm(a, b) { return len(sub(a, b)); }
 export function crossSection(vol, point, along, widthMm, heightMm, step) {
   var up = vol.zDir;
   // remove any vertical component from the arch direction, then turn it 90 degrees in the axial plane
-  var a = sub(along, [up[0]*dot(along, up), up[1]*dot(along, up), up[2]*dot(along, up)]);
-  var across = cross(up, a);
-  return reslice(vol, point, across, up, widthMm, heightMm, step);
+  var a = unit(sub(along, [up[0]*dot(along, up), up[1]*dot(along, up), up[2]*dot(along, up)]));
+  // Two clicks on the same spot, or a direction straight up and down, give no
+  // arch direction at all. Say so, rather than draw a black image and a NaN ruler.
+  if (!a) throw new ScanError("Pick two different points along the arch to set its direction.");
+  return reslice(vol, point, cross(up, a), up, widthMm, heightMm, step);
 }
 
 /* Window/level to 8-bit grey, for a canvas. */
