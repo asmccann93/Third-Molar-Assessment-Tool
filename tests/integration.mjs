@@ -595,10 +595,14 @@ async function testExtract() {
     const blanked = { ...goodNote, plan: '   ', gaps: ['Medical history not discussed'] };
     const parsedBlank = pm.parseNote(JSON.stringify(blanked), 'exam-recall');
     ok('a whitespace-only field is normalised to null', parsedBlank.plan === null);
-    let threw = null;
-    try { pm.parseNote(JSON.stringify({ ...goodNote, plan: '', gaps: [] }), 'third-molar'); } catch (e) { threw = e.message; }
-    ok('and an empty field with no gap reported fails loudly, as a null one does',
-      /null but no gaps/.test(String(threw)), String(threw).slice(0, 80));
+    // Since 21 September 2026 this no longer refuses on any consult type: the
+    // blank is listed for the clinician to check (the clinical lead's decision).
+    let surgBlank = { gaps: [] };
+    try { surgBlank = pm.parseNote(JSON.stringify({ ...goodNote, plan: '', gaps: [] }), 'third-molar'); } catch (e) { surgBlank = { gaps: [], err: e.message }; }
+    ok('an empty field with no gap reported now drafts on a surgical consultation too',
+      Array.isArray(surgBlank.gaps) && surgBlank.gaps.length === 1, JSON.stringify(surgBlank.gaps));
+    ok('and the blank risks field is the one listed, for the clinician to check',
+      /^Material risks named, per option: left blank in the draft; check whether it came up$/.test(surgBlank.gaps[0]), surgBlank.gaps[0]);
   }
 
   ok('a quote that starts with "No" is still evidence',
@@ -763,13 +767,53 @@ async function testExtract() {
   ok('the model is told never to leave a key out',
     /Every key below must appear[^\n]*never leave a key out/.test(sys0));
 
+  // Seen live, 21 September 2026: a recall with one field that DOES apply left
+  // blank, and no gaps at all. Failed to draft, twice, on the same transcript.
+  // It now drafts, and the blank is listed for the clinician to check.
+  for (const field of ['patientQuestions', 'medicalHistory', 'informationGiven']) {
+    const recallBlank = { ...recallNote, [field]: null, gaps: [] };
+    stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(recallBlank) }], stop_reason: 'end_turn' } }));
+    res = mockRes();
+    await handler(mockReq({ body: { turns, consultType: 'exam-recall' } }), res);
+    const g = res.body?.note?.gaps || [];
+    ok(`a recall with ${field} blank and no gaps drafts, instead of failing`, res.statusCode === 200, `${res.statusCode} ${JSON.stringify(res.body).slice(0, 120)}`);
+    ok(`and ${field} is listed as a gap for the clinician to check`,
+      g.length === 1 && /left blank in the draft; check whether it came up/.test(g[0]), JSON.stringify(g));
+  }
+  {
+    const pm = await import('../api/_prompt.mjs');
+    let two = { gaps: [] };
+    try { two = pm.parseNote(JSON.stringify({ ...recallNote, patientQuestions: null, nextStep: '', gaps: [] }), 'exam-recall'); } catch (e) { two = { gaps: [] }; }
+    ok('every blank that applies gets its own gap, and none for the fields that do not apply',
+      two.gaps.length === 2 && two.gaps.every((x) => /left blank in the draft/.test(x)) && !two.gaps.some((x) => /risk|alternative|decision/i.test(x)),
+      JSON.stringify(two.gaps));
+    ok('the added gaps never say something was not discussed, only that the draft is blank',
+      !two.gaps.some((x) => /not discussed|not mentioned|not said/i.test(x)));
+    const kept = pm.parseNote(JSON.stringify({ ...recallNote, patientQuestions: null, gaps: ['No questions asked'] }), 'exam-recall');
+    ok('where the model did report gaps, its own wording is kept untouched', JSON.stringify(kept.gaps) === '["No questions asked"]', JSON.stringify(kept.gaps));
+    ok('the model is still told to add gaps itself (the backstop is not the plan)',
+      /add a plain-English entry to the gaps array naming what is missing/.test(sys0));
+  }
+
   // The rule still bites where it matters. Same payload, surgical type.
   stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(recallNote) }], stop_reason: 'end_turn' } }));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'third-molar' } }), res);
-  ok('but the SAME blanks on a surgical consultation are still refused',
-    res.statusCode === 502 && /no gaps were reported/.test(JSON.stringify(res.body)),
-    `${res.statusCode}`);
+  ok('the SAME blanks on a surgical consultation now draft too, every blank listed',
+    res.statusCode === 200 && (res.body?.note?.gaps || []).length > 0 &&
+      res.body.note.gaps.every((x) => /left blank in the draft; check whether it came up$/.test(x)),
+    `${res.statusCode} ${JSON.stringify(res.body?.note?.gaps)}`);
+  ok('and on a surgical consultation the consent fields are among them (nothing excused there)',
+    (res.body?.note?.gaps || []).some((x) => /^Material risks/.test(x)) && (res.body?.note?.gaps || []).some((x) => /^Decision/.test(x)),
+    JSON.stringify(res.body?.note?.gaps));
+  {
+    const pm = await import('../api/_prompt.mjs');
+    for (const type of ['emergency', 'implant-surgery', 'sedation', 'restorative', 'perio', 'endo', 'extraction-surgery', 'treatment-plan', 'implant-consult', 'third-molar']) {
+      let out = null, err = null;
+      try { out = pm.parseNote(JSON.stringify({ ...recallNote, gaps: [] }), type); } catch (e) { err = e.message; }
+      ok(`${type}: blanks with no gaps draft instead of failing`, out && out.gaps.length > 0 && !err, err || JSON.stringify(out && out.gaps));
+    }
+  }
 
   // Which tooth. The never-event, arriving through a transcript.
   ok('the model is told to report which teeth were identified',
@@ -1032,12 +1076,17 @@ async function testExtract() {
   await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
   ok('missing field fails loudly, no partial note', res.statusCode === 502 && !res.body?.note, `got ${res.statusCode}`);
 
-  // --- nulls with no gaps: the model quietly dropping content ---
+  // --- nulls with no gaps: the model possibly dropping content ---
+  // Until 21 September 2026 this refused the note. It now drafts, and every
+  // blank is listed so the clinician checks it: nothing is silently dropped.
   const nullNoGaps = { ...goodNote, decision: null, gaps: [] };
   bedrockReturning(JSON.stringify(nullNoGaps));
   res = mockRes();
   await handler(mockReq({ body: { turns } }), res);
-  ok('null field with empty gaps rejected', res.statusCode === 502, `got ${res.statusCode}`);
+  ok('null field with empty gaps drafts, and the blanks are listed for checking',
+    res.statusCode === 200 && (res.body?.note?.gaps || []).some((x) => /^Decision, or deferred.*: left blank in the draft; check whether it came up$/.test(x)) &&
+      (res.body?.note?.gaps || []).some((x) => /^Material risks/.test(x)),
+    `got ${res.statusCode} ${JSON.stringify(res.body?.note?.gaps)}`);
 
   // --- model wraps in fences despite instructions ---
   bedrockReturning('```json\n' + JSON.stringify(goodNote) + '\n```');
