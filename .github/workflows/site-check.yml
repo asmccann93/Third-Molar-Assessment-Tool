@@ -81,7 +81,11 @@ jobs:
           # time the page is edited, because the matching sw.js has no reason to
           # change. site-check.js asserts the inverse for that path instead:
           # that no cache exists. Do not "fix" this by adding it.
-          for dir in "." "third-molar" "sedation" "local-anaesthetic" "asa-assessment" "implant"; do
+          # implant is out of this list while it is gated (21 September 2026), for
+          # the same reason as ai-notes: its worker is network-only and has no
+          # CACHE to bump, and site-check.js refuses one if it appears. Put it
+          # back, with the viewer.js rule below, when the gate comes off.
+          for dir in "." "third-molar" "sedation" "local-anaesthetic" "asa-assessment"; do
             if [ "$dir" = "." ]; then idx="index.html"; sw="sw.js";
             else idx="$dir/index.html"; sw="$dir/sw.js"; fi
             if [ ! -f "$idx" ]; then continue; fi
@@ -96,13 +100,6 @@ jobs:
               fi
             fi
           done
-          # The implant worker also caches viewer.js, so that file moving needs a bump too.
-          if [ -f implant/viewer.js ] && ! git diff --quiet "$before" HEAD -- implant/viewer.js; then
-            if git diff --quiet "$before" HEAD -- implant/sw.js; then
-              echo "FAIL  implant/viewer.js changed but implant/sw.js did not."
-              fail=1
-            fi
-          fi
           exit $fail
 
   canary:
@@ -130,9 +127,24 @@ jobs:
           done
           exit $fail
 
-      - name: AI Notes must stay shut
+      - name: AI Notes and the implant preview must stay shut
         run: |
           fail=0
+          # The implant preview is kept to its author while its figures are
+          # drafts (21 September 2026). The page and the CBCT bundle must both
+          # answer 401 to anyone without a session; a 200 means the draft
+          # figures are public.
+          for p in "/implant/" "/implant/viewer.js"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE$p")
+            if [ "$code" = "401" ]; then
+              echo "ok    $p  401"
+            else
+              echo "FAIL  $p  $code  - expected 401."
+              [ "$code" = "200" ] && echo "      The implant gate is OPEN. Treat as urgent."
+              fail=1
+            fi
+          done
+
           code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE/ai-notes/")
           if [ "$code" = "401" ]; then
             echo "ok    /ai-notes/  401"
