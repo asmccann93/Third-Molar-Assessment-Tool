@@ -67,6 +67,7 @@ export const CONSULT_TYPES = {
     notApplicable: ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'patientFactors', 'decision'],
     emphasis:
       'There is usually NO consent discussion in a recall: no procedure proposed, no alternatives weighed, no risks named, so no patient-specific factors making a risk material, and no decision taken. Leave those fields null and do NOT add gaps for them — they do not apply to this kind of appointment. If a treatment WAS proposed and discussed, fill them normally. ' +
+      'The other fields still apply to a recall — reason for attendance, medical history, the patient\'s own questions, information given and next step: if one of those is empty, leave it null AND add a gaps entry for it, as usual. ' +
       'Routine examination. Expect findings, oral hygiene advice, lifestyle advice ' +
       '(smoking, alcohol, diet), radiographic justification, and a recall interval.',
   },
@@ -508,9 +509,24 @@ export function parseNote(raw, consultTypeKey) {
   for (const [k] of [...FIELDS, ...DICTATED_FIELDS]) {
     if (typeof parsed[k] === 'string' && parsed[k].trim() === '') parsed[k] = null;
   }
-  const nulls = FIELDS.filter(([k]) => blank(parsed[k]) && !skip.has(k)).length;
-  if (nulls > 0 && parsed.gaps.length === 0) {
-    throw new Error('Fields are null but no gaps were reported');
+  const blanks = FIELDS.filter(([k]) => blank(parsed[k]) && !skip.has(k));
+  if (blanks.length > 0 && parsed.gaps.length === 0) {
+    // Blank fields that apply, and no gaps reported. This used to refuse the
+    // whole note, and at temperature 0 it refused it identically on every
+    // retry: seen live on 21 September 2026, twice on one recall transcript,
+    // where the prompt's "do NOT add gaps" for the recall's inapplicable fields
+    // was carried over to fields that do apply. The clinician was left writing
+    // the note by hand mid-clinic.
+    //
+    // Now, for every consult type (the clinical lead's decision, 21 September
+    // 2026), the blanks are listed for the clinician here instead, worded so
+    // they claim nothing about the conversation: the field is empty in the
+    // draft, and whether it came up is for them to check. On a consent
+    // consultation a blank "risks" may be the model dropping something that was
+    // said; that is exactly what this wording asks them to check, and every
+    // note is reviewed before it is used. A flagged blank is more use than no
+    // note at all.
+    parsed.gaps = blanks.map(([, label]) => `${label}: left blank in the draft; check whether it came up`);
   }
 
   return parsed;
