@@ -769,7 +769,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-19.2';
+  var BUILD = '2026-09-21.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -810,10 +810,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     ENCODER_READY_MS: 8000,          // wasm compile + worklet load, before refusing to start
     ENCODER_DONE_MS:  15000,         // final flush at stop; pages so far are kept if it lapses
     STALL_MS:      8000,             // no encoded page for this long -> warn
-    // Matches maxDuration on /api/extract (120s). At 60s the page gave up while
+    // Matches maxDuration on /api/extract (300s since 21 September 2026, when
+    // the server began retrying a busy service). At 60s the page gave up while
     // the server was still working, and reported it as "signal is aborted
     // without reason" — which reads like a bug in the tool, not a slow model.
-    SUMMARY_TIMEOUT_MS: 120000,      // summary / post-op / referral / ask; frees the button
+    SUMMARY_TIMEOUT_MS: 300000,      // summary / post-op / referral / ask; frees the button
 
     MAX_BYTES:     4.2 * 1024 * 1024,
     SILENCE_MS:    6000,             // no sound for this long -> warn
