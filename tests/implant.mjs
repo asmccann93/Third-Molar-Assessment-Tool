@@ -308,7 +308,7 @@ section('Keyboard focus survives an answer');
 section('CBCT viewer core, on a synthetic phantom');
 
 // A minimal DICOM writer: Explicit VR Little Endian, one slice per file.
-function dicomSlice({ rows, cols, ipp, iop, ps, raw, slope, intercept, instance, extra = {}, ts = '1.2.840.10008.1.2.1', bare = false, bits = 16, samples = 1 }) {
+function dicomSlice({ rows, cols, ipp, iop, ps, raw, slope, intercept, instance, extra = {}, ts = '1.2.840.10008.1.2.1', bare = false, bits = 16, samples = 1, seriesUid = '1.2.3.999' }) {
   const chunks = [];
   const enc = new TextEncoder();
   const el = (group, elem, vr, value) => {
@@ -337,7 +337,7 @@ function dicomSlice({ rows, cols, ipp, iop, ps, raw, slope, intercept, instance,
   const ds = [
     [8, 0x16, 'UI', '1.2.840.10008.5.1.4.1.1.2'], [8, 0x60, 'CS', 'CT'],
     [0x10, 0x10, 'PN', 'SENTINEL^MUST-NOT-DISPLAY'], [0x10, 0x20, 'LO', 'SENTINEL-ID'], [0x10, 0x30, 'DA', '19000101'],
-    [0x20, 0x0e, 'UI', '1.2.3.999'], [0x20, 0x13, 'IS', String(instance)],
+    [0x20, 0x0e, 'UI', seriesUid], [0x20, 0x13, 'IS', String(instance)],
     [0x20, 0x32, 'DS', ipp.join('\\')], [0x20, 0x37, 'DS', iop.join('\\')],
     ...(extra.frames ? [[0x28, 0x08, 'IS', String(extra.frames)]] : []),
     [0x28, 0x02, 'US', samples], [0x28, 0x04, 'CS', samples === 3 ? 'RGB' : 'MONOCHROME2'], [0x28, 0x10, 'US', rows], [0x28, 0x11, 'US', cols],
@@ -494,7 +494,7 @@ function jpegLossless(values, rows, cols, precision = 16) {
 // position in its own group; pixels either uncompressed or lossless JPEG with
 // an empty offset table and one fragment per frame.
 function dicomMulti({ rows, cols, frames, iop = [1, 0, 0, 0, 1, 0], ps, slope = 1, intercept = -1000, lossless = false,
-  splitFragments = false, withOffsets = false, perFrameRescale = null, sharedRescaleToo = false, corrupt = -1, perFrameIop = null, signed = false }) {
+  splitFragments = false, withOffsets = false, perFrameRescale = null, sharedRescaleToo = false, padAfterEnd = 0, trailer = null, framesTag = null, corrupt = -1, perFrameIop = null, signed = false }) {
   const enc = new TextEncoder();
   const cat = (arrs) => { const n = arrs.reduce((a, b) => a + b.length, 0), o = new Uint8Array(n); let k = 0; arrs.forEach((b) => { o.set(b, k); k += b.length; }); return o; };
   const pad = (b, vr) => (b.length % 2 ? Uint8Array.from([...b, vr === 'UI' || vr === 'OB' ? 0 : 32]) : b);
@@ -537,6 +537,8 @@ function dicomMulti({ rows, cols, frames, iop = [1, 0, 0, 0, 1, 0], ps, slope = 
     const jpegs = frames.map((fr, f) => {
       let j = jpegLossless(signed ? Uint16Array.from(fr.raw, (v) => v & 0xffff) : fr.raw, rows, cols);
       if (f === corrupt) j = Uint8Array.from(j.subarray(0, 40));
+      if (padAfterEnd) j = Uint8Array.from([...j, ...Array(padAfterEnd).fill(0)]);
+      if (trailer) j = Uint8Array.from([...j, ...trailer]);
       return j.length % 2 ? Uint8Array.from([...j, 0]) : j;
     });
     const frags = [], offsets = []; let pos = 0;
@@ -558,7 +560,7 @@ function dicomMulti({ rows, cols, frames, iop = [1, 0, 0, 0, 1, 0], ps, slope = 
     el(8, 0x16, 'UI', '1.2.840.10008.5.1.4.1.1.13.1.3'), el(8, 0x60, 'CS', 'DX'),
     el(0x10, 0x10, 'PN', 'SENTINEL^MUST-NOT-DISPLAY'), el(0x10, 0x20, 'LO', 'SENTINEL-ID'), el(0x10, 0x30, 'DA', '19000101'),
     el(0x20, 0x0e, 'UI', '1.2.3.998'),
-    el(0x28, 0x02, 'US', 1), el(0x28, 0x04, 'CS', 'MONOCHROME2'), el(0x28, 0x08, 'IS', String(frames.length)),
+    el(0x28, 0x02, 'US', 1), el(0x28, 0x04, 'CS', 'MONOCHROME2'), el(0x28, 0x08, 'IS', framesTag === null ? String(frames.length) : framesTag),
     el(0x28, 0x10, 'US', rows), el(0x28, 0x11, 'US', cols),
     el(0x28, 0x100, 'US', 16), el(0x28, 0x101, 'US', 16), el(0x28, 0x102, 'US', 15), el(0x28, 0x103, 'US', signed ? 1 : 0),
     sq(0x5200, 0x9229, [shared]), sq(0x5200, 0x9230, perFrame),
@@ -660,6 +662,86 @@ function dicomMulti({ rows, cols, frames, iop = [1, 0, 0, 0, 1, 0], ps, slope = 
     .map((fr) => dicomMulti({ rows: NY, cols: NX, frames: [fr], ps: [PX, PX], lossless: true }));
   const vs = load(perSlice);
   ok('lossless JPEG exported one file per slice also loads', vs && vs.nz === 8, vs && vs.message);
+
+  /* ---- the review of 20 September, evening ---- */
+
+  // A sheared stack was refused when the frames arrived bottom-up and loaded
+  // when the same bytes arrived top-down: the check compared the spatially
+  // last slice against whichever one came first in the file.
+  const shear = (order) => order.map((k) => dicomSlice({ rows: 4, cols: 4, ipp: [k * 1.0, 0, k * 0.5], iop: [1, 0, 0, 0, 1, 0],
+    ps: [0.5, 0.5], raw: new Int16Array(16).fill(1024), slope: 1, intercept: -1024, instance: k + 1 }));
+  for (const [label, order] of [['bottom-up', [0, 1, 2, 3]], ['top-down', [3, 2, 1, 0]], ['shuffled', [2, 0, 3, 1]]]) {
+    const r = load(shear(order));
+    ok(`a sheared series is refused whichever order the files arrive in (${label})`,
+      r instanceof V.ScanError && /offset sideways/.test(r.message), r && (r.message || 'loaded'));
+  }
+  const shearFrames = (order) => dicomMulti({ rows: 4, cols: 4, ps: [0.5, 0.5],
+    frames: order.map((k) => ({ ipp: [k * 1.0, 0, k * 0.5], raw: new Uint16Array(16).fill(1000) })) });
+  for (const [label, order] of [['bottom-up', [0, 1, 2, 3]], ['top-down', [3, 2, 1, 0]]]) {
+    const r = load([shearFrames(order)]);
+    ok(`and in a multi-frame file whichever order the frames are written in (${label})`,
+      r instanceof V.ScanError && /offset sideways/.test(r.message), r && (r.message || 'loaded'));
+  }
+
+  // A per-frame tag that is present but blank used to hide the shared value,
+  // shifting every voxel by 1000 HU with no warning.
+  const flat = [0, 1, 2].map((k) => ({ ipp: [0, 0, k * 0.5], raw: new Uint16Array(16).fill(1000) }));
+  const hu = (opts) => { const v = load([dicomMulti({ rows: 4, cols: 4, frames: flat, ps: [0.5, 0.5], sharedRescaleToo: true, ...opts })]); return v && v.hu ? v.hu[0] : v; };
+  ok('a blank per-frame rescale falls through to the shared one, not to 1 and 0',
+    hu({ perFrameRescale: flat.map(() => ['  ', '  ']) }) === 0, hu({ perFrameRescale: flat.map(() => ['  ', '  ']) }));
+  ok('a real per-frame rescale still wins over the shared one',
+    hu({ perFrameRescale: flat.map(() => [1, -900]) }) === 100, hu({ perFrameRescale: flat.map(() => [1, -900]) }));
+  ok('a blank per-frame position is refused, not read as the top-level one',
+    load([dicomMulti({ rows: 4, cols: 4, frames: flat.map((f) => ({ ...f, ipp: ['  ', '  ', '  '] })), ps: [0.5, 0.5] })]) instanceof V.ScanError);
+
+  // Two decimal places of tilt between slices is 3.6 mm out at the edge of a
+  // 160 mm field, and used to be accepted.
+  const flatSeries = (n, iop) => [...Array(n).keys()].map((k) => dicomSlice({ rows: 4, cols: 4, ipp: [0, 0, k * 0.5], iop,
+    ps: [0.5, 0.5], raw: new Int16Array(16).fill(1024), slope: 1, intercept: -1024, instance: k + 1 }));
+  ok('slices written to three decimals still load (no false refusal)', load(flatSeries(3, [0.999, 0.017, 0, -0.017, 0.999, 0])).nz === 3);
+  const mixed = [dicomSlice({ rows: 4, cols: 4, ipp: [0, 0, 0], iop: [1, 0, 0, 0, 1, 0], ps: [0.5, 0.5], raw: new Int16Array(16).fill(1024), slope: 1, intercept: -1024, instance: 1 }),
+    dicomSlice({ rows: 4, cols: 4, ipp: [0, 0, 0.5], iop: [0.9997, 0.0262, 0, -0.0262, 0.9997, 0], ps: [0.5, 0.5], raw: new Int16Array(16).fill(1024), slope: 1, intercept: -1024, instance: 2 }),
+    dicomSlice({ rows: 4, cols: 4, ipp: [0, 0, 1], iop: [1, 0, 0, 0, 1, 0], ps: [0.5, 0.5], raw: new Int16Array(16).fill(1024), slope: 1, intercept: -1024, instance: 3 })];
+  const t15 = load(mixed);
+  ok('but one slice tilted by 1.5 degrees against the others is refused',
+    t15 instanceof V.ScanError && /tilted/.test(t15.message), t15 && (t15.message || 'loaded'));
+
+  // Padding after the end marker made dicom-parser miss the frame boundary.
+  const padded = load([dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], lossless: true, splitFragments: true, padAfterEnd: 4 })]);
+  ok('split fragments with padding after the end marker still load (not "damaged")', same(padded), padded && padded.message);
+
+  // Some writers leave a trailer after the end marker. The fill bits have to go
+  // before the real marker, found by reading forward from the scan header:
+  // searching backwards put them after the trailer, where they do nothing and
+  // the decoder loses the last pixel of the slice again.
+  const trailed = load([dicomMulti({ rows: NY, cols: NX, frames, ps: [PX, PX], lossless: true, trailer: [0xff, 0xd9, 0, 0] })]);
+  ok('a JPEG with a trailer after the end marker still decodes every pixel', same(trailed), trailed && trailed.message);
+
+  // Values that cannot be used as a scan
+  const zeroSlope = load([dicomMulti({ rows: 4, cols: 4, frames: flat, ps: [0.5, 0.5], perFrameRescale: flat.map(() => [0, 0]) })]);
+  ok('a rescale slope of zero is refused, not drawn as one flat grey',
+    zeroSlope instanceof V.ScanError && /not usable/.test(zeroSlope.message), zeroSlope && (zeroSlope.message || 'loaded'));
+  for (const bad of ['abc', '0', '-2']) {
+    const r = load([dicomMulti({ rows: 4, cols: 4, frames: flat, ps: [0.5, 0.5], framesTag: bad })]);
+    ok(`a frame count of "${bad}" is refused, not read as a single frame`,
+      r instanceof V.ScanError && /frame count/.test(r.message), r && (r.message || 'loaded'));
+  }
+
+  // The reason a file was set aside has to be the real one.
+  const big = dicomSlice({ rows: 2, cols: 2, ipp: [0, 0, 0], iop: [1, 0, 0, 0, 1, 0], ps: [1, 1],
+    raw: new Int16Array(4), slope: 1, intercept: 0, instance: 1, ts: '1.2.840.10008.1.2.2' });
+  const be = load([big]);
+  ok('a big-endian file is named as such, not called "not DICOM"',
+    be instanceof V.ScanError && /big-endian/.test(be.message), be && (be.message || 'loaded'));
+
+  // Which series wins must not depend on the order the files arrived in.
+  const seriesPair = (uid, fill, n) => [...Array(n).keys()].map((k) => dicomSlice({ rows: 4, cols: 4, ipp: [0, 0, k * 0.5],
+    iop: [1, 0, 0, 0, 1, 0], ps: [0.5, 0.5], raw: new Int16Array(16).fill(fill), slope: 1, intercept: 0, instance: k + 1,
+    extra: {}, seriesUid: uid }));
+  const A2 = seriesPair('1.2.3.aaa', 1000, 3), B2 = seriesPair('1.2.3.bbb', 2000, 3);
+  const pick = (list) => { const v = load(list); return v && v.hu ? v.hu[0] : String(v); };
+  ok('two series of the same size: the same one is loaded whichever order they arrive in',
+    pick([...A2, ...B2]) === pick([...B2, ...A2]), pick([...A2, ...B2]) + ' vs ' + pick([...B2, ...A2]));
 
   const signedScan = load([dicomMulti({ rows: 4, cols: 4, lossless: true, signed: true, intercept: 0,
     frames: [0, 1, 2].map((k) => ({ ipp: [0, 0, k * 0.5], raw: new Int16Array(16).fill(-700) })), ps: [0.5, 0.5] })]);

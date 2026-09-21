@@ -1139,8 +1139,8 @@ async function testMiddleware() {
     { headers: { accept, ...(cookie ? { cookie } : {}) } }
   );
 
-  ok('matcher covers only the two paths',
-    JSON.stringify(config.matcher) === JSON.stringify(['/ai-notes/:path*', '/api/:path*']),
+  ok('matcher covers the gated tools and the API, and nothing else',
+    JSON.stringify(config.matcher) === JSON.stringify(['/ai-notes/:path*', '/implant/:path*', '/api/:path*']),
     JSON.stringify(config.matcher));
 
   let r = await middleware(req('/ai-notes/'));
@@ -1176,6 +1176,58 @@ async function testMiddleware() {
   const wrong = await mintToken('a-different-secret', 3600);
   r = await middleware(req('/ai-notes/', { cookie: `${COOKIE_NAME}=${wrong}` }));
   ok('cookie signed with another secret rejected', r?.status === 401);
+
+
+  /* ---- the implant preview: a session is not enough, it must be his ---- */
+  const asWho = async (who) => buildCookie(await mintToken(process.env.SESSION_SECRET, 3600, who)).split(';')[0];
+  process.env.IMPLANT_USERS = 'AM';
+
+  r = await middleware(req('/implant/'));
+  ok('implant, not signed in: the passcode form, naming the tool', r?.status === 401 && (await r.clone().text()).includes('Implant Case Assessment'), `got ${r?.status}`);
+
+  r = await middleware(req('/implant/', { cookie: await asWho('AM') }));
+  ok('implant, signed in as the named clinician: allowed through', r === undefined, `got ${r?.status}`);
+
+  r = await middleware(req('/implant/', { cookie: await asWho('SM') }));
+  ok('implant, signed in as someone else: 403, not 401', r?.status === 403, `got ${r?.status}`);
+  ok('and the 403 says the passcode was fine, the tool is not open to them',
+    (await r.clone().text()).includes('not available to you'));
+
+  r = await middleware(req('/implant/', { cookie: await asWho('am') }));
+  ok('the list is not case-sensitive', r === undefined, `got ${r?.status}`);
+
+  process.env.IMPLANT_USERS = ' AM , SM ';
+  r = await middleware(req('/implant/', { cookie: await asWho('SM') }));
+  ok('spaces around a name in the list do not lock that person out', r === undefined, `got ${r?.status}`);
+
+  delete process.env.IMPLANT_USERS;
+  r = await middleware(req('/implant/', { cookie: await asWho('AM') }));
+  ok('with no list set, the tool is closed to everyone, author included', r?.status === 403, `got ${r?.status}`);
+  process.env.IMPLANT_USERS = 'AM';
+
+  const preToken = await mintToken(process.env.SESSION_SECRET, 3600);
+  r = await middleware(req('/implant/', { cookie: buildCookie(preToken).split(';')[0] }));
+  ok('a session from before per-user sign-in cannot open it either', r?.status === 403, `got ${r?.status}`);
+
+  r = await middleware(req('/implant/viewer.js', { accept: '*/*', cookie: await asWho('SM') }));
+  ok('the viewer bundle is gated too, not just the page', r?.status === 403, `got ${r?.status}`);
+
+  r = await middleware(req('/implant/sw.js', { accept: '*/*' }));
+  ok('but its service worker stays reachable, so the caching one can be evicted', r === undefined, `got ${r?.status}`);
+
+  r = await middleware(req('/implant/', { accept: 'application/json', cookie: await asWho('SM') }));
+  ok('a non-page request gets JSON, not an HTML page', r?.status === 403 && r.headers.get('content-type').includes('json'));
+
+  // The open tools are protected by the matcher, not by this function: the
+  // function 401s anything it is handed, which is why the matcher is the thing
+  // to assert. A stray prefix here would take the whole site off the air.
+  const covered = (p) => config.matcher.some((m) => new RegExp('^' + m.replace('/:path*', '(/.*)?$')).test(p));
+  for (const open of ['/', '/third-molar/', '/sedation/', '/local-anaesthetic/', '/asa-assessment/', '/404.html']) {
+    ok(`the matcher leaves ${open} alone`, !covered(open));
+  }
+  for (const shut of ['/implant/', '/implant/viewer.js', '/ai-notes/', '/api/auth']) {
+    ok(`the matcher covers ${shut}`, covered(shut));
+  }
 
   r = await middleware(req('/ai-notes/'));
   ok('challenge is noindex and no-store',
