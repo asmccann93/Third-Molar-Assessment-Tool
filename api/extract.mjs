@@ -32,7 +32,11 @@ import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS
          buildPostopSystemPrompt, parsePostop } from './_prompt.mjs';
 import { checklistGaps } from './_checklists.mjs';
 
-export const config = { maxDuration: 120 };
+// 300 s, raised from 120 on 21 September 2026: a long implant or treatment-plan
+// consultation on the Full length can take longer than two minutes to draft,
+// and the retries below need room. 300 s is the maximum on every Vercel plan
+// under Fluid compute, which is the default.
+export const config = { maxDuration: 300 };
 
 const REGION = process.env.AWS_REGION || 'eu-west-2';
 const MODEL_ID = process.env.BEDROCK_MODEL_ID || 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0';
@@ -270,9 +274,11 @@ export default async function handler(req, res) {
     const payload = {
       anthropic_version: 'bedrock-2023-05-31',
       // Raised from 4096 when the checklist, dictated fields and implant log
-      // were added to the response shape. A truncated draft is thrown away
-      // whole, so the headroom is worth more than the tokens.
-      max_tokens: 8192,
+      // were added to the response shape, and from 8192 to 16000 on
+      // 21 September 2026 for long consultations on the Full length. A
+      // truncated draft is thrown away whole, so the headroom is worth more
+      // than the tokens: they are only spent when the note is that long.
+      max_tokens: 16000,
       temperature: 0,
       system: buildSystemPrompt(consultType, length),
       messages: [{ role: 'user', content: buildUserMessage(transcript, pauses, roles) }]
@@ -283,7 +289,7 @@ export default async function handler(req, res) {
     if (raw?.stop_reason === 'max_tokens') {
       return res.status(502).json({
         error: 'response_truncated',
-        detail: 'The draft exceeded the token limit and was cut off. Nothing kept — record again, or raise max_tokens.'
+        detail: 'The note came out longer than the limit and was cut off, so nothing was kept. Choose Brief under note length and press Try drafting again.'
       });
     }
 
@@ -331,28 +337,58 @@ export default async function handler(req, res) {
  * parseNote checks that every field is PRESENT. This checks that every field is
  * the right TYPE, which is a different failure and a worse one.
  *
- * A field returned as an object passes parseNote, renders as "[object Object]",
- * and — because it is not null — is not reported as a gap. So {"text": "nerve
- * injury"} in the risks field means a risk that was genuinely discussed vanishes
- * from the note while the note reports itself complete. Silent content loss in a
- * field a complaint would turn on.
+ * A field returned as an object used to pass parseNote, render as
+ * "[object Object]", and, because it was not null, go unreported as a gap: a
+ * risk that was genuinely discussed vanished while the note called itself
+ * complete. So the wrong shape was refused, and the note with it.
  *
- * Rejecting rather than coercing, deliberately. Joining an array or stringifying
- * an object would be inventing structure the model did not produce, which is the
- * one thing this tool must not do. A visible failure is the correct outcome.
+ * Since 21 September 2026 (the clinical lead's decision) the two shapes the
+ * model actually produces are laid out as text instead, because the risks
+ * field is labelled "per option" and invites exactly them:
+ *   - a list of strings  -> one item per line, in the model's order;
+ *   - an object whose values are strings -> one "option: text" line per key,
+ *     so the option each risk belongs to is kept, in the model's words.
+ * Nothing is added, reordered or reworded. Anything deeper (a list of objects,
+ * an object of lists, numbers standing in for text) is still refused: laying
+ * that out would mean choosing a structure the model did not give.
  */
+function asText(v) {
+  if (Array.isArray(v)) {
+    const items = v.filter((x) => x !== null && x !== undefined);
+    if (!items.every((x) => typeof x === 'string')) return undefined;
+    const lines = items.map((x) => x.trim()).filter(Boolean);
+    return lines.length ? lines.join('\n') : null;
+  }
+  if (v && typeof v === 'object') {
+    const entries = Object.entries(v).filter(([, x]) => x !== null && x !== undefined);
+    if (!entries.every(([, x]) => typeof x === 'string')) return undefined;
+    const lines = entries.map(([k, x]) => [String(k).trim(), x.trim()]).filter(([, x]) => x)
+      .map(([k, x]) => (k ? `${k}: ${x}` : x));
+    return lines.length ? lines.join('\n') : null;
+  }
+  return undefined;
+}
+
 function assertShape(note) {
   for (const [key, label] of [...FIELDS, ...DICTATED_FIELDS]) {
     const v = note[key];
     if (v === null || v === undefined) continue;
-    if (typeof v !== 'string') {
+    if (typeof v === 'string') continue;
+    const laid = asText(v);
+    if (laid === undefined) {
       throw new Error(`Field "${key}" (${label}) came back as ${Array.isArray(v) ? 'an array' : typeof v}, not text`);
     }
+    note[key] = laid;
+    // Laid out as nothing (an empty list, say): blank, so it must be listed.
+    if (laid === null) note.gaps.push(`${label}: left blank in the draft; check whether it came up`);
   }
   if (!Array.isArray(note.gaps)) throw new Error('gaps is not an array');
-  for (const g of note.gaps) {
-    if (typeof g !== 'string') throw new Error(`A gap came back as ${typeof g}, not text`);
-  }
+  note.gaps = note.gaps.map((g) => {
+    if (typeof g === 'string') return g;
+    const laid = asText(g);
+    if (typeof laid === 'string') return laid.replace(/\n/g, '; ');
+    throw new Error(`A gap came back as ${typeof g}, not text`);
+  });
 }
 
 /* ---------- Bedrock ---------- */
@@ -394,7 +430,30 @@ async function invokeModel(payload, creds) {
     extraHeaders: { 'content-type': 'application/json', accept: 'application/json' }
   });
 
-  const r = await fetch(`https://${host}${wirePath}`, { method: 'POST', headers, body: bodyText });
+  // A busy or briefly unavailable service used to fail the draft outright, and
+  // the clinician had to press Try drafting again. Now it is retried here: up
+  // to two more attempts, 2 s then 6 s apart, and only for the answers that
+  // mean "try again" (throttled, 5xx, or no answer at all). A refusal about the
+  // request itself (4xx other than 429) is not retried: it would fail the same
+  // way. Each attempt is signed afresh, because the signature carries the time.
+  const RETRY = new Set([429, 500, 502, 503, 504]);
+  const waits = [2000, 6000];
+  let r;
+  for (let attempt = 0; ; attempt++) {
+    const h = attempt === 0 ? headers : await signRequest({
+      method: 'POST', host, path: canonicalPath, body: bodyText, region: REGION, service: SERVICE, creds,
+      extraHeaders: { 'content-type': 'application/json', accept: 'application/json' }
+    });
+    try {
+      r = await fetch(`https://${host}${wirePath}`, { method: 'POST', headers: h, body: bodyText });
+    } catch (e) {
+      if (attempt < waits.length) { await sleep(waits[attempt]); continue; }
+      throw new Error('Could not reach the drafting service: ' + String((e && e.message) || e).slice(0, 200));
+    }
+    if (r.ok || !RETRY.has(r.status) || attempt >= waits.length) break;
+    console.warn('extract: bedrock', r.status, '- retrying');
+    await sleep(waits[attempt]);
+  }
   if (!r.ok) {
     // Generous limit on purpose. On a signature mismatch AWS returns the exact
     // canonical string it expected, which is the fastest way to find the
@@ -474,6 +533,10 @@ async function signRequest({ method, host, path, body, region, service, creds, e
 }
 
 /* ---------- helpers ---------- */
+
+// Overridable so the tests do not wait for real seconds.
+export const _retry = { sleepMs: null };
+const sleep = (ms) => new Promise((res) => setTimeout(res, _retry.sleepMs === null ? ms : _retry.sleepMs));
 
 async function readJson(req) {
   if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;

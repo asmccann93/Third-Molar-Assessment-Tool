@@ -427,7 +427,16 @@ export function notApplicableFields(consultTypeKey) {
 // message here deliberately carries nothing from the response.
 function parseObject(cleaned) {
   let parsed;
-  try { parsed = JSON.parse(cleaned); } catch { throw new Error('Model did not return valid JSON'); }
+  try { parsed = JSON.parse(cleaned); } catch {
+    // Words around the object ("Here is the note:" before it, "Let me know..."
+    // after it, a code fence in the middle of a sentence) used to refuse the
+    // note, identically on every retry. The object itself is taken from the
+    // first "{" to the last "}" and must still parse whole; nothing outside it
+    // is kept, and nothing inside it is changed.
+    const from = cleaned.indexOf('{'), to = cleaned.lastIndexOf('}');
+    if (from < 0 || to <= from) throw new Error('Model did not return valid JSON');
+    try { parsed = JSON.parse(cleaned.slice(from, to + 1)); } catch { throw new Error('Model did not return valid JSON'); }
+  }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`Model returned ${parsed === null ? 'null' : Array.isArray(parsed) ? 'an array' : 'a ' + typeof parsed}, not a JSON object`);
   }
@@ -439,15 +448,15 @@ export function parseNote(raw, consultTypeKey) {
 
   const parsed = parseObject(cleaned);
 
-  // A field that APPLIES must be present: leaving it out is a malformed
-  // response and fails loudly. A field that does not apply to this kind of
-  // appointment may be left out — the model deciding it is irrelevant is the
-  // same answer as null, and refusing it cost the whole note at temperature 0.
-  const inapplicable = new Set(notApplicableFields(consultTypeKey));
+  // A field left out is the same answer as null. Until 21 September 2026 that
+  // was only accepted for fields that do not apply to the consult type.
+  // Since then a field that applies but was left out is treated
+  // exactly like one returned as null: it is blank, and the backstop below
+  // lists it for the clinician to check. Refusing it cost the whole note, the
+  // same way on every retry, over an answer ("nothing to put here") that is
+  // no different from null (the clinical lead's decision).
   for (const [key] of FIELDS) {
-    if (key in parsed) continue;
-    if (inapplicable.has(key)) { parsed[key] = null; continue; }
-    throw new Error(`Missing field: ${key}`);
+    if (!(key in parsed)) parsed[key] = null;
   }
   // Dictated fields are optional in the RESPONSE too — an older prompt, or a
   // model that omits them, must not fail the whole note. Absent means null.
@@ -492,6 +501,10 @@ export function parseNote(raw, consultTypeKey) {
 
   if (!('checklist' in parsed) || parsed.checklist === null) parsed.checklist = {};
   if (typeof parsed.checklist !== 'object' || Array.isArray(parsed.checklist)) throw new Error('checklist is not an object');
+  // No gaps key at all is "nothing missing", and a single string is one gap.
+  // Both used to refuse the note. Anything else in that place is still refused.
+  if (parsed.gaps === undefined || parsed.gaps === null) parsed.gaps = [];
+  if (typeof parsed.gaps === 'string') parsed.gaps = parsed.gaps.trim() ? [parsed.gaps] : [];
   if (!Array.isArray(parsed.gaps)) throw new Error('Missing or invalid gaps array');
 
   // Any null field must be accounted for in gaps — but only where the field
