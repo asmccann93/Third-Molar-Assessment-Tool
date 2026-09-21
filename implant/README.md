@@ -1,15 +1,20 @@
 # Implant Case Assessment — `/implant/`
 
-**Status: preview.** Not linked from the site, `noindex`, and every clinical
-figure in it is a draft awaiting the clinical lead's review. `site-check.js`
-(check 5) enforces the preview rules.
+**Status: preview, passcode-gated, author only.** Linked from the hub and every
+switcher bar as "Implant (preview)", but since 21 September 2026 it sits behind the
+same sign-in as AI Notes *and* an allow-list: `middleware.js` lets through only the
+initials named in the `IMPLANT_USERS` environment variable (`AM`). Anyone else who
+signs in gets a 403 page saying it is not available to them; if `IMPLANT_USERS` is
+unset, nobody gets in. It keeps no offline copy while gated. `noindex`, out of the
+sitemap, and every clinical figure in it is a draft awaiting the clinical lead's
+review. `site-check.js` (check 5, and 3e for the hub worker) enforces all of this.
 
 ## Files
 
 | File | What it is |
 | --- | --- |
 | `index.html` | The assessment. Self-contained, no build step, like ASA. |
-| `sw.js` | Offline cache, prefix `imp-`. Bump `CACHE` whenever `index.html` or `viewer.js` changes (CI checks both). |
+| `sw.js` | Network-only while the tool is gated: caches nothing, and deletes the `imp-` caches the earlier offline worker left behind. It must not declare a `CACHE` (site-check refuses one). Give it back its cache only when the gate comes off. |
 | `viewer.js` | CBCT viewer core plus dicom-parser and a lossless JPEG decoder, built from `src/`. Loaded only when a scan is opened. |
 | `src/viewer-core.js` | Source of the viewer core: loads a DICOM series in the browser (a folder of slices, or one multi-frame file; uncompressed or lossless JPEG), cuts planes through it, converts image points to millimetres. It never reads the scan for the clinician. |
 | `src/viewer-entry.js` | Build entry. |
@@ -48,6 +53,9 @@ marker so it never does; the tests fail without it.
 ## Launch checklist
 
 1. Clinical content reviewed and signed off; `DRAFT` figures confirmed.
-2. Remove the preview banner and the `robots` meta; add the og and twitter tags.
-3. Add `<a href="/implant/">Implant</a>` to the switcher on every page, AI Notes included.
-4. Move the entry from `PREVIEW` to `TOOLS` in `site-check.js`; add it to `sitemap.xml`, the hub, and the canary list in CI.
+2. Take `/implant/` out of `RESTRICTED` in `middleware.js` (and out of its matcher, if it is to be public), delete `IMPLANT_USERS`, restore an offline `sw.js` with an `imp-` cache, and put `implant` back in the CI cache-bump loop (with its `viewer.js` rule).
+3. Remove the preview banner and the `robots` meta; add the og and twitter tags.
+4. Change the switcher label on every page from `Implant (preview)` to `Implant`
+   (hub, four tools, AI Notes, 404 and the implant page itself), and drop the
+   `Preview` tag from the hub card.
+5. Move the entry from `PREVIEW` to `TOOLS` in `site-check.js`; add it to `sitemap.xml`. It is already on the hub; in the CI canary, move it from the must-stay-shut step to the must-stay-open one, and drop the `Sign-in required` tag from the hub card.

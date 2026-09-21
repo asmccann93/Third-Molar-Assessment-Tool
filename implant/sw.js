@@ -1,49 +1,29 @@
-/* Implant Case Assessment — service worker.
-   Bump CACHE whenever index.html changes, or installed browsers keep serving
-   the old copy. Only this tool's caches are removed on activate: the other
-   tools share this origin and own their own. */
-const CACHE = "imp-v0-4";
-const ASSETS = ["./", "./index.html", "./viewer.js"];
+// implant/sw.js
+//
+// Network-only service worker, scope /implant/.
+//
+// The tool is behind a passcode and restricted to its author while its clinical
+// figures are drafts, so it keeps no offline copy: a cached page opens without
+// the passcode, on any device that signed in once, for as long as the cache
+// lives. This worker exists to be that absence, and to clear the caches the
+// earlier caching worker left behind (prefix imp-).
+//
+// Do not add a cache here while the tool is gated.
 
-self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+self.addEventListener('install', () => {
+  self.skipWaiting();
 });
 
-self.addEventListener("activate", (e) => {
-  e.waitUntil(
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(
-        keys.filter((k) => k.indexOf("imp-") === 0 && k !== CACHE).map((k) => caches.delete(k))
-      ))
+      .then((keys) => Promise.all(keys.filter((k) => k.indexOf('imp-') === 0).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener("fetch", (e) => {
-  if (e.request.method !== "GET") return;
-  if (e.request.mode === "navigate") {
-    e.respondWith(
-      fetch(e.request)
-        .then((resp) => {
-          if (resp && resp.ok) {
-            const copy = resp.clone();
-            caches.open(CACHE).then((c) => c.put(e.request, copy));
-          }
-          return resp;
-        })
-        .catch(() => caches.match(e.request).then((r) => r || caches.match("./index.html")))
-    );
-    return;
-  }
-  e.respondWith(
-    caches.match(e.request).then((cached) =>
-      cached || fetch(e.request).then((resp) => {
-        if (resp && (resp.ok || resp.type === "opaque")) {
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
-        }
-        return resp;
-      })
-    )
-  );
+self.addEventListener('fetch', () => {
+  // Nothing intercepted, nothing stored: every request goes to the network,
+  // and therefore through the gate.
+  return;
 });
