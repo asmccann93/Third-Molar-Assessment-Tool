@@ -34,6 +34,7 @@ var LOSSLESS_TS = {
   "1.2.840.10008.1.2.4.70": "JPEG Lossless, Non-Hierarchical, First-Order Prediction"
 };
 var IMPLICIT_LE = "1.2.840.10008.1.2";
+var BIG_ENDIAN = "1.2.840.10008.1.2.2";
 
 function num(ds, tag, i) {
   var s = ds.string(tag);
@@ -63,12 +64,22 @@ var SKIP = {
   noImage: "DICOM files without an image (a directory or report)",
   compressed: "compressed in a format this viewer does not read (it reads uncompressed and lossless JPEG only)",
   format: "images in a format other than 16-bit greyscale (a thumbnail, a colour preview)",
-  noGeometry: "images without position and spacing information"
+  noGeometry: "images without position and spacing information",
+  badScale: "images whose rescale values are not usable",
+  frames: "images whose frame count could not be read",
+  bigEndian: "written in big-endian form, which this viewer does not read"
 };
 
 function parse(bytes, dicomParser) {
   try { return dicomParser.parseDicom(bytes); }
   catch (e) {
+    // A big-endian file parses as far as its header and then fails. Reading
+    // that header back means the clinician is told the real reason rather
+    // than "not DICOM files".
+    try {
+      var head = dicomParser.readPart10Header(bytes);
+      if (head && (head.string("x00020010") || "").replace(/\0/g, "").trim() === BIG_ENDIAN) return BIG_ENDIAN;
+    } catch (e3) { /* not a part-10 file either */ }
     // Some exports write bare datasets with no 128-byte preamble and no DICM
     // prefix. Those are almost always implicit little endian.
     // Anything parses as *something* this way, so only trust it if it holds a
@@ -85,28 +96,51 @@ function parse(bytes, dicomParser) {
 // functional groups: per frame first, then shared by all frames. Older files
 // keep it at the top level. Returns the dataset that holds `tag` for frame f.
 var PER_FRAME = "x52009230", SHARED = "x52009229";
-function holder(ds, f, seqTag, tag) {
-  var places = [];
-  var pf = ds.elements[PER_FRAME], sh = ds.elements[SHARED];
-  if (pf && pf.items && pf.items[f]) places.push(pf.items[f].dataSet);
-  if (sh && sh.items && sh.items[0]) places.push(sh.items[0].dataSet);
-  for (var i = 0; i < places.length; i++) {
-    var seq = places[i].elements[seqTag];
-    var inner = seq && seq.items && seq.items[0] && seq.items[0].dataSet;
-    if (inner && inner.elements[tag] && inner.elements[tag].length > 0) return inner;
-  }
-  return ds.elements[tag] && ds.elements[tag].length > 0 ? ds : null;
+function places(ds, f, seqTag) {
+  var out = [], pf = ds.elements[PER_FRAME], sh = ds.elements[SHARED];
+  var from = function (holderDs) {
+    if (!holderDs) return;
+    var seq = holderDs.elements[seqTag];
+    if (seq && seq.items) for (var k = 0; k < seq.items.length; k++) if (seq.items[k].dataSet) out.push(seq.items[k].dataSet);
+  };
+  if (pf && pf.items && pf.items[f]) from(pf.items[f].dataSet);
+  if (sh && sh.items && sh.items[0]) from(sh.items[0].dataSet);
+  out.push(ds);
+  return out;
 }
-function numsAt(ds, f, seqTag, tag) { var h = holder(ds, f, seqTag, tag); return h ? nums(h, tag) : null; }
-function numAt(ds, f, seqTag, tag) { var h = holder(ds, f, seqTag, tag); return h ? num(h, tag) : null; }
+/* The first place whose value actually reads as a number. A tag that is present
+   but blank (space padding, which some exports write instead of a zero-length
+   tag) must fall through to the next place, not swallow it: a blank per-frame
+   rescale used to hide the shared one and shift the whole volume by 1000 HU. */
+function numsAt(ds, f, seqTag, tag) {
+  var list = places(ds, f, seqTag);
+  for (var i = 0; i < list.length; i++) { var v = nums(list[i], tag); if (v) return v; }
+  return null;
+}
+function numAt(ds, f, seqTag, tag) {
+  var list = places(ds, f, seqTag);
+  for (var i = 0; i < list.length; i++) { var v = num(list[i], tag); if (v !== null) return v; }
+  return null;
+}
 
-/* The compressed bytes of frame f. One fragment per frame is what the CS 8100
-   writes (with an empty offset table); anything else goes through the offset
-   table, built from the JPEG start markers when the file leaves it empty. */
+/* Which fragments hold which frame. A frame may be split across fragments, but
+   a fragment never spans two frames, so a fragment that opens with the JPEG
+   start marker (FF D8) opens a frame. Reading it that way rather than from the
+   offset table matters: dicom-parser only finds a boundary when the end marker
+   sits in the last three bytes of a fragment, so a couple of padding bytes
+   after it made a perfectly good scan fail as "damaged". */
 function frameBytes(ds, pixel, f, nFrames, dicomParser) {
   var frags = pixel.fragments || [];
   if (nFrames === 1) return dicomParser.readEncapsulatedPixelDataFromFragments(ds, pixel, 0, frags.length);
   if (frags.length === nFrames) return dicomParser.readEncapsulatedPixelDataFromFragments(ds, pixel, f, 1);
+  // Group the fragments into frames by the start marker each one opens with.
+  var raw = ds.byteArray, runs = [];
+  for (var i = 0; i < frags.length; i++) {
+    var off = frags[i].position;
+    if (!runs.length || (raw[off] === 0xff && raw[off + 1] === 0xd8)) runs.push({ start: i, count: 1 });
+    else runs[runs.length - 1].count++;
+  }
+  if (runs.length === nFrames) return dicomParser.readEncapsulatedPixelDataFromFragments(ds, pixel, runs[f].start, runs[f].count);
   var bot = pixel.basicOffsetTable && pixel.basicOffsetTable.length ? pixel.basicOffsetTable
     : dicomParser.createJPEGBasicOffsetTable(ds, pixel);
   if (bot.length !== nFrames) throw new ScanError("The compressed image data does not match the number of slices. The export may be damaged.");
@@ -122,12 +156,14 @@ function frameBytes(ds, pixel, f, nFrames, dicomParser) {
 function readFile(buffer, dicomParser, Lossless) {
   var bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   var ds = parse(bytes, dicomParser);
+  if (ds === BIG_ENDIAN) return { skip: "bigEndian" };
   if (!ds) return { skip: "notDicom" };
 
   var pixel = ds.elements.x7fe00010;
   if (!pixel) return { skip: "noImage" };
 
   var ts = (ds.string("x00020010") || "").replace(/\0/g, "").trim();
+  if (ts === BIG_ENDIAN) return { skip: "bigEndian" };
   var lossless = !!LOSSLESS_TS[ts];
   if (ts && !UNCOMPRESSED_TS[ts] && !(lossless && Lossless)) return { skip: "compressed" };
   if (lossless && !pixel.encapsulatedPixelData) return { skip: "compressed" };
@@ -135,8 +171,11 @@ function readFile(buffer, dicomParser, Lossless) {
   if (bits !== 16 || samples !== 1) return { skip: "format" };
 
   var rows = ds.uint16("x00280010"), cols = ds.uint16("x00280011");
-  var nFrames = parseInt(ds.string("x00280008") || "1", 10);
-  if (!(nFrames >= 1)) nFrames = 1;
+  var framesTag = (ds.string("x00280008") || "").replace(/\0/g, "").trim();
+  var nFrames = framesTag === "" ? 1 : parseInt(framesTag, 10);
+  // Present but unreadable: loading frame 1 of 173 and calling it the scan is
+  // worse than saying so.
+  if (!(nFrames >= 1)) return { skip: "frames" };
   var signed = ds.uint16("x00280103") === 1;
   var n = rows * cols;
   if (!(n > 0)) return { skip: "format" };
@@ -154,6 +193,9 @@ function readFile(buffer, dicomParser, Lossless) {
     if (!row || !col || !(ps[0] > 0) || !(ps[1] > 0)) return { skip: "noGeometry" };
     var slope = numAt(ds, f, "x00289145", "x00281053"); if (slope === null) slope = 1;
     var intercept = numAt(ds, f, "x00289145", "x00281052"); if (intercept === null) intercept = 0;
+    // A slope of zero flattens the scan to one grey; a negative one inverts it.
+    // Either means the file is wrong, and neither should be drawn as a scan.
+    if (!(slope > 0) || !isFinite(intercept)) return { skip: "badScale" };
     slices.push({
       series: series, rows: rows, cols: cols, ipp: ipp, row: row, col: col,
       // DICOM PixelSpacing is [between rows, between columns].
@@ -179,16 +221,36 @@ function viewFrame(bytes, pixel, f, n, signed) {
    Four bytes of fill bits (0xFF, stuffed as 0xFF 0x00: the 1-bits T.81 uses
    for padding) are put before the marker, so the marker is always further
    away than the lookahead. Nothing after the last pixel is ever decoded, so
-   the padding cannot change a value. */
+   the padding cannot change a value.
+
+   The marker is found by reading forward from the start-of-scan header, not
+   backwards from the end of the data: inside entropy-coded data every 0xFF is
+   stuffed as FF 00, so the first FF D9 after the scan header is the real end,
+   while anything after it (a vendor trailer, a second copy of the marker) is
+   not. Searching backwards put the padding after the real marker, which did
+   nothing at all. */
 function padBeforeEnd(jpeg) {
-  var end = jpeg.length - 2;
-  while (end >= 0 && !(jpeg[end] === 0xff && jpeg[end + 1] === 0xd9)) end--;
+  var end = -1;
+  for (var i = 2; i + 3 < jpeg.length && jpeg[i] === 0xff; ) {
+    var m = jpeg[i + 1];
+    if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { i += 2; continue; }  // no length of their own
+    var segEnd = i + 2 + ((jpeg[i + 2] << 8) | jpeg[i + 3]);
+    if (m === 0xda) {                       // start of scan: entropy data follows
+      for (var j = segEnd; j + 1 < jpeg.length; j++) {
+        if (jpeg[j] === 0xff && jpeg[j + 1] === 0xd9) { end = j; break; }
+      }
+      break;
+    }
+    i = segEnd;
+  }
+  if (end < 0) {                            // no scan header, or no marker: leave it alone
+    for (var k = jpeg.length - 2; k >= 0; k--) if (jpeg[k] === 0xff && jpeg[k + 1] === 0xd9) { end = k; break; }
+  }
   if (end < 0) end = jpeg.length;
   var out = new Uint8Array(jpeg.length + 8);
   out.set(jpeg.subarray(0, end), 0);
-  for (var i = 0; i < 4; i++) { out[end + 2 * i] = 0xff; out[end + 2 * i + 1] = 0; }
+  for (var q = 0; q < 4; q++) { out[end + 2 * q] = 0xff; out[end + 2 * q + 1] = 0; }
   out.set(jpeg.subarray(end), end + 8);
-  if (end === jpeg.length) return out.subarray(0, end + 8);
   return out;
 }
 
@@ -233,20 +295,25 @@ export function loadSeries(buffers, dicomParser, Lossless) {
   slices.forEach(function (s) { (bySeries[s.series] = bySeries[s.series] || []).push(s); });
   var keys = Object.keys(bySeries);
   if (keys.length > 1) {
-    keys.sort(function (a, b) { return bySeries[b].length - bySeries[a].length; });
+    // Ties broken by name, not by the order the browser handed over the files,
+    // so the same folder always loads the same series.
+    keys.sort(function (a, b) { return (bySeries[b].length - bySeries[a].length) || (a < b ? -1 : a > b ? 1 : 0); });
     warnings.push("The folder held " + keys.length + " series; the largest (" + bySeries[keys[0]].length + " slices) was loaded.");
   }
   slices = bySeries[keys[0]];
   if (slices.length < 2) throw new ScanError("Only one slice was found. A CBCT needs the whole series.");
 
-  var first = slices[0];
+  var first = slices[0];   // reference for the per-slice checks; reset to the bottom slice after the sort
   var xDir = first.row, yDir = first.col, zDir = unit(cross(xDir, yDir));
   if (!zDir || Math.abs(dot(xDir, yDir)) > 1e-3) throw new ScanError("The slice orientation in this scan is not valid.");
   slices.forEach(function (s) {
     if (s.rows !== first.rows || s.cols !== first.cols) throw new ScanError("Slices in this series are different sizes.");
-    // Normalised, and a tolerance of 1e-3: exports that write the orientation
-    // to three decimals must still compare equal to themselves.
-    if (dot(s.row, xDir) < 1 - 1e-3 || dot(s.col, yDir) < 1 - 1e-3)
+    // Normalised first, so slices written to three decimals still compare
+    // equal to each other; what is left is real disagreement between slices.
+    // 1e-6 is 0.08 degrees, which puts a voxel 80 mm out from the centre at
+    // most 0.11 mm from where it belongs. The old 1e-3 allowed 2.6 degrees,
+    // which is 3.6 mm out there: a whole implant diameter.
+    if (dot(s.row, xDir) < 1 - 1e-6 || dot(s.col, yDir) < 1 - 1e-6)
       throw new ScanError("Slices in this series are tilted differently from each other.");
     if (Math.abs(s.rowSpacing - first.rowSpacing) > 1e-4 || Math.abs(s.colSpacing - first.colSpacing) > 1e-4)
       throw new ScanError("Slices in this series have different pixel spacing.");
@@ -255,6 +322,10 @@ export function loadSeries(buffers, dicomParser, Lossless) {
   // Spatial order, from position along the slice normal. Never file order.
   slices.forEach(function (s) { s.d = dot(s.ipp, zDir); });
   slices.sort(function (a, b) { return a.d - b.d; });
+  // From here on, "first" means the slice at the bottom of the stack. Before
+  // the sort it meant whichever file or frame happened to come first, which
+  // silently disabled the shear check below on any export written top-down.
+  first = slices[0];
 
   var gaps = [];
   for (var k = 1; k < slices.length; k++) gaps.push(slices[k].d - slices[k - 1].d);
