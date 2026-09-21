@@ -755,15 +755,19 @@ async function testExtract() {
       .every((k) => !notApplicableFields(k).includes('patientFactors')));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'third-molar' } }), res);
-  ok('the SAME left-out fields on a surgical consultation still fail loudly',
-    res.statusCode === 502 && /Missing field/.test(JSON.stringify(res.body)), `${res.statusCode}`);
+  // Since 21 September 2026 a left-out field is a blank field, on every type.
+  ok('the SAME left-out fields on a surgical consultation now draft, each listed for checking',
+    res.statusCode === 200 && (res.body?.note?.gaps || []).some((g) => /^Material risks.*left blank in the draft/.test(g)),
+    `${res.statusCode} ${JSON.stringify(res.body?.note?.gaps)}`);
   const recallOmitsApplicable = { ...recallNote };
   delete recallOmitsApplicable.reasonForAttendance;
   stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(recallOmitsApplicable) }], stop_reason: 'end_turn' } }));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'exam-recall' } }), res);
-  ok('and a recall that leaves out a field that DOES apply still fails loudly',
-    res.statusCode === 502 && /Missing field: reasonForAttendance/.test(JSON.stringify(res.body)), `${res.statusCode}`);
+  ok('and a recall that leaves out a field that DOES apply drafts, with that field listed',
+    res.statusCode === 200 && res.body?.note?.reasonForAttendance === null &&
+      (res.body?.note?.gaps || []).some((g) => /^Reason for attendance.*left blank in the draft/.test(g)),
+    `${res.statusCode} ${JSON.stringify(res.body?.note?.gaps)}`);
   ok('the model is told never to leave a key out',
     /Every key below must appear[^\n]*never leave a key out/.test(sys0));
 
@@ -1074,7 +1078,17 @@ async function testExtract() {
   bedrockReturning(JSON.stringify(missingField));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
-  ok('missing field fails loudly, no partial note', res.statusCode === 502 && !res.body?.note, `got ${res.statusCode}`);
+  // Since 21 September 2026: drafts, and the missing field is blank and listed.
+  // goodNote already reports a gap of its own, so the model's gap stands and the
+  // field is simply null; the page shows a null field as a gap regardless.
+  ok('a missing field drafts as a blank field, never as invented content',
+    res.statusCode === 200 && res.body?.note?.alternatives === null, `got ${res.statusCode}`);
+  bedrockReturning(JSON.stringify({ ...missingField, gaps: [] }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+  ok('and with no gaps of its own, the missing field is listed for checking',
+    res.statusCode === 200 && (res.body?.note?.gaps || []).some((g) => /^Reasonable alternatives.*left blank in the draft/.test(g)),
+    JSON.stringify(res.body?.note?.gaps));
 
   // --- nulls with no gaps: the model possibly dropping content ---
   // Until 21 September 2026 this refused the note. It now drafts, and every
@@ -1100,33 +1114,134 @@ async function testExtract() {
   await handler(mockReq({ body: { turns } }), res);
   ok('non-JSON response rejected', res.statusCode === 502);
 
+  // --- a busy or briefly unavailable service is retried (21 September 2026) ---
+  {
+    const ex = await import('../api/extract.mjs');
+    ex._retry.sleepMs = 0;
+    const seq = (codes) => { let i = 0; return stubFetch(async () => {
+      const c = codes[Math.min(i++, codes.length - 1)];
+      if (c === 'net') throw new Error('socket hang up');
+      return c === 200 ? { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }
+                       : { status: c, body: { message: 'ThrottlingException' } };
+    }); };
+    for (const code of [429, 503, 500]) {
+      const calls = seq([code, 200]);
+      res = mockRes();
+      await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+      ok(`a ${code} from the service is retried and the note drafts`, res.statusCode === 200 && calls.length === 2, `${res.statusCode} after ${calls.length} calls`);
+    }
+    let calls = seq(['net', 200]);
+    res = mockRes();
+    await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+    ok('a dropped connection is retried too', res.statusCode === 200 && calls.length === 2, `${res.statusCode} after ${calls.length} calls`);
+    calls = seq([503, 503, 200]);
+    res = mockRes();
+    await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+    ok('two failures then success still drafts', res.statusCode === 200 && calls.length === 3, `${res.statusCode} after ${calls.length} calls`);
+    calls = seq([429]);
+    res = mockRes();
+    await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+    ok('it gives up after three attempts, and says so', res.statusCode === 502 && calls.length === 3 && /bedrock 429/.test(res.body?.detail || ''), `${res.statusCode} after ${calls.length} calls`);
+    calls = seq([400]);
+    res = mockRes();
+    await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+    ok('a refusal of the request itself is not retried (it would fail the same way)', res.statusCode === 502 && calls.length === 1, `${calls.length} calls`);
+    calls = seq([403]);
+    res = mockRes();
+    await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+    ok('nor is a permissions error', calls.length === 1, `${calls.length} calls`);
+    let firstAuth = null, secondAuth = null, n = 0;
+    stubFetch(async (e, opts) => { n++; if (n === 1) { firstAuth = opts.headers.authorization; return { status: 503, body: {} }; }
+      secondAuth = opts.headers.authorization; return { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } }; });
+    res = mockRes();
+    await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+    ok('a retry still carries a valid signature', res.statusCode === 200 && typeof secondAuth === 'string' && /^AWS4-HMAC-SHA256 /.test(secondAuth), String(secondAuth).slice(0, 40));
+    ex._retry.sleepMs = null;
+    ok('the function has room for a long draft and its retries (300 s)', ex.config.maxDuration === 300, String(ex.config.maxDuration));
+  }
+
   // --- truncated at max_tokens ---
   bedrockReturning(JSON.stringify(goodNote).slice(0, 200), { stop_reason: 'max_tokens' });
   res = mockRes();
   await handler(mockReq({ body: { turns } }), res);
   ok('truncation reported distinctly', res.statusCode === 502 && res.body?.error === 'response_truncated', res.body?.error);
+  ok('and tells the clinician what to do: choose Brief', /Choose Brief/.test(res.body?.detail || ''), res.body?.detail);
 
   // --- wrong-shaped fields: present, so parseNote passes, but not text --------
   // The dangerous one is an object: it renders as "[object Object]", it is not
   // null so no gap is raised, and whatever it contained is silently lost.
-  const shapes = {
-    'an object in risks':      { ...goodNote, risks: { text: 'nerve injury' } },
-    'an array in risks':       { ...goodNote, risks: ['nerve', 'bleeding'] },
-    'a number in costs':       { ...goodNote, costs: 340 },
-    'a boolean in decision':   { ...goodNote, decision: true },
-    'a nested object in gaps': { ...goodNote, gaps: [{ why: 'none named' }] }
+  // Since 21 September 2026 the two shapes the model actually produces for a
+  // "per option" field are laid out as text, in its own words and order; the
+  // rest are still refused.
+  const laidOut = {
+    'a list of risks':           [{ ...goodNote, risks: ['Nerve injury', 'Dry socket'] }, 'risks', 'Nerve injury\nDry socket'],
+    'risks given per option':    [{ ...goodNote, risks: { Extraction: 'Nerve injury', Coronectomy: 'Root migration' } }, 'risks', 'Extraction: Nerve injury\nCoronectomy: Root migration'],
+    'a gap given as an object':  [{ ...goodNote, gaps: [{ field: 'costs', note: 'not discussed' }] }, null, null]
   };
-  for (const [label, bad] of Object.entries(shapes)) {
+  for (const [label, [bad, key, want]] of Object.entries(laidOut)) {
     bedrockReturning(JSON.stringify(bad));
     res = mockRes();
     await handler(mockReq({ body: { turns } }), res);
-    ok(`rejects ${label}`, res.statusCode === 502 && !res.body?.note, `got ${res.statusCode}`);
+    ok(`${label}: drafts, laid out as text`, res.statusCode === 200 && (key === null || res.body?.note?.[key] === want),
+      `${res.statusCode} ${JSON.stringify(key ? res.body?.note?.[key] : res.body?.note?.gaps)}`);
   }
-
-  bedrockReturning(JSON.stringify({ ...goodNote, risks: { text: 'nerve injury' } }));
+  ok('a gap given as an object keeps the model\'s own words', (res.body?.note?.gaps || []).includes('field: costs; note: not discussed'),
+    JSON.stringify(res.body?.note?.gaps));
+  bedrockReturning(JSON.stringify({ ...goodNote, risks: [] }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns } }), res);
+  ok('an empty list is a blank field, and is listed for checking',
+    res.statusCode === 200 && res.body?.note?.risks === null && (res.body?.note?.gaps || []).some((g) => /^Material risks.*left blank/.test(g)),
+    JSON.stringify(res.body?.note));
+  const stillRefused = {
+    'a number in costs':          { ...goodNote, costs: 340 },
+    'a boolean in decision':      { ...goodNote, decision: true },
+    'a list of objects in risks': { ...goodNote, risks: [{ option: 'Extraction', risk: 'Nerve injury' }] },
+    'an object of lists in risks':{ ...goodNote, risks: { Extraction: ['Nerve injury', 'Pain'] } },
+  };
+  for (const [label, bad] of Object.entries(stillRefused)) {
+    bedrockReturning(JSON.stringify(bad));
+    res = mockRes();
+    await handler(mockReq({ body: { turns } }), res);
+    ok(`still refuses ${label} (laying it out would mean inventing a structure)`, res.statusCode === 502 && !res.body?.note, `got ${res.statusCode}`);
+    ok(`and says which section, in words (${label})`, /came back as/.test(res.body?.detail || '') && /Field "/.test(res.body?.detail || ''), res.body?.detail);
+  }
+  bedrockReturning(JSON.stringify({ ...goodNote, risks: [{ option: 'Extraction', risk: 'Nerve injury' }] }));
   res = mockRes();
   await handler(mockReq({ body: { turns } }), res);
   ok('and names the offending field', /risks/.test(res.body?.detail || ''), res.body?.detail);
+
+  // Words around the note, and a missing gaps list.
+  const wrapped = {
+    'a sentence before':          'Here is the note:\n' + JSON.stringify(goodNote),
+    'a sentence after':           JSON.stringify(goodNote) + '\n\nLet me know if you need changes.',
+    'a code fence mid-sentence':  'Here you go:\n```json\n' + JSON.stringify(goodNote) + '\n```\nDone.',
+  };
+  for (const [label, text] of Object.entries(wrapped)) {
+    bedrockReturning(text);
+    res = mockRes();
+    await handler(mockReq({ body: { turns } }), res);
+    ok(`words around the note (${label}) are ignored, and the note drafts unchanged`,
+      res.statusCode === 200 && res.body?.note?.reasonForAttendance === 'Recorded.' && !/Here|Let me know|Done/.test(JSON.stringify(res.body?.note)),
+      `${res.statusCode} ${JSON.stringify(res.body).slice(0, 100)}`);
+  }
+  bedrockReturning('I could not produce a note for this transcript.');
+  res = mockRes();
+  await handler(mockReq({ body: { turns } }), res);
+  ok('an answer with no note in it at all is still refused', res.statusCode === 502 && /valid JSON/.test(res.body?.detail || ''), res.body?.detail);
+  bedrockReturning('Here: {"reasonForAttendance": "x", ');
+  res = mockRes();
+  await handler(mockReq({ body: { turns } }), res);
+  ok('and so is a note that is cut off part-way', res.statusCode === 502, `got ${res.statusCode}`);
+  const noGaps = { ...goodNote, risks: 'Nerve injury.' }; delete noGaps.gaps;
+  bedrockReturning(JSON.stringify(noGaps));
+  res = mockRes();
+  await handler(mockReq({ body: { turns } }), res);
+  ok('no gaps list at all means nothing missing, not a refusal', res.statusCode === 200 && Array.isArray(res.body?.note?.gaps), `${res.statusCode}`);
+  bedrockReturning(JSON.stringify({ ...goodNote, gaps: 'No risks named by the clinician.' }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns } }), res);
+  ok('a single gap given as a string is kept as one gap', res.statusCode === 200 && (res.body?.note?.gaps || []).includes('No risks named by the clinician.'), JSON.stringify(res.body?.note?.gaps));
 
   // A null field is still legitimate — that is a gap, not a shape error.
   bedrockReturning(JSON.stringify({ ...goodNote, risks: null, gaps: ['No risks named.'] }));
