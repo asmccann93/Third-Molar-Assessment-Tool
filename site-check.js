@@ -20,7 +20,7 @@
  * discoverability decision; the passcode gate is the control and is unchanged).
  * It is still checked separately rather than being added to TOOLS, because the
  * other rules do not apply to it: it has no cache and must have none, and it
- * must stay out of the sitemap. Check 4 asserts the link is present on every
+ * must stay out of the sitemap. Checks 4 and 4a assert the link is present on every
  * public page, so it cannot vanish from one bar only.
  */
 const fs = require("fs");
@@ -69,7 +69,10 @@ const stripComments = (src) =>
   src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 const cacheNameOf = (sw) => {
-  const m = sw && sw.match(/CACHE\s*=\s*"([^"]+)"/);
+  // Either quote style: a worker that declared its cache with single quotes
+  // used to read as having no cache at all, which is the wrong way round for
+  // the tools that must not have one.
+  const m = sw && sw.match(/CACHE\s*=\s*["']([^"']+)["']/);
   return m ? m[1] : null;
 };
 
@@ -212,14 +215,48 @@ for (const tool of TOOLS) {
   }
 }
 
+const PREVIEW = [{ name: "Implant", dir: "implant", href: "/implant/", gate: "IMPLANT_USERS" }];
+
+/* --- 3e. the hub's worker must not cache a gated tool --------------------------
+   Its scope is the whole origin, so on the very first visit to a gated page,
+   before that page's own worker has installed, the hub worker is the one that
+   sees the request. Unless it steps aside, the signed-in page goes into its
+   cache and opens without the passcode from then on. It skipped AI Notes; it
+   did not skip the implant tool until 21 September 2026. */
+{
+  const hubSw = stripComments(read(path.join(root, "sw.js")) || "");
+  for (const gated of [GATED].concat(PREVIEW)) {
+    if (!hubSw.includes(`startsWith("${gated.href}")`)) {
+      problems.push(`Hub sw.js does not skip ${gated.href}. On a first visit it would cache the gated page, which would then open without the passcode.`);
+    }
+  }
+}
+
+/* --- 4a. the 404 page carries the same bar -----------------------------------
+   It is a page a colleague reaches by mistyping a URL, which is exactly when a
+   complete bar is worth having, and nothing checked it until 20 September 2026
+   (it had been missing AI Notes since 2 September). */
+const notFound = read(path.join(root, "404.html"));
+if (notFound) {
+  for (const other of TOOLS.concat([GATED], PREVIEW)) {
+    if (!notFound.includes(`href="${other.href}"`)) {
+      problems.push(`404.html: the switcher has no link to ${other.name} (${other.href}).`);
+    }
+  }
+}
+
 /* --- 4b. both extra tools have a card on the hub ------------------------------
    The bar is easy to miss on a phone, where it scrolls. Since 20 September 2026
    the hub lists AI Notes and the preview tool as cards too, at the clinical
    lead's request. A card is a promise about what the tool is: the preview one
    must say so on its face. */
 const hub = read(path.join(root, "index.html"));
+// HTML comments removed first, as check 5 does for the robots tag: a card that
+// has been commented out is not a card, and commenting a block out is the
+// obvious way to roll something back in a repo edited through the web UI.
+const hubLive = hub ? hub.replace(/<!--[\s\S]*?-->/g, "") : null;
 function hubCard(href) {
-  const m = hub && hub.match(new RegExp(`<a class="tool" href="${href.replace(/\//g, "\\/")}"[\\s\\S]*?<\\/a>`));
+  const m = hubLive && hubLive.match(new RegExp(`<a class="tool" href="${href}"[\\s\\S]*?<\\/a>`));
   return m ? m[0] : null;
 }
 if (hub && !hubCard(GATED.href)) {
@@ -229,13 +266,13 @@ if (hub && !hubCard(GATED.href)) {
 /* --- 5. tools in preview ----------------------------------------------------
    A tool being built lives at its final path but is not yet a member of TOOLS.
    Since 20 September 2026 a preview tool IS linked from every switcher, at the
-   clinical lead's request, so colleagues can reach it; it stays out of the
-   sitemap and out of the search engines, and it keeps its preview banner, so
-   nobody arrives at draft figures from a search. Absent is fine. Present
-   means: noindex on, out of the sitemap, its own cache with its own prefix,
-   nothing stored, a complete bar of its own, and a link in every other bar.
+   clinical lead's request, and since that evening it is also GATED: a valid
+   passcode plus a name on its own list. Listed but shut, in other words, which
+   is why the link is allowed to exist at all. Absent is fine. Present means:
+   noindex on, out of the sitemap, gated in middleware.js with its own list,
+   headers in vercel.json, NO offline cache, nothing stored, a complete bar of
+   its own, a link in every other bar, and a card on the hub carrying its tags.
    At launch, move the entry into TOOLS and delete it from here. */
-const PREVIEW = [{ name: "Implant", dir: "implant", href: "/implant/", prefix: "imp-" }];
 for (const tool of PREVIEW) {
   const index = read(path.join(root, tool.dir, "index.html"));
   if (!index) { notes.push(`${tool.name}: not present in this tree, skipped`); continue; }
@@ -247,11 +284,33 @@ for (const tool of PREVIEW) {
   if (sitemap && sitemap.includes(tool.href)) {
     problems.push(`${tool.name}: is in preview but listed in sitemap.xml.`);
   }
-  const cache = cacheNameOf(read(path.join(root, tool.dir, "sw.js")));
-  if (!cache) problems.push(`${tool.name}: could not read the CACHE name from sw.js`);
-  else if (cache.indexOf(tool.prefix) !== 0) {
-    problems.push(`${tool.name}: cache "${cache}" does not start with "${tool.prefix}". Another tool's activate step could delete it, or it could delete theirs.`);
+  /* Gated since 20 September 2026, so it is checked the way AI Notes is: it
+     must keep NO offline copy. A cached page opens without the passcode on any
+     device that signed in once, which would quietly undo the gate. */
+  const swRaw = read(path.join(root, tool.dir, "sw.js"));
+  const sw = swRaw && stripComments(swRaw);
+  if (!swRaw) {
+    problems.push(`${tool.name}: sw.js is missing. Without it the hub worker at scope "/" claims this path and will cache the page.`);
+  } else {
+    if (cacheNameOf(sw)) problems.push(`${tool.name}: sw.js declares a CACHE name. While the tool is gated this worker must be network-only.`);
+    if (/respondWith/.test(sw)) problems.push(`${tool.name}: sw.js calls respondWith. It must hand every request straight back to the browser.`);
+    if (/caches\s*\.\s*(open|match|put|add)/.test(sw)) problems.push(`${tool.name}: sw.js fills a cache. While the tool is gated it may only delete.`);
   }
+  // And the gate itself: the matcher is the only thing standing in front of it.
+  const mw = read(path.join(root, "middleware.js"));
+  if (mw) {
+    if (!mw.includes(`'${tool.href}:path*'`)) {
+      problems.push(`${tool.name}: middleware.js does not gate ${tool.href}. The preview would be open to anyone with the link.`);
+    }
+    if (!mw.includes(tool.gate)) {
+      problems.push(`${tool.name}: middleware.js no longer names ${tool.gate}, so nothing restricts which signed-in person may open it.`);
+    }
+  }
+  const headers = read(path.join(root, "vercel.json"));
+  if (headers && !headers.includes(`"/implant/:path*"`)) {
+    problems.push(`${tool.name}: vercel.json has no header block for ${tool.href}; the gated page would be cacheable and indexable by header.`);
+  }
+
   const code = stripComments(index);
   for (const api of ["localStorage", "sessionStorage", "indexedDB"]) {
     if (new RegExp(`\\b${api}\\b`).test(code)) problems.push(`${tool.name}: index.html references ${api}. It promises to store nothing.`);
@@ -282,8 +341,10 @@ for (const tool of PREVIEW) {
     problems.push(`${tool.name}: has no card on the hub. It is in the bar only, which scrolls out of sight on a phone.`);
   } else if (card && !/class="tool-tag preview"/.test(card)) {
     problems.push(`${tool.name}: its hub card does not carry the Preview tag, so it reads as a finished tool.`);
+  } else if (card && !/Sign-in required/.test(card)) {
+    problems.push(`${tool.name}: its hub card does not say a sign-in is required, so the passcode prompt will look like a fault.`);
   }
-  notes.push(`${tool.name}: in preview (noindex, not in the sitemap, linked from every bar, tagged on the hub), cache "${cache}"`);
+  notes.push(`${tool.name}: in preview, gated (noindex, not in the sitemap, no offline copy, linked from every bar, tagged on the hub)`);
 }
 
 /* --- report --- */

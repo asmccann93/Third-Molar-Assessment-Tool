@@ -15,10 +15,11 @@ Developed by Aiden McCann.
 /sedation/              Sedation                index.html + sw.js
 /local-anaesthetic/     Local Anaesthetic       index.html + sw.js
 /asa-assessment/        ASA Assessment          index.html + sw.js
+/implant/               Implant Case Assessment — PREVIEW, passcode-gated, author only
 /ai-notes/              AI Notes  — PRIVATE, passcode-gated
 /api/                   Serverless routes, AI Notes only
 /fonts/                 Self-hosted IBM Plex + Source Serif
-middleware.js           Edge gate for /ai-notes/ and /api/
+middleware.js           Edge gate for /ai-notes/, /implant/ and /api/
 vercel.json             Headers and function limits, path-scoped
 site-check.js           Pre-deploy checks
 ```
@@ -111,6 +112,7 @@ otherwise runs the same code against the same keys on a URL nobody is watching.
 | Variable | Notes |
 |---|---|
 | `APP_USERS` | Per-user passcodes as `AM:passcode,SM:passcode,NOC:passcode`. The initials are how the tool identifies who is signed in. Each passcode a passphrase, not four digits — the throttle is per warm instance and will not stop a determined guesser. |
+| `IMPLANT_USERS` | Who may open `/implant/`, on top of a valid passcode: initials from `APP_USERS`, commas between (`AM`). **Unset means closed to everyone.** Anyone else signed in gets a 403 page saying it is not available to them. |
 | `APP_PASSCODE` | **Do not set.** The old shared code. No longer honoured by `api/auth.mjs` (since 19 September 2026); if it is set, it is ignored and the function log says so. Deleted from Vercel on 17 September 2026. |
 | `SESSION_SECRET` | Signs the session cookie. `openssl rand -hex 32`. |
 | `SPEECHMATICS_API_KEY` | |
@@ -135,7 +137,7 @@ the intended behaviour if a device is lost.
 
 ### Two things that look like bugs and are not
 
-**Every switcher has six entries, and the sixth leads to a passcode prompt.**
+**Every switcher has seven entries. The sixth is the implant tool (a preview, passcode-gated and open only to the names in `IMPLANT_USERS`), and the seventh, AI Notes, also leads to a passcode prompt.**
 AI Notes has been linked from every public bar since 2 September 2026. A
 visitor who taps it sees a 401 sign-in page and nothing else; the gate, not
 the link's absence, is the control. `site-check.js` now asserts the link is

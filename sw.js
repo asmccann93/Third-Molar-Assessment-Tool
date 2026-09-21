@@ -1,4 +1,4 @@
-const CACHE = "tma-hub-v12";
+const CACHE = "tma-hub-v14";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
@@ -39,7 +39,12 @@ self.addEventListener("fetch", (e) => {
   // This must stay the first statement in the handler. Do not move it below the
   // method check: a non-GET request falls through to the browser anyway, but a
   // future edit that reorders these would silently reopen the hole.
-  if (new URL(e.request.url).pathname.startsWith("/ai-notes/")) return;
+  //
+  // The implant tool is gated the same way since 21 September 2026 and is
+  // skipped for the same reason: a copy cached here would open without the
+  // passcode, on any device that had signed in once.
+  const path = new URL(e.request.url).pathname;
+  if (path.startsWith("/ai-notes/") || path.startsWith("/implant/")) return;
 
   if (e.request.method !== "GET") return;
 
