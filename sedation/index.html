@@ -239,6 +239,10 @@
     border:1px solid #A11D2E33; border-left:3px solid var(--clay); border-radius:8px;
     padding:10px 13px; margin-bottom:10px; }
 
+  /* Incomplete items on the summary, each a link to its step */
+  .gostep { font:inherit; color:var(--accent); background:none; border:none; padding:0;
+    text-decoration:underline; text-underline-offset:2px; }
+
   /* Draft opt-in */
   .draftbar { display:flex; align-items:flex-start; gap:12px; justify-content:space-between;
     border:1px solid var(--line); border-radius:8px; padding:13px 16px; margin-top:18px; flex-wrap:wrap; }
@@ -256,10 +260,13 @@
     border:1px solid var(--line); border-radius:8px; padding:13px 16px; margin:10px 0 0; }
   .sigwrap { margin-top:12px; }
   .sigpad { display:block; width:100%; height:150px; background:#FFFFFF; border:1.5px solid var(--line);
-    border-radius:8px; touch-action:none; cursor:crosshair; }
+    border-radius:8px; touch-action:none; cursor:crosshair; object-fit:contain; }
   .sigpad:focus-visible { border-color:var(--accent); }
+  /* object-fit: a print engine that lays out the squat print box without
+     repainting (Chrome does not repaint before printing) shrinks the drawing
+     to fit rather than stretching it. */
   .sigshow { display:block; width:100%; height:110px; background:#FFFFFF;
-    border-bottom:1px solid var(--line); border-radius:0; }
+    border-bottom:1px solid var(--line); border-radius:0; object-fit:contain; }
   .sigline { height:64px; border-bottom:1px solid var(--line); }
   .sigmeta { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin-top:8px; }
   .signame { font-size:14px; font-weight:600; color:var(--ink); }
@@ -315,6 +322,8 @@
     .allergy-bar { padding:5px 8px !important; margin-bottom:7px !important; font-size:8.8pt !important;
       border-width:1px !important; break-inside:avoid; }
     .voidnote { font-size:8.2pt !important; padding:5px 8px !important; }
+    .alertbox { font-size:8.2pt !important; padding:5px 8px !important; margin-top:7px !important; }
+    .gostep { color:inherit !important; text-decoration:none !important; }
 
     /* Declarations and signatures */
     .sigblock { margin-top:8px !important; break-inside:avoid; page-break-inside:avoid; }
@@ -579,13 +588,22 @@ var ASA = [
   { id: "III", label: "ASA III — Severe systemic disease" },
   { id: "IV",  label: "ASA IV — Incapacitating disease" }
 ];
-var MALLAMPATI = ["I", "II", "III", "IV"];
+var MALLAMPATI = ["I", "II", "III", "IV", "Unable to assess"];
 var MOUTH_OPENING = [">3cm", "2–3cm", "<2cm"];
 var NECK = ["Normal", "Limited", "Immobile"];
 var YESNO = ["Yes", "No"];
 var GAG = ["None", "Mild", "Moderate", "Severe"];
 var DRUGS = ["None", "Cannabis", "Cocaine", "MDMA", "Opioids", "Other"];
 var SMOKING = ["Non", "Ex", "Current"];
+/* Sex is required, so it needs an answer for everyone. Pregnancy is asked for
+   every answer except Male: it is the safety question, and leaving it unasked
+   for "Other / not stated" would repeat the gap requiring sex was meant to close. */
+var SEX = ["Female", "Male", "Other / not stated"];
+function pregnancyAsked() { return !!get("sex") && get("sex") !== "Male"; }
+var PREGNANCY = ["No", "Yes", "Possible / unsure", "Not applicable"];
+var TRIMESTER = ["First trimester", "Second trimester", "Third trimester"];
+var ALLERGY_STATUS = ["No known drug allergies", "Allergies recorded"];
+var DENTITION = ["Loose teeth", "Crowns, veneers or bridges", "Removable denture", "Heavily restored", "Nothing of note"];
 var INDICATIONS = ["Dental phobia / anxiety", "Gag reflex", "Medical condition",
                    "Learning disability", "Extensive treatment", "Failed LA"];
 var TECHNIQUE = ["IV Midazolam", "IV Remimazolam", "Inhalation", "Other"];
@@ -678,17 +696,55 @@ var state = {
 };
 
 function get(k) { return state.a[k]; }
+
+/* Detail fields that a step only shows while a parent answer calls for them.
+   Each `shown` test mirrors the condition in that step's render function, so
+   keep the two in step. When a parent changes so a detail is no longer shown,
+   the stale answer is dropped rather than left to print or drive flags invisibly. */
+function historyHas(id) { return (get("history") || []).indexOf(id) >= 0; }
+var DEPENDENTS = [
+  { parent: "sex", fields: ["pregnancy", "trimester", "breastfeeding"],
+    shown: function () { return pregnancyAsked(); } },
+  { parent: "pregnancy", fields: ["trimester"],
+    shown: function () { return get("pregnancy") === "Yes"; } },
+  { parent: "pregnancy", fields: ["breastfeeding"],
+    shown: function () { return !!get("pregnancy") && get("pregnancy") !== "Not applicable"; } },
+  { parent: "history", fields: ["diabetesType", "diabetesControl"],
+    shown: function () { return historyHas("diabetes"); } },
+  { parent: "history", fields: ["anticoagName", "anticoagINR"],
+    shown: function () { return historyHas("anticoagulant"); } },
+  { parent: "capacity", fields: ["bestInterests"],
+    shown: function () { return get("capacity") === "No"; } },
+  { parent: "anaesProblem", fields: ["anaesProblemDetail"],
+    shown: function () { return get("anaesProblem") === "Yes"; } },
+  { parent: "anaesFamily", fields: ["anaesFamilyDetail"],
+    shown: function () { return get("anaesFamily") === "Yes"; } },
+  { parent: "gag", fields: ["gagTrigger"],
+    shown: function () { return get("gag") === "Moderate" || get("gag") === "Severe"; } },
+  { parent: "allergyStatus", fields: ["allergies"],
+    shown: function () { return get("allergyStatus") === "Allergies recorded"; } },
+  { parent: "cnsDepressant", fields: ["cnsDepressantDetail"],
+    shown: function () { return get("cnsDepressant") === "Yes"; } },
+  { parent: "drugs", fields: ["drugFreq", "drugLast"],
+    shown: function () { return (get("drugs") || []).filter(function (x) { return x !== "None"; }).length > 0; } },
+  { parent: "prevSedation", fields: ["prevOutcome"],
+    shown: function () { return get("prevSedation") === "Yes"; } },
+  { parent: "fit", fields: ["unfitReason"],
+    shown: function () { return get("fit") === "No"; } }
+];
+
+/* Returns true if the change voided a signature, so a caller that does not
+   otherwise re-render knows the screen is out of date. */
 function set(k, v) {
   state.a[k] = v;
   /* Date of birth is a means to an end. Derive age immediately so the record
      can carry the age without ever retaining the date itself. */
-  if (k === "dob" || k === "date") deriveAge();
-  /* Pregnancy questions only apply to female patients; drop any stale answers
-     rather than leaving them to drive flags invisibly. */
-  if (k === "sex" && v !== "Female") {
-    delete state.a.pregnancy; delete state.a.trimester; delete state.a.breastfeeding;
-  }
-  touchRecord();
+  if (k === "dob" || k === "date") deriveAge(k);
+  DEPENDENTS.forEach(function (d) {
+    if (d.parent === k && !d.shown()) d.fields.forEach(function (f) { delete state.a[f]; });
+  });
+  if (k === "patientTypedName" || k === "clinicianTypedName") stampTyped(k.replace("TypedName", ""));
+  return touchRecord();
 }
 
 /* ---------- Data minimisation ----------
@@ -700,8 +756,18 @@ var PRIVATE_FIELDS = [
   "name", "dob",                       // patient
   "address", "phone",                  // patient contact
   "escortName", "escortPhone",         // escort / chaperone
-  "patientTypedName"                   // typed attestation reproduces the name
+  "patientTypedName",                  // typed attestations reproduce names, and
+  "clinicianTypedName"                 // are signatures, which are never saved
 ];
+
+/* A typed name is a signature, and signatures are not carried over: re-sign
+   after resuming or opening a record. The clinician's typed name used to come
+   back with the answers, arriving as an attestation with no snapshot, so a
+   later amendment could never void it. */
+function dropTypedAttestations() {
+  delete state.a.patientTypedName;
+  delete state.a.clinicianTypedName;
+}
 
 function withoutPrivateFields(answers) {
   var out = {};
@@ -721,9 +787,13 @@ function blankSignatures() {
   };
 }
 
-function deriveAge() {
+/* A cleared, invalid or future date of birth must not leave the previous age
+   behind. Changing only the assessment date keeps a stored age when there is no
+   date of birth to derive from, as in a resumed draft. */
+function deriveAge(k) {
   var a = ageFromDOB();
   if (a != null) state.a.ageYears = a;
+  else if (k === "dob" || get("dob")) delete state.a.ageYears;
 }
 
 /* ---------- Record integrity ----------
@@ -731,23 +801,49 @@ function deriveAge() {
    clinical content changes afterwards, the signature no longer represents
    what was signed, so it is voided and must be renewed. */
 
+/* Typed attestations and the draw/type choice are part of signing, not of the
+   record being signed, so one party signing can't void the other's signature.
+   Nor does an empty medication row say anything, so adding or removing one
+   leaves signatures alone. */
 function recordFingerprint() {
-  return JSON.stringify([state.a, state.meds]);
+  var a = {};
+  Object.keys(state.a).forEach(function (k) {
+    if (!/(TypedName|SignMode)$/.test(k)) a[k] = state.a[k];
+  });
+  return JSON.stringify([a, state.meds.filter(function (m) { return m.name || m.dose || m.freq || m.reason; })]);
+}
+
+/* A typed name attests to the record as it stands when typed, as a drawn
+   signature does, so it takes the same snapshot and is voided the same way. */
+function stampTyped(role) {
+  var s = state.sig[role];
+  if ((get(role + "TypedName") || "").trim()) {
+    if (!s.signedAt) s.signedAt = new Date().toISOString();
+    s.voidedAt = null;
+    s.snapshot = recordFingerprint();
+  } else if (!s.strokes.length) {
+    s.signedAt = null;
+    s.snapshot = null;
+  }
 }
 
 function touchRecord() {
   var now = recordFingerprint();
+  var voided = false;
   ["patient", "clinician"].forEach(function (role) {
     var s = state.sig[role];
-    if (!s.strokes.length || !s.snapshot) return;
+    if (!attested(role) || !s.snapshot) return;
     if (s.snapshot !== now) {
       state.sig[role] = {
         strokes: [], signedAt: null, snapshot: null,
         voidedAt: new Date().toISOString()
       };
+      state.a[role + "TypedName"] = "";
+      voided = true;
     }
   });
   saveDraft();
+  return voided;
 }
 
 /* A record is attested either by a drawn signature or a typed name */
@@ -811,6 +907,7 @@ function restoreDraft(d) {
   state.a = d.a || {};
   state.meds = (d.meds && d.meds.length) ? d.meds : [{ name: "", dose: "", freq: "", reason: "" }];
   state.sig = blankSignatures();     // signatures are not retained; re-sign after resuming
+  dropTypedAttestations();
   state.step = d.step || 0;
   state.furthest = d.furthest || 0;
   state.recordId = d.recordId || state.recordId || newRecordId();
@@ -855,6 +952,10 @@ function computeBMI() {
   if (!kg || !m || kg <= 0 || m <= 0) return null;
   var bmi = kg / (m * m);
   if (!isFinite(bmi) || bmi <= 0 || bmi > 200) return null;
+  /* Rounded once, here, to the one decimal place shown, so the category and
+     flags always agree with the figure printed beside them (34.97 shows as
+     35.0, so it is class II, not class I). */
+  bmi = Math.round(bmi * 10) / 10;
   return { bmi: bmi, kg: kg, m: m };
 }
 
@@ -1223,10 +1324,11 @@ function download(filename, text, mime) {
   } catch (e) { return false; }
 }
 
+/* Named from the record ID, never the patient: the export is promised to carry
+   no identifying details, and that includes its filename. */
 function fileStem() {
-  var who = (get("name") || "Patient").replace(/[\/\\:*?"<>|]/g, "").replace(/\s+/g, " ").trim() || "Patient";
   var when = get("date") || new Date().toISOString().slice(0, 10);
-  return who + " - " + when;
+  return "record - " + (state.recordId || "record") + " - " + when;
 }
 
 function exportRecord() {
@@ -1285,28 +1387,100 @@ function exportAudit() {
   download("audit - " + (state.recordId || "record") + ".csv", csv, "text/csv;charset=utf-8");
 }
 
+/* ---------- Record shape ----------
+   Every answer the form can hold, and the form it takes: TEXT for typed entries
+   (held as strings, numbers included), an option list for a single choice,
+   { multi } for a multi-select, { score } for an integer scale. Built from the
+   same option lists the steps render, so an opened file is checked against what
+   the form itself can produce. A new field needs adding here as well as to its step. */
+var TEXT = "text";
+var YESNO_KEYS = ["breastfeeding", "capacity", "anaesProblem", "anaesFamily", "facialAbn", "osa", "beard",
+                  "cnsDepressant", "prevSedation", "fit"];
+var TEXT_KEYS = ["name", "dob", "address", "phone", "date", "assessedBy",
+                 "wtKg", "htCm", "wtSt", "wtLb", "htFt", "htIn", "bpSys", "bpDia", "pulse", "spo2",
+                 "diabetesType", "diabetesControl", "anticoagName", "anticoagINR", "historyDetail",
+                 "bestInterests", "anaesProblemDetail", "anaesFamilyDetail", "gagTrigger", "airwayNotes",
+                 "allergies", "cnsDepressantDetail", "drugFreq", "drugLast", "alcohol", "prevOutcome",
+                 "whySedation", "clinicalSummary", "unfitReason", "clinician", "signDate",
+                 "escortName", "escortPhone", "fastingInstruction", "patientTypedName", "clinicianTypedName"];
+var FIELDS = {
+  sex: SEX, asa: ASA.map(function (o) { return o.id; }), units: ["metric", "imperial"],
+  pregnancy: PREGNANCY, trimester: TRIMESTER, mallampati: MALLAMPATI, mouthOpening: MOUTH_OPENING,
+  neck: NECK, gag: GAG, allergyStatus: ALLERGY_STATUS, smoking: SMOKING, technique: TECHNIQUE,
+  patientSignMode: ["draw", "typed"], clinicianSignMode: ["draw", "typed"],
+  history: { multi: [].concat.apply([], HISTORY_GROUPS.map(function (g) {
+    return g.items.map(function (it) { return it.id; });
+  })) },
+  dentition: { multi: DENTITION }, drugs: { multi: DRUGS },
+  indications: { multi: INDICATIONS }, arrangements: { multi: ARRANGEMENTS },
+  iosn1Override: { score: [1, 4] },
+  iosn2: { score: [1, IOSN_MEDICAL.length] }, iosn3: { score: [1, IOSN_COMPLEXITY.length] },
+  ageYears: { score: [0, 129] }
+};
+YESNO_KEYS.forEach(function (k) { FIELDS[k] = YESNO; });
+TEXT_KEYS.forEach(function (k) { FIELDS[k] = TEXT; });
+MDAS_QUESTIONS.forEach(function (q) { FIELDS["mdas_" + q.id] = { score: [1, MDAS_ANCHORS.length] }; });
+
+function validAnswer(shape, v) {
+  if (shape === TEXT) return typeof v === "string";
+  if (Array.isArray(shape)) return typeof v === "string" && shape.indexOf(v) >= 0;
+  if (shape.multi) return Array.isArray(v) && v.every(function (x) { return shape.multi.indexOf(x) >= 0; });
+  if (shape.score) return typeof v === "number" && Math.floor(v) === v && v >= shape.score[0] && v <= shape.score[1];
+  return false;
+}
+
+var MED_COLS = ["name", "dose", "freq", "reason"];
+
+/* The whole file is checked before anything in the form changes, so a damaged or
+   hand-edited file can't leave half a record behind, or values the form never
+   produces for the summary to trip over later. Anything unknown or malformed is
+   left out, and the clinician is told how much. */
 function importRecord(file) {
   var reader = new FileReader();
   reader.onload = function () {
-    try {
-      var d = JSON.parse(reader.result);
-      if (!d || d.format !== "sedation-pre-assessment" || typeof d.answers !== "object") {
-        state.notice = "That file isn’t a sedation pre-assessment record.";
-        render(false); return;
-      }
-      state.a = d.answers || {};
-      state.meds = (d.medications && d.medications.length) ? d.medications
-                 : [{ name: "", dose: "", freq: "", reason: "" }];
-      state.sig = blankSignatures();   // never travels with an export
-      state.recordId = d.recordId || newRecordId();
-      state.step = 0;
-      state.view = "form";
-      state.notice = null;
-      render(true);
-    } catch (e) {
+    var d;
+    try { d = JSON.parse(reader.result); } catch (e) {
       state.notice = "That file could not be read.";
-      render(false);
+      render(false); return;
     }
+    var answers = d && d.answers;
+    if (!d || d.format !== "sedation-pre-assessment" || !answers || typeof answers !== "object" || Array.isArray(answers)) {
+      state.notice = "That file isn’t a sedation pre-assessment record.";
+      render(false); return;
+    }
+
+    var a = {}, dropped = 0;
+    Object.keys(answers).forEach(function (k) {
+      if (Object.prototype.hasOwnProperty.call(FIELDS, k) && validAnswer(FIELDS[k], answers[k])) a[k] = answers[k];
+      else dropped++;
+    });
+    var meds = [];
+    if (d.medications != null && !Array.isArray(d.medications)) dropped++;
+    else (d.medications || []).forEach(function (m) {
+      var ok = m && typeof m === "object" && !Array.isArray(m) &&
+        MED_COLS.every(function (c) { return m[c] == null || typeof m[c] === "string"; });
+      if (!ok) { dropped++; return; }
+      meds.push({ name: m.name || "", dose: m.dose || "", freq: m.freq || "", reason: m.reason || "" });
+    });
+
+    state.a = a;
+    /* Follow-ups the file's own answers don't call for, dropped as set() would.
+       Parents are listed ahead of their follow-ups, so one pass settles a chain. */
+    DEPENDENTS.forEach(function (dep) {
+      if (!dep.shown()) dep.fields.forEach(function (f) { delete state.a[f]; });
+    });
+    state.meds = meds.length ? meds : [{ name: "", dose: "", freq: "", reason: "" }];
+    state.sig = blankSignatures();   // never travels with an export
+    dropTypedAttestations();
+    /* The ID ends up in filenames, so only take one that looks like one */
+    state.recordId = (typeof d.recordId === "string" && /^[\w-]{1,64}$/.test(d.recordId)) ? d.recordId : newRecordId();
+    state.step = 0;
+    state.view = "form";
+    state.notice = dropped
+      ? dropped + (dropped === 1 ? " answer" : " answers") + " in that file could not be used and " +
+        (dropped === 1 ? "was" : "were") + " left out. Check each step before signing."
+      : null;
+    render(true);
   };
   reader.readAsText(file);
 }
@@ -1352,6 +1526,10 @@ function resetAll() {
   state.furthest = 0;
   state.recordId = newRecordId();
   state.confirm = null;
+  /* Keeping a copy was agreed for the previous patient, not this one: stop any
+     pending write and ask again. */
+  if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+  state.keepDraft = false;
   discardDraft();
   state.view = "intro";
 }
@@ -1458,8 +1636,20 @@ function sigView(role, name, label) {
     "</div></div></div>";
 }
 
+/* A signature keeps the shape it was drawn with. Points are stored as fractions
+   of the pad, with the pad's proportions (`ratio`, width over height) alongside,
+   and are painted at one scale for both axes, centred, into whatever box shows
+   them: the summary, the much squatter print box, or a pad resized by turning
+   the tablet. Strokes held without a ratio came from the pad at its usual size. */
+var SIG_RATIO = 560 / 150;
+
+function sigFrame(w, h, ratio) {
+  var fh = Math.min(h, w / (ratio || SIG_RATIO)), fw = fh * (ratio || SIG_RATIO);
+  return { x: (w - fw) / 2, y: (h - fh) / 2, w: fw, h: fh };
+}
+
 /* Redraw stored strokes onto a canvas at its current size and pixel density */
-function paintSig(canvas, strokes) {
+function paintSig(canvas, sig) {
   var rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return null;
   var dpr = window.devicePixelRatio || 1;
@@ -1473,62 +1663,87 @@ function paintSig(canvas, strokes) {
   ctx.lineWidth = 1.8;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  strokes.forEach(function (stroke) {
+  var f = sigFrame(rect.width, rect.height, sig.ratio);
+  function X(p) { return f.x + p.x * f.w; }
+  function Y(p) { return f.y + p.y * f.h; }
+  sig.strokes.forEach(function (stroke) {
     if (!stroke.length) return;
     if (stroke.length === 1) {
       ctx.beginPath();
-      ctx.arc(stroke[0].x * rect.width, stroke[0].y * rect.height, 1.2, 0, Math.PI * 2);
+      ctx.arc(X(stroke[0]), Y(stroke[0]), 1.2, 0, Math.PI * 2);
       ctx.fill();
       return;
     }
     ctx.beginPath();
-    ctx.moveTo(stroke[0].x * rect.width, stroke[0].y * rect.height);
-    for (var i = 1; i < stroke.length; i++) ctx.lineTo(stroke[i].x * rect.width, stroke[i].y * rect.height);
+    ctx.moveTo(X(stroke[0]), Y(stroke[0]));
+    for (var i = 1; i < stroke.length; i++) ctx.lineTo(X(stroke[i]), Y(stroke[i]));
     ctx.stroke();
   });
   return ctx;
 }
 
+/* Repaint every signature at the size its box has now. The pad's ink has to
+   stay under the finger after a rotation, and printing lays the summary out
+   again at a different size. */
+function repaintSigs() {
+  root.querySelectorAll("[data-sig]").forEach(function (c) { paintSig(c, state.sig[c.getAttribute("data-sig")]); });
+  root.querySelectorAll("[data-sigview]").forEach(function (c) { paintSig(c, state.sig[c.getAttribute("data-sigview")]); });
+}
+
 /* Attach drawing behaviour. Pointer events cover finger, stylus, and mouse. */
 function bindSig(canvas, role) {
   var store = state.sig[role];
-  var ctx = paintSig(canvas, store.strokes);
+  var ctx = paintSig(canvas, store);
   if (!ctx) return;
-  var drawing = false, current = null;
+  /* One pointer per stroke: a palm or second finger landing mid-signature
+     is ignored rather than starting a stroke of its own. */
+  var drawing = false, current = null, pointerId = null;
 
-  function point(e) {
+  function frame() {
     var r = canvas.getBoundingClientRect();
+    var f = sigFrame(r.width, r.height, store.ratio);
+    f.left = r.left; f.top = r.top;
+    return f;
+  }
+  function point(e, f) {
     return {
-      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+      x: Math.min(1, Math.max(0, (e.clientX - f.left - f.x) / f.w)),
+      y: Math.min(1, Math.max(0, (e.clientY - f.top - f.y) / f.h))
     };
   }
 
   canvas.addEventListener("pointerdown", function (e) {
     e.preventDefault();
+    if (drawing) return;
     drawing = true;
+    pointerId = e.pointerId;
     try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-    current = [point(e)];
+    if (!store.strokes.length) {
+      var r = canvas.getBoundingClientRect();
+      store.ratio = r.width / r.height;
+    }
+    current = [point(e, frame())];
     store.strokes.push(current);
   });
 
   canvas.addEventListener("pointermove", function (e) {
-    if (!drawing || !current) return;
+    if (!drawing || !current || e.pointerId !== pointerId) return;
     e.preventDefault();
-    var r = canvas.getBoundingClientRect();
+    var f = frame();
     var prev = current[current.length - 1];
-    var p = point(e);
+    var p = point(e, f);
     current.push(p);
     ctx.beginPath();
-    ctx.moveTo(prev.x * r.width, prev.y * r.height);
-    ctx.lineTo(p.x * r.width, p.y * r.height);
+    ctx.moveTo(f.x + prev.x * f.w, f.y + prev.y * f.h);
+    ctx.lineTo(f.x + p.x * f.w, f.y + p.y * f.h);
     ctx.stroke();
   });
 
-  function finish() {
-    if (!drawing) return;
+  function finish(e) {
+    if (!drawing || e.pointerId !== pointerId) return;
     drawing = false;
     current = null;
+    pointerId = null;
     if (store.strokes.length && !store.signedAt) {
       store.signedAt = new Date().toISOString();
       store.voidedAt = null;
@@ -1552,11 +1767,46 @@ function bindSig(canvas, role) {
    STEPS
    ============================================================ */
 
+/* Displays that follow a typed value. They live in slots that refreshLive()
+   rewrites in place when the value changes, since a full render at that moment
+   would lose the tap that moved focus away from the field. */
+function ageChipHTML() {
+  var age = computeAge();
+  return age != null
+    ? '<div class="agechip"><strong>' + age + " years</strong> at assessment" +
+      (age < 18 ? " · under 18" : age >= 65 ? " · older adult" : "") + "</div>"
+    : "";
+}
+
+function under18HTML() {
+  var age = computeAge();
+  return age != null && age < 18
+    ? '<div class="alertbox"><span style="color:var(--amber);flex-shrink:0;">' + I.alert + "</span><div>" +
+      "<strong>Patient is under 18.</strong> This form is designed for adults aged 18 and over. " +
+      "Paediatric sedation assessment differs in consent, escort, fasting, and dosing, and should follow " +
+      "your paediatric pathway instead. Check the date of birth if this is unexpected.</div></div>"
+    : "";
+}
+
+function bmiResultHTML() {
+  var r = computeBMI();
+  if (!r) return '<div class="hintbox">Enter height and weight to calculate BMI and category automatically.</div>';
+  var cat = bmiCategory(r.bmi);
+  var color = cat.tone === "alert" ? "var(--clay)" : cat.tone === "watch" ? "var(--amber)" : "var(--line)";
+  return '<div class="resultcard" style="border-color:' + color + ';">' +
+    '<span class="eyebrow-soft">Body mass index</span>' +
+    '<div style="display:flex;align-items:baseline;gap:12px;margin-top:8px;">' +
+      '<span class="bignum">' + r.bmi.toFixed(1) + "</span>" +
+      '<span class="bigunit">kg/m²</span>' +
+      '<span class="chip" style="margin-left:auto;">' + esc(cat.label) + "</span>" +
+    "</div>" +
+    '<p class="lede">Calculated from ' + r.kg.toFixed(1) + " kg and " + (r.m * 100).toFixed(0) + " cm.</p></div>";
+}
+
 var STEPS = [
   {
     key: "patient", label: "Patient details", tag: "Record",
     render: function () {
-      var age = computeAge();
       return '<h2 class="step" tabindex="-1">Patient details</h2>' +
         '<p class="lede">Identifying information for this assessment record.</p>' +
         '<div class="grid2" style="margin-top:8px;">' +
@@ -1566,12 +1816,9 @@ var STEPS = [
         '<div class="hint">Identifying details \u2014 name, date of birth, address, phone, and escort contact \u2014 ' +
           "are used for this session and the printed record only. None is kept on the device or included in an " +
           "export; the age below is derived and stored in place of the date of birth.</div>" +
-        (age != null
-          ? '<div class="agechip" aria-live="polite"><strong>' + age + " years</strong> at assessment" +
-            (age < 18 ? " · under 18" : age >= 65 ? " · older adult" : "") + "</div>"
-          : "") +
+        '<div data-live="age" aria-live="polite">' + ageChipHTML() + "</div>" +
         subLabel("Sex") +
-        radioList("sex", ["Female", "Male"], { row: true, compact: true }) +
+        radioList("sex", SEX, { row: true, compact: true }) +
         textField("address", "Address") +
         '<div class="grid2">' +
           textField("phone", "Phone", { type: "tel" }) +
@@ -1580,19 +1827,13 @@ var STEPS = [
           textField("date", "Assessment date", { type: "date" }) +
           textField("assessedBy", "Assessed by") +
         "</div>" +
-        (age != null && age < 18
-          ? '<div class="alertbox"><span style="color:var(--amber);flex-shrink:0;">' + I.alert + "</span><div>" +
-            "<strong>Patient is under 18.</strong> This form is designed for adults aged 18 and over. " +
-            "Paediatric sedation assessment differs in consent, escort, fasting, and dosing, and should follow " +
-            "your paediatric pathway instead. Check the date of birth if this is unexpected.</div></div>"
-          : "");
+        '<div data-live="under18">' + under18HTML() + "</div>";
     }
   },
   {
     key: "bmi", label: "Physical status", tag: "ASA · BMI",
     render: function () {
       var units = get("units") || "metric";
-      var r = computeBMI();
       var fields = units === "imperial"
         ? '<div class="grid2">' +
             '<div class="field"><span class="flabel">Weight</span><div class="grid2" style="gap:10px;">' +
@@ -1609,21 +1850,7 @@ var STEPS = [
             textField("htCm", "Height (cm)", { type: "number", numeric: true, step: "0.1", min: 40, max: 250, placeholder: "e.g. 172" }) +
           "</div>";
 
-      var out;
-      if (r) {
-        var cat = bmiCategory(r.bmi);
-        var color = cat.tone === "alert" ? "var(--clay)" : cat.tone === "watch" ? "var(--amber)" : "var(--line)";
-        out = '<div class="resultcard" aria-live="polite" style="border-color:' + color + ';">' +
-          '<span class="eyebrow-soft">Body mass index</span>' +
-          '<div style="display:flex;align-items:baseline;gap:12px;margin-top:8px;">' +
-            '<span class="bignum">' + r.bmi.toFixed(1) + "</span>" +
-            '<span class="bigunit">kg/m²</span>' +
-            '<span class="chip" style="margin-left:auto;">' + esc(cat.label) + "</span>" +
-          "</div>" +
-          '<p class="lede">Calculated from ' + r.kg.toFixed(1) + " kg and " + (r.m * 100).toFixed(0) + " cm.</p></div>";
-      } else {
-        out = '<div class="hintbox" aria-live="polite">Enter height and weight to calculate BMI and category automatically.</div>';
-      }
+      var out = '<div data-live="bmi" aria-live="polite">' + bmiResultHTML() + "</div>";
 
       return '<h2 class="step" tabindex="-1">Physical status</h2>' +
         '<p class="lede">ASA grade, body mass index, and baseline observations.</p>' +
@@ -1667,14 +1894,14 @@ var STEPS = [
             "</div>" : "") +
         textArea("historyDetail", "History details", "Expand on any condition selected above: control, severity, current treatment…") +
 
-        (get("sex") === "Female"
+        (pregnancyAsked()
           ? '<h3 class="block">Pregnancy &amp; breastfeeding</h3>' +
             '<p class="lede">Sedation agents differ markedly in their suitability during pregnancy.</p>' +
             subLabel("Pregnant, or possibly pregnant?") +
-              radioList("pregnancy", ["No", "Yes", "Possible / unsure", "Not applicable"], { row: true, compact: true }) +
+              radioList("pregnancy", PREGNANCY, { row: true, compact: true }) +
             (get("pregnancy") === "Yes"
               ? subLabel("Stage of pregnancy") +
-                radioList("trimester", ["First trimester", "Second trimester", "Third trimester"], { row: true, compact: true })
+                radioList("trimester", TRIMESTER, { row: true, compact: true })
               : "") +
             (get("pregnancy") && get("pregnancy") !== "Not applicable"
               ? subLabel("Breastfeeding?") + radioList("breastfeeding", YESNO, { row: true, compact: true })
@@ -1708,7 +1935,7 @@ var STEPS = [
     render: function () {
       return '<h2 class="step" tabindex="-1">Airway assessment</h2>' +
         '<p class="lede">Findings that predict difficulty with airway management.</p>' +
-        subLabel("Mallampati class") + radioList("mallampati", MALLAMPATI.concat(["Unable to assess"]), { row: true, compact: true }) +
+        subLabel("Mallampati class") + radioList("mallampati", MALLAMPATI, { row: true, compact: true }) +
         subLabel("Mouth opening") + radioList("mouthOpening", MOUTH_OPENING, { row: true, compact: true }) +
         subLabel("Neck mobility") + radioList("neck", NECK, { row: true, compact: true }) +
         subLabel("Facial / jaw abnormality") + radioList("facialAbn", YESNO, { row: true, compact: true }) +
@@ -1724,7 +1951,7 @@ var STEPS = [
 
         '<h3 class="block">Dentition</h3>' +
         '<p class="lede">Loose or restored teeth carry an aspiration and damage risk worth recording before treatment.</p>' +
-        checkList("dentition", ["Loose teeth", "Crowns, veneers or bridges", "Removable denture", "Heavily restored", "Nothing of note"]) +
+        checkList("dentition", DENTITION) +
 
         textArea("airwayNotes", "Airway notes", "Prior anaesthetic difficulty, other findings…");
     }
@@ -1751,7 +1978,7 @@ var STEPS = [
 
         '<h3 class="block">Drug allergies</h3>' +
         '<p class="lede">Record explicitly. A blank field cannot be told apart from a question that was never asked.</p>' +
-        radioList("allergyStatus", ["No known drug allergies", "Allergies recorded"], { row: true, compact: true }) +
+        radioList("allergyStatus", ALLERGY_STATUS, { row: true, compact: true }) +
         (get("allergyStatus") === "Allergies recorded"
           ? textArea("allergies", "Allergy details", "One per line: agent and nature of reaction.")
           : "") +
@@ -1963,11 +2190,12 @@ function stepIndex(key) {
 var REQUIRED = [
   { key: "name",        label: "Patient name",         step: "patient" },
   { key: "ageYears",    label: "Age (from date of birth)", step: "patient" },
+  { key: "sex",         label: "Sex",                  step: "patient" },
   { key: "assessedBy",  label: "Assessed by",          step: "patient" },
-  { key: "asa",         label: "ASA classification",   step: "asa" },
+  { key: "asa",         label: "ASA classification",   step: "bmi" },
   { key: "mallampati",  label: "Mallampati class",     step: "airway" },
   { key: "allergyStatus", label: "Drug allergy status", step: "meds" },
-  { key: "gag",         label: "Gag reflex severity",  step: "gag" },
+  { key: "gag",         label: "Gag reflex severity",  step: "airway" },
   { key: "anaesProblem",label: "Previous anaesthetic problems", step: "history" },
   
   { key: "technique",   label: "Sedation technique",   step: "plan" },
@@ -1982,9 +2210,19 @@ function missingItems() {
 
   if (!computeBMI()) out.push({ label: "Height and weight", step: stepIndex("bmi") });
   if (!(get("history") || []).length) out.push({ label: "Medical history", step: stepIndex("history") });
-  if (get("sex") === "Female" && !get("pregnancy"))
+  if (pregnancyAsked() && !get("pregnancy"))
     out.push({ label: "Pregnancy status", step: stepIndex("history") });
+  /* Details a step asks for once its answer calls for them */
+  function blank(k) { return !(get(k) || "").trim(); }
+  if (get("pregnancy") === "Yes" && !get("trimester"))
+    out.push({ label: "Stage of pregnancy", step: stepIndex("history") });
   if (!get("capacity")) out.push({ label: "Capacity to consent", step: stepIndex("history") });
+  if (get("capacity") === "No" && blank("bestInterests"))
+    out.push({ label: "Best-interests decision", step: stepIndex("history") });
+  if (get("allergyStatus") === "Allergies recorded" && blank("allergies"))
+    out.push({ label: "Allergy details", step: stepIndex("meds") });
+  if (get("fit") === "No" && blank("unfitReason"))
+    out.push({ label: "Reason not fit for sedation", step: stepIndex("plan") });
   if (!mdasTotal().complete) out.push({ label: "MDAS (all five items)", step: stepIndex("mdas") });
   if (iosnTotal() == null) out.push({ label: "IOSN (all three parts)", step: stepIndex("iosn") });
   if (!(get("indications") || []).length) out.push({ label: "Primary indication", step: stepIndex("justification") });
@@ -2007,7 +2245,9 @@ function headerHTML(title) {
 
 function introView() {
   var draft = loadDraft();
-  var resume = (draft && !state.keepDraft)
+  /* A copy of the record in hand isn't "found"; one from an earlier session is,
+     whether or not keeping a copy has been ticked since. */
+  var resume = (draft && draft.recordId !== state.recordId)
     ? '<div class="draftbar" style="border-color:var(--accent);">' +
         "<div><div style=\"font-size:14px;font-weight:600;\">Unfinished assessment found</div>" +
         '<div class="hint">Saved ' + fmtSigned(draft.savedAt) +
@@ -2073,6 +2313,7 @@ function formView() {
     '<div class="cols">' + railHTML() +
       '<div class="body-col">' +
         allergyBanner({ warn: step.key === "sign" }) +
+        (state.notice ? '<div class="voidnote" role="status">' + esc(state.notice) + "</div>" : "") +
         '<span class="chip">' + esc(step.tag) + "</span>" +
         step.render() +
         '<div class="nav spa-noprint">' +
@@ -2129,10 +2370,15 @@ function summaryView() {
     : '<div class="panel"><span class="eyebrow-soft">Points for consideration</span>' +
         '<p class="lede">No advisory flags raised from the responses recorded.</p></div>';
 
+  /* Printed too: a record filed with gaps should say so on paper. On screen
+     each item goes straight to its step. */
   var missingHTML = missing.length
-    ? '<div class="alertbox spa-noprint"><span style="color:var(--amber);flex-shrink:0;">' + I.alert + "</span><div>" +
-        "<strong>Incomplete:</strong> " + missing.map(function (m) { return esc(m.label); }).join(", ") +
-        ". Use the step numbers above to complete these before signing.</div></div>"
+    ? '<div class="alertbox"><span style="color:var(--amber);flex-shrink:0;">' + I.alert + "</span><div>" +
+        "<strong>Incomplete:</strong> " + missing.map(function (m) {
+          return '<button type="button" class="gostep" data-act="goto" data-idx="' + m.step + '">' + esc(m.label) +
+            '<span class="spa-noprint"> (step ' + (m.step + 1) + ")</span></button>";
+        }).join(", ") +
+        '.<span class="spa-noprint"> Select an item to go to its step, and complete these before signing.</span></div></div>'
     : "";
 
   var voided = anyVoided();
@@ -2169,6 +2415,7 @@ function summaryView() {
 
     '<h3 class="block">Patient</h3><div class="panel">' +
       row("Name", get("name")) +
+      row("Date of birth", get("dob")) +
       row("Age at assessment", computeAge() != null ? computeAge() + " years" : "") +
       row("Sex", get("sex")) + row("Phone", get("phone")) +
       row("Address", get("address")) +
@@ -2224,7 +2471,9 @@ function summaryView() {
 
     '<h3 class="block">Anxiety &amp; sedation need</h3><div class="panel">' +
       row("MDAS total", mt.complete ? mt.sum + " / 25" + (mt.sum >= 19 ? " · severe dental phobia" : "") : "") +
-      row("IOSN Part 1 · Anxiety", iosnParts().p1) +
+      row("IOSN Part 1 · Anxiety", iosnParts().overridden && iosnParts().derived != null
+        ? iosnParts().p1 + " (overridden; MDAS-derived " + iosnParts().derived + ")"
+        : iosnParts().p1) +
       row("IOSN Part 2 · Medical factors", iosnParts().p2) +
       row("IOSN Part 3 · Treatment complexity", iosnParts().p3) +
       row("IOSN total", it != null ? it + " / 12 · " + band.label + " need" : "") +
@@ -2306,9 +2555,25 @@ function hydrate() {
       bindSig(c, c.getAttribute("data-sig"));
     });
     root.querySelectorAll("[data-sigview]").forEach(function (c) {
-      paintSig(c, state.sig[c.getAttribute("data-sigview")].strokes);
+      paintSig(c, state.sig[c.getAttribute("data-sigview")]);
     });
   });
+}
+
+var sigResize = null;
+window.addEventListener("resize", function () {
+  if (sigResize) cancelAnimationFrame(sigResize);
+  sigResize = requestAnimationFrame(function () { sigResize = null; repaintSigs(); });
+});
+/* Chrome fires beforeprint before laying out for print, so the boxes still have
+   their screen size there (the CSS object-fit covers that case); Safari and
+   Firefox report the print layout through the print media query. */
+window.addEventListener("beforeprint", repaintSigs);
+window.addEventListener("afterprint", repaintSigs);
+if (window.matchMedia) {
+  var printMQ = window.matchMedia("print");
+  if (printMQ.addEventListener) printMQ.addEventListener("change", repaintSigs);
+  else if (printMQ.addListener) printMQ.addListener(repaintSigs);
 }
 
 /* Name the PDF from the record so it files correctly in patient notes */
@@ -2373,22 +2638,71 @@ function render(scroll) {
 }
 
 /* Text entry updates state silently — no re-render, so focus is never lost.
-   Fields whose value feeds a live calculation re-render on blur/change. */
-var LIVE = ["wtKg", "htCm", "wtSt", "wtLb", "htFt", "htIn", "alcohol"];
+   Fields whose value feeds a live display (BMI, age) update that display in
+   place on change. They used to re-render the whole step, but change fires as
+   focus leaves the field, which is part-way through the tap on whatever was
+   tapped next; replacing the page there swallowed that tap. Alcohol feeds only
+   the summary, so it needs nothing here. */
+var LIVE = ["wtKg", "htCm", "wtSt", "wtLb", "htFt", "htIn", "dob", "date"];
+
+function refreshLive() {
+  livePending = false;
+  [["bmi", bmiResultHTML], ["age", ageChipHTML], ["under18", under18HTML]].forEach(function (s) {
+    var slot = root.querySelector('[data-live="' + s[0] + '"]');
+    if (slot) slot.innerHTML = s[1]();
+  });
+}
+
+/* Even in place, a display that grows or appears moves what sits below it, and
+   a tap whose target moves between press and release is lost. So while a press
+   is in progress the refresh waits for its click. A press that never becomes a
+   click (dragged away, or cancelled) mustn't hold it back for long. */
+var pressing = false, pressCount = 0, livePending = false;
+function pressDone() {
+  pressing = false;
+  if (livePending) setTimeout(refreshLive, 0);
+}
+document.addEventListener("pointerdown", function () { pressing = true; pressCount++; }, true);
+document.addEventListener("mousedown", function () { pressing = true; }, true);
+document.addEventListener("click", pressDone, true);
+document.addEventListener("pointercancel", pressDone, true);
+document.addEventListener("pointerup", function () {
+  var n = pressCount;
+  setTimeout(function () { if (pressing && pressCount === n) pressDone(); }, 1000);
+}, true);
+
+/* The one exception: an entry that voids a signature re-renders at once, so the
+   screen never goes on showing a voided signature as signed. The caret is put
+   back where it was, since this happens mid-word. */
+function renderAfterVoid(t) {
+  var caret = null;
+  try { caret = t.selectionStart; } catch (err) {}
+  render(false);
+  var el = document.activeElement;
+  if (caret != null && el && el.setSelectionRange) {
+    try { el.setSelectionRange(caret, caret); } catch (err) {}
+  }
+}
 
 root.addEventListener("input", function (e) {
   var t = e.target;
   if (t.hasAttribute && t.hasAttribute("data-field")) {
-    set(t.getAttribute("data-field"), t.value);
+    if (set(t.getAttribute("data-field"), t.value)) renderAfterVoid(t);
   } else if (t.hasAttribute && t.hasAttribute("data-med")) {
     var i = parseInt(t.getAttribute("data-med"), 10);
-    if (state.meds[i]) { state.meds[i][t.getAttribute("data-col")] = t.value; touchRecord(); }
+    if (state.meds[i]) {
+      state.meds[i][t.getAttribute("data-col")] = t.value;
+      if (touchRecord()) renderAfterVoid(t);
+    }
   }
 });
 
 root.addEventListener("change", function (e) {
   var t = e.target;
-  if (t.hasAttribute && t.hasAttribute("data-field") && LIVE.indexOf(t.getAttribute("data-field")) >= 0) render(false);
+  if (t.hasAttribute && t.hasAttribute("data-field") && LIVE.indexOf(t.getAttribute("data-field")) >= 0) {
+    if (pressing) livePending = true;
+    else refreshLive();
+  }
 });
 
 /* Arrow-key navigation within option groups (WAI-ARIA radio group pattern) */
@@ -2420,15 +2734,23 @@ root.addEventListener("click", function (e) {
   var el = e.target.closest("[data-act]");
   if (!el) return;
   var act = el.getAttribute("data-act");
+  /* A notice is about the screen it appeared on; moving on retires it */
+  if (["begin", "resumeDraft", "next", "back", "goto", "edit"].indexOf(act) >= 0) state.notice = null;
 
   if (act === "begin") {
     if (!get("date")) state.a.date = new Date().toISOString().slice(0, 10);
     state.view = "form"; render(true); return;
   }
 
+  /* The switch lives on the start screen, where the stored copy may be an earlier
+     session's, still on offer to resume. Ticking only agrees to keep a copy from
+     here on, so nothing is written until there is a record to write; unticking
+     deletes a copy only if it is this record's own. */
   if (act === "toggleDraft") {
     state.keepDraft = !state.keepDraft;
-    if (state.keepDraft) saveDraft(); else discardDraft();
+    var held = loadDraft();
+    if (!state.keepDraft && held && held.recordId === state.recordId) discardDraft();
+    else if (state.keepDraft && hasContent() && (!held || held.recordId === state.recordId)) saveDraft();
     render(false); return;
   }
   if (act === "resumeDraft") {
@@ -2444,7 +2766,8 @@ root.addEventListener("click", function (e) {
 
   if (act === "radio") {
     var k = el.getAttribute("data-key"), v = el.getAttribute("data-val");
-    set(k, get(k) === v ? undefined : v);
+    /* Tapping a chosen option clears it, except units, which always have a value */
+    set(k, (get(k) === v && k !== "units") ? undefined : v);
     render(false); return;
   }
 
@@ -2478,7 +2801,11 @@ root.addEventListener("click", function (e) {
     render(false); return;
   }
 
-  if (act === "goto") { state.step = parseInt(el.getAttribute("data-idx"), 10); saveDraft(); render(true); return; }
+  if (act === "goto") {
+    state.step = parseInt(el.getAttribute("data-idx"), 10);
+    state.view = "form";   // also reached from the summary's incomplete list
+    saveDraft(); render(true); return;
+  }
   if (act === "back") {
     if (state.step > 0) { state.step--; render(true); }
     else { state.view = "intro"; render(true); }
@@ -2526,6 +2853,8 @@ root.addEventListener("click", function (e) {
     var smRole = el.getAttribute("data-role");
     var key = smRole + "SignMode";
     state.a[key] = (get(key) === "typed") ? "draw" : "typed";
+    /* The typed name is only shown in typed mode; switching to draw drops it */
+    if (state.a[key] === "draw") set(smRole + "TypedName", "");
     render(false); return;
   }
 
