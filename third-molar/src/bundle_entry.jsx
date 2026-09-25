@@ -441,7 +441,8 @@ const POS_PALATAL = "palatal";
 
 
 
-async function buildAndDownloadPdf(score, findings, responseRows, radiographImage, assessor, assessedOn) {
+// provisional: { noRadiograph, incomplete, floor } - used only when there is no score.
+async function buildAndDownloadPdf(score, findings, responseRows, radiographImage, assessor, assessedOn, provisional) {
   const pageSize = [595.28, 841.89]; // A4 in points
   const margin = 50;
   const pdfDoc = await PDFDocument.create();
@@ -541,9 +542,19 @@ async function buildAndDownloadPdf(score, findings, responseRows, radiographImag
 
   if (!score) {
     drawParagraph(
-      "Provisional assessment: no radiograph was available, so the radiographic steps were not completed and a surgical difficulty score could not be calculated. Obtain a periapical (PA) or an orthopantomogram (OPG/OPT) and repeat the assessment before surgical planning.",
+      provisional && !provisional.noRadiograph
+        ? `Provisional assessment: ${provisional.incomplete}. A surgical difficulty score could not be calculated.`
+        : "Provisional assessment: no radiograph was available, so the radiographic steps were not completed and a surgical difficulty score could not be calculated. Obtain a periapical (PA) or an orthopantomogram (OPG/OPT) and repeat the assessment before surgical planning.",
       { size: 10.5, bold: true, color: clayColor, gapAfter: 12 }
     );
+    // The medical referral minimum applies whether or not a score exists.
+    if (provisional && provisional.floor) {
+      drawParagraph(`Suggested provider (minimum): ${provisional.floor.text}`, { size: 11.5, bold: true, gapAfter: 2 });
+      drawParagraph(
+        `Minimum set by the medical history, as no surgical difficulty score could be calculated: ${provisional.floor.reasons.join("; ")}.`,
+        { size: 9.5, color: clayColor, gapAfter: 12 }
+      );
+    }
   }
 
   if (findings.length) {
@@ -558,9 +569,14 @@ async function buildAndDownloadPdf(score, findings, responseRows, radiographImag
       const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
       const isJpeg = radiographImage.startsWith("data:image/jpeg");
       const embedded = isJpeg ? await pdfDoc.embedJpg(bytes) : await pdfDoc.embedPng(bytes);
-      const scale = Math.min(1, maxWidth / embedded.width);
+      // Fit the width and the height of a page (less the heading), so a tall
+      // image is not cut off at the bottom.
+      const headingSpace = 21;
+      const scale = Math.min(1, maxWidth / embedded.width, (page.getHeight() - margin * 2 - headingSpace) / embedded.height);
       const imgWidth = embedded.width * scale;
       const imgHeight = embedded.height * scale;
+      // Keep the heading on the same page as the image.
+      if (y - headingSpace - imgHeight < margin) newPage();
       drawParagraph("Attached radiograph", { size: 12, bold: true, gapAfter: 6 });
       if (y - imgHeight < margin) newPage();
       page.drawImage(embedded, { x: margin, y: y - imgHeight, width: imgWidth, height: imgHeight });
@@ -643,7 +659,12 @@ const sanitizeAnswers = (a) => {
     if (!migrated) unreadable.push(k);
     out[k] = migrated || null;
   });
-  out.unreadableAnswers = unreadable;
+  // Keep what an earlier load already found unreadable: that load cleared the
+  // answer, so this one cannot detect it again. Dropped once re-entered.
+  const earlier = Array.isArray(a.unreadableAnswers)
+    ? a.unreadableAnswers.filter((k) => SCORED_KEYS.includes(k) && !out[k])
+    : [];
+  out.unreadableAnswers = [...new Set([...earlier, ...unreadable])];
   return {
     ...out,
     medicalItems: keepKnownIds(MEDICAL_ITEMS, a.medicalItems),
@@ -680,7 +701,14 @@ function loadHistory() {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
+    if (!Array.isArray(arr)) return [];
+    // Anything that is not an entry object with a date is dropped rather than
+    // allowed to crash the list. Entries without an id get a stable one from
+    // their position, which is saved with the next change to the history, so
+    // Delete removes that one entry rather than every id-less entry.
+    return arr
+      .filter((h) => h && typeof h === "object" && !Array.isArray(h) && h.date)
+      .map((h, i) => (h.id != null ? h : { ...h, id: `legacy-${i}` }));
   } catch (e) {
     return [];
   }
@@ -939,7 +967,7 @@ function ThirdMolarAssessment() {
   const [showRestoredNote, setShowRestoredNote] = useState(savedHasProgress(saved));
   const [history, setHistory] = useState(loadHistory);
   const [openedFromHistory, setOpenedFromHistory] = useState(saved ? !!saved.openedFromHistory : false);
-  // Null while an assessment is live (the PDF is then dated today); set to the
+  // Null while an assessment is live (the PDF then uses completedOn); set to the
   // recorded date when a past assessment is reopened from history.
   const [assessedOn, setAssessedOn] = useState(saved && saved.assessedOn ? saved.assessedOn : null);
   const [showReferences, setShowReferences] = useState(false);
@@ -948,6 +976,10 @@ function ThirdMolarAssessment() {
   // that it is half-finished; the cover page offers it as an explicit Resume
   // instead, so restarting is equally available.
   const [started, setStarted] = useState(false);
+  // When the assessment was completed, so the history entry and PDF carry that
+  // date rather than the day "Start new" or "Download PDF" is later pressed.
+  // Old saved progress has none; those fall back to today.
+  const [completedOn, setCompletedOn] = useState(saved && saved.completedOn ? saved.completedOn : null);
 
   /* Moving between screens is a navigation, but nothing in the DOM says so: focus
      stays on the button that was pressed and the scroll position is left where it
@@ -974,17 +1006,17 @@ function ThirdMolarAssessment() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, answers, halted, finished, openedFromHistory, started, assessedOn }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, answers, halted, finished, openedFromHistory, started, assessedOn, completedOn }));
     } catch (e) {
       // Likely quota exceeded due to the radiograph image; retry without it.
       try {
         const { radiographImage, ...rest } = answers;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, answers: rest, halted, finished, openedFromHistory, started, assessedOn }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ step, answers: rest, halted, finished, openedFromHistory, started, assessedOn, completedOn }));
       } catch (e2) {
         // Storage unavailable (e.g. private browsing) \u2013 continue without persistence.
       }
     }
-  }, [step, answers, halted, finished, openedFromHistory, started, assessedOn]);
+  }, [step, answers, halted, finished, openedFromHistory, started, assessedOn, completedOn]);
 
   const set = (key, value) =>
     setAnswers((prev) => {
@@ -1039,6 +1071,7 @@ function ThirdMolarAssessment() {
     archiveCurrent();
     setOpenedFromHistory(false);
     setAssessedOn(null);
+    setCompletedOn(null);
     setStarted(true);
     setAnswers(freshAnswers());
     setStep(0);
@@ -1095,10 +1128,10 @@ function ThirdMolarAssessment() {
     const s = computeSurgicalDifficultyScore();
     const entry = {
       id: Date.now(),
-      date: new Date().toISOString(),
+      date: completedOn || new Date().toISOString(),
       tooth: answers.tooth,
       total: s ? s.total : null,
-      category: s ? s.category : "Provisional (no radiograph)",
+      category: s ? s.category : answers.radiograph === "No" ? "Provisional (no radiograph)" : incompleteScoreText(),
       version: APP_VERSION,
       answers: rest,
     };
@@ -1111,6 +1144,7 @@ function ThirdMolarAssessment() {
     archiveCurrent();
     setOpenedFromHistory(false);
     setAssessedOn(null);
+    setCompletedOn(null);
     const opposite = OPPOSITE_TOOTH[answers.tooth] || null;
     setAnswers({
       ...freshAnswers(),
@@ -1134,7 +1168,8 @@ function ThirdMolarAssessment() {
   const hasWorkInProgress = () => {
     if (finished || openedFromHistory) return false;
     return Object.keys(INITIAL_ANSWERS).some((k) => {
-      if (k === "tooth" || k === "unreadableAnswers") return false;
+      // The assessor name is remembered between assessments, so it is not work.
+      if (k === "tooth" || k === "unreadableAnswers" || k === "assessor") return false;
       const v = answers[k];
       if (Array.isArray(v)) return v.length > 0;
       return v !== INITIAL_ANSWERS[k];
@@ -1200,6 +1235,7 @@ function ThirdMolarAssessment() {
     const next = nextActiveIndex(step, 1);
     if (next >= STEPS.length) {
       setFinished(true);
+      setCompletedOn(new Date().toISOString());
       return;
     }
     setStep(next);
@@ -1329,6 +1365,35 @@ function ThirdMolarAssessment() {
     };
   };
 
+  // With no score, the medical referral minimum still applies on its own.
+  const getMedicalReferralFloor = () => {
+    if (answers.medicalHistory !== "Yes") return null;
+    let tier = 0;
+    answers.medicalItems.forEach((id) => {
+      const floor = MEDICAL_REFERRAL_FLOOR[id];
+      if (floor != null && floor > tier) tier = floor;
+    });
+    if (!tier) return null;
+    const reasons = [];
+    MEDICAL_ITEMS.forEach((item) => {
+      if (answers.medicalItems.includes(item.id) && MEDICAL_REFERRAL_FLOOR[item.id] === tier) reasons.push(item.label);
+    });
+    return { text: REFERRAL_TIERS[tier], reasons };
+  };
+
+  // A radiograph was recorded but the score inputs are missing (e.g. an answer
+  // from an earlier version that could not be read).
+  const incompleteScoreText = () => {
+    const keys = ["angulation", "depth", arch === "upper" ? "sinusProximity" : "spaceAvailable"];
+    const missing = keys
+      .filter((k) => !answers[k])
+      .map((k) => {
+        const label = STEPS.find((s) => s.key === k).label;
+        return label.charAt(0).toLowerCase() + label.slice(1);
+      });
+    return missing.length ? `Incomplete \u2013 re-enter ${missing.join(", ")}` : "Incomplete";
+  };
+
   const computeSurgicalDifficultyScore = () => {
     const upper = arch === "upper";
     const a = (upper ? ANGULATION_POINTS_UPPER : ANGULATION_POINTS_LOWER)[answers.angulation];
@@ -1418,7 +1483,7 @@ function ThirdMolarAssessment() {
       });
     }
 
-    if (answers.depth === "Below the cervical line of the adjacent second molar") {
+    if (answers.depth === DEPTH_C) {
       findings.push({
         level: "amber",
         text: "Deep impaction below the cervical line of the adjacent tooth is associated with greater surgical difficulty.",
@@ -1591,7 +1656,9 @@ function ThirdMolarAssessment() {
     );
   }
 
-  if (!started && !halted && !finished) {
+  // Also covers a finished or halted assessment restored from storage: it is
+  // offered through Resume rather than reopened on the previous patient.
+  if (!started) {
     return (
       <Shell hideTitle>
         <div style={{ maxWidth: 620, margin: "0 auto" }}>
@@ -1641,7 +1708,11 @@ function ThirdMolarAssessment() {
               }}
             >
               <span style={{ fontFamily: sans, fontSize: 14, color: ink }}>
-                An unfinished assessment was found on this device.
+                {halted
+                  ? "A halted assessment was found on this device."
+                  : finished
+                  ? "A completed assessment was found on this device."
+                  : "An unfinished assessment was found on this device."}
               </span>
               <button
                 type="button"
@@ -1756,6 +1827,7 @@ function ThirdMolarAssessment() {
   if (finished) {
     const findings = buildSummary();
     const score = computeSurgicalDifficultyScore();
+    const medicalFloor = score ? null : getMedicalReferralFloor();
     const colorFor = { clay, amber, teal };
     const responseRows = [
       ["Tooth assessed", answers.tooth],
@@ -1822,6 +1894,11 @@ function ThirdMolarAssessment() {
               Previously recorded assessment – {new Date(assessedOn).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
             </div>
           )}
+          {/* "Assessed by" below is hidden in print, so the printed summary carries it here. */}
+          <div className="tma-printonly" style={{ fontFamily: sans, fontSize: 13, color: inkSoft, marginTop: 6 }}>
+            {answers.assessor && answers.assessor.trim() ? `Assessed by: ${answers.assessor.trim()} \u00b7 ` : ""}Date:{" "}
+            {new Date(assessedOn || completedOn || Date.now()).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
+          </div>
 
           {!score && (
             <div
@@ -1837,10 +1914,35 @@ function ThirdMolarAssessment() {
                 Provisional assessment
               </span>
               <p style={{ fontFamily: sans, fontSize: 14, color: ink, lineHeight: 1.6, marginTop: 8, marginBottom: 0 }}>
-                No radiograph was available, so the radiographic steps were not completed and a
-                surgical difficulty score could not be calculated. Obtain a periapical (PA) or
-                orthopantomogram (OPG/OPT) and repeat the assessment before surgical planning.
+                {answers.radiograph === "No"
+                  ? "No radiograph was available, so the radiographic steps were not completed and a surgical difficulty score could not be calculated. Obtain a periapical (PA) or orthopantomogram (OPG/OPT) and repeat the assessment before surgical planning."
+                  : `${incompleteScoreText()}. A surgical difficulty score could not be calculated.`}
               </p>
+              {medicalFloor && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    marginTop: 14,
+                    paddingTop: 14,
+                    borderTop: `1px solid ${border}`,
+                  }}
+                >
+                  <span style={{ fontFamily: mono, fontSize: 11, letterSpacing: "0.06em", color: inkSoft, textTransform: "uppercase" }}>
+                    Suggested provider (minimum)
+                  </span>
+                  <span style={{ fontFamily: sans, fontSize: 14, fontWeight: 700, color: ink }}>
+                    {medicalFloor.text}
+                  </span>
+                </div>
+              )}
+              {medicalFloor && (
+                <p style={{ fontFamily: sans, fontSize: 12, color: clay, lineHeight: 1.55, marginTop: 8, marginBottom: 0 }}>
+                  Minimum set by the medical history, as no surgical difficulty score could be calculated: {medicalFloor.reasons.join("; ")}.
+                </p>
+              )}
             </div>
           )}
 
@@ -2010,6 +2112,7 @@ function ThirdMolarAssessment() {
                 setOpenedFromHistory(false);
                 // editing a past assessment makes it a live one, so it must not keep the old date
                 setAssessedOn(null);
+                setCompletedOn(null);
               }}
               style={restartBtnStyle}
             >
@@ -2024,7 +2127,11 @@ function ThirdMolarAssessment() {
             <button
               onClick={async () => {
                 try {
-                  await buildAndDownloadPdf(score, findings, responseRows, answers.radiographImage, answers.assessor, assessedOn);
+                  await buildAndDownloadPdf(score, findings, responseRows, answers.radiographImage, answers.assessor, assessedOn || completedOn, {
+                    noRadiograph: answers.radiograph === "No",
+                    incomplete: incompleteScoreText(),
+                    floor: medicalFloor,
+                  });
                 } catch (e) {
                   alert("Sorry \u2013 the PDF could not be generated. Please try again, or use the Print summary option instead.");
                 }
@@ -2948,9 +3055,16 @@ function Shell({ children, wide, hideTitle }) {
           outline: none;
         }
 
+        .tma-printonly {
+          display: none;
+        }
+
         @media print {
           .tma-noprint {
             display: none !important;
+          }
+          .tma-printonly {
+            display: block !important;
           }
           body {
             background: #fff !important;
