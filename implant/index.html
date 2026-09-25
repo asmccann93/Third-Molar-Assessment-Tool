@@ -591,14 +591,47 @@ function evaluate(a) {
   }
   out.checks.forEach(function (c) { if (!c.ok) { out.score += c.pts; out.reasons.push({ pts: c.pts, text: c.text }); } });
 
+  // An implant was proposed but a check it needs could not be made: say which,
+  // and what it needed, so a missing check is never read as a passed one.
+  var blank = function (k) { return a[k] === undefined || a[k] === null || String(a[k]).trim() === ""; };
+  var proposed = !blank("dia") || !blank("len");
+  var made = function (key) { return out.checks.some(function (c) { return c.key === key; }); };
+  var needs = function (keys) {
+    return keys.filter(function (k) { return m[k] === null; })
+      .map(function (k) {
+        return (k === "ht" && !s ? "available bone height" : measureName(k, s).toLowerCase()) +
+          (blank(k) ? "" : " (the value entered is not valid)");
+      });
+  };
+  out.notChecked = [];
+  if (proposed) {
+    var htName = s ? (s.limit.vital ? "Apex to " + s.limit.label : "Implant length within " + s.limit.bone)
+      : "Implant length against the bone height";
+    [{ key: "md", name: "Clearance to each adjacent tooth", keys: ["dia", "md"] },
+     { key: "bl", name: "Bone left buccally and lingually", keys: ["dia", "bl"] },
+     { key: "ht", name: htName, keys: ["len", "ht"] }].forEach(function (c) {
+      if (made(c.key)) return;
+      var why = needs(c.keys);
+      if (c.key === "ht" && !s) why.push("the tooth");
+      out.notChecked.push(c.key);
+      out.unknown.push("Not checked: " + c.name + " (needs " + why.join(" and ") + ")");
+    });
+  }
+  // At a nerve site, the apex-to-nerve check is the one that decides whether
+  // the implant is safe. While it is unmade, the case is not straightforward:
+  // it is incomplete.
+  out.nerveUnchecked = !!(s && s.limit.vital && proposed && !made("ht"));
+
   var band = DRAFT.bands.filter(function (b) { return out.score <= b.max; })[0];
   // A proposed implant that reaches into the nerve clearance is not a case to
   // rate: it is a plan to change. No score may call it straightforward.
   out.vitalBreach = out.checks.some(function (c) { return c.vital && !c.ok; });
   out.rating = out.hard.length ? "Outside routine placement"
-    : (out.vitalBreach ? "Revise the proposed implant" : band.label);
+    : (out.vitalBreach ? "Revise the proposed implant"
+      : (out.nerveUnchecked && band === DRAFT.bands[0] ? INCOMPLETE : band.label));
   return out;
 }
+var INCOMPLETE = "Incomplete: nerve clearance not checked";
 
 var MEASURE_NAMES = { md: "Space between the adjacent teeth", bl: "Bone width", ht: "Available bone height",
   rest: "Restorative space", dia: "Implant diameter", len: "Implant length" };
@@ -772,6 +805,11 @@ function resultHTML() {
     out += '<div class="card alert"><p class="grade">Outside routine placement</p><div class="gradesub">One or more findings mean this case should not go ahead as a routine placement. What each one needs:</div><ul class="because">';
     r.hard.forEach(function (x) { out += '<li><strong>' + esc(x.t) + '.</strong> ' + esc(x.adv.action) + '</li>'; });
     out += '</ul></div>';
+  } else if (r.rating === INCOMPLETE) {
+    out += '<div class="card warn"><p class="grade">' + esc(INCOMPLETE) + '</p><div class="gradesub">An implant was entered, but ' +
+      'its length has not been checked against the distance to ' + esc(r.site.limit.label) + ', so the case is not rated ' +
+      esc(DRAFT.bands[0].label.toLowerCase()) + '. Enter the available bone height and the implant length to make the check. ' +
+      'Complexity score so far ' + r.score + '.</div></div>';
   } else if (r.vitalBreach) {
     out += '<div class="card alert"><p class="grade">Revise the proposed implant</p><div class="gradesub">As entered, the implant ' +
       'reaches into the clearance to ' + esc(r.site.limit.label) + '. Change the implant before rating the case. ' +
