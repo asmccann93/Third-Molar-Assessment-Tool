@@ -1,4 +1,14 @@
-const CACHE = "tma-hub-v14";
+const CACHE = "tma-hub-v15";
+
+/* Paths this worker must never handle: the gated tools, bare or slashed, and
+   the API. site-check.js runs this worker against these paths, bare, slashed
+   and deeper, and fails if it answers any of them. */
+const SKIP = ["/ai-notes", "/implant", "/api"];
+const skipped = (path) => SKIP.some((p) => path === p || path.startsWith(p + "/"));
+
+/* What the cache-first branch may store: the hub's own static files. */
+const cacheableAsset = (path) =>
+  /\.(png|ico|svg|webmanifest|woff2)$/.test(path);
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
@@ -19,6 +29,10 @@ self.addEventListener("activate", (e) => {
       // This does clear "tma-v1-4-*", the caches of the third molar tool that
       // used to live here. That is intended: those installs are not being
       // migrated, and the tool now serves itself from /third-molar/ on "tm-".
+      //
+      // It must also clear "tma-hub-v14" and earlier: those versions cached GET
+      // /api/auth (a session record) and could hold a gated page under its bare
+      // path. That is why v15 is a bump and not just an edit.
       .then((keys) =>
         Promise.all(
           keys.filter((k) => k.indexOf("tma-") === 0 && k !== CACHE).map((k) => caches.delete(k))
@@ -43,8 +57,19 @@ self.addEventListener("fetch", (e) => {
   // The implant tool is gated the same way since 21 September 2026 and is
   // skipped for the same reason: a copy cached here would open without the
   // passcode, on any device that had signed in once.
-  const path = new URL(e.request.url).pathname;
-  if (path.startsWith("/ai-notes/") || path.startsWith("/implant/")) return;
+  //
+  // The bare paths count too. "/ai-notes" without the slash is a navigation the
+  // browser can make (typed, bookmarked, redirected), and a startsWith("/ai-notes/")
+  // test does not match it - so the signed-in page was being cached under that
+  // key and opened offline without the passcode.
+  //
+  // /api/ is never touched either. Those responses are per-session and live:
+  // GET /api/auth is a session record, and /api/transcribe?jobId= is polled until
+  // it finishes. Cached here, the first would leave a "signed in" record on a
+  // device promised to keep nothing, and the second would never complete.
+  const url = new URL(e.request.url);
+  const path = url.pathname;
+  if (skipped(path)) return;
 
   if (e.request.method !== "GET") return;
 
@@ -79,15 +104,21 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // Cache-first for static assets (icons, manifest).
+  // Cache-first for the hub's own static assets (icons, manifest, fonts), and
+  // nothing else. Anything this list does not name - another origin, a script,
+  // an API, a data file - goes straight to the browser, uncached. An allowlist,
+  // not a blocklist: a new dynamic route must not become cacheable by default.
+  if (url.origin !== self.location.origin || !cacheableAsset(path)) return;
+
   e.respondWith(
     caches.match(e.request).then(
       (cached) =>
         cached ||
         fetch(e.request).then((resp) => {
-          // resp.ok is false for opaque cross-origin responses (the web fonts),
-          // which are still worth keeping, so allow those through as well.
-          if (resp && (resp.ok || resp.type === "opaque")) {
+          // Only a good, same-origin ("basic") response. Opaque cross-origin
+          // responses used to be kept for the Google fonts; the fonts are
+          // self-hosted since 21 August 2026, so nothing opaque belongs here.
+          if (resp && resp.ok && resp.type === "basic") {
             const copy = resp.clone();
             caches.open(CACHE).then((c) => c.put(e.request, copy));
           }

@@ -25,8 +25,13 @@ export const config = { matcher: ['/ai-notes/:path*', '/implant/:path*', '/api/:
 // Tools that need more than a valid session: the env var names the people.
 const RESTRICTED = { '/implant/': { env: 'IMPLANT_USERS', name: 'Implant Case Assessment' } };
 
+// The bare path counts too. The matcher sends '/implant' (no slash) here and
+// Vercel serves the same index.html for it, so checking only '/implant/...'
+// let any signed-in clinician walk in by leaving the slash off.
 const restrictionFor = (pathname) => {
-  for (const prefix of Object.keys(RESTRICTED)) if (pathname.indexOf(prefix) === 0) return RESTRICTED[prefix];
+  for (const prefix of Object.keys(RESTRICTED)) {
+    if (pathname.indexOf(prefix) === 0 || pathname === prefix.slice(0, -1)) return RESTRICTED[prefix];
+  }
   return null;
 };
 

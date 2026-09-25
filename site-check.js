@@ -26,6 +26,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const vm = require("vm");
 
 const root = process.argv[2];
 const record = process.argv.includes("--record");
@@ -76,6 +77,20 @@ const cacheNameOf = (sw) => {
   return m ? m[1] : null;
 };
 
+/* The switcher bar itself: the contents of <nav class="ostb">, with HTML
+   comments removed. The link checks look ONLY here. They used to search the
+   whole page, and the hub's cards carry the same hrefs, so a link could vanish
+   from the hub's bar while the check stayed green. */
+const navBar = (html) => {
+  const m = html && html.replace(/<!--[\s\S]*?-->/g, "").match(/<nav class="ostb"[^>]*>([\s\S]*?)<\/nav>/);
+  return m ? m[1] : null;
+};
+const barLinks = (bar, href) => bar.includes(`href="${href}"`);
+const barCurrent = (bar) => {
+  const m = bar.match(/href="([^"]+)"\s+aria-current="page"/);
+  return m ? m[1] : null;
+};
+
 const previous = fs.existsSync(FINGERPRINTS) ? JSON.parse(read(FINGERPRINTS)) : {};
 const current = {};
 
@@ -111,23 +126,23 @@ for (const tool of TOOLS) {
   }
 
   /* --- 2. switcher completeness and current-page marking --- */
-  if (!/<nav class="ostb"/.test(index)) {
+  const bar = navBar(index);
+  if (!bar) {
     problems.push(`${tool.name}: the switcher bar is missing from index.html`);
   } else {
     for (const other of TOOLS) {
-      const linked = new RegExp(`href="${other.href.replace(/\//g, "\\/")}"`).test(index);
-      if (!linked) {
+      if (!barLinks(bar, other.href)) {
         problems.push(
           `${tool.name}: the switcher has no link to ${other.name} (${other.href}). ` +
             `That tool will vanish from the bar on this page only.`
         );
       }
     }
-    const marked = index.match(/href="([^"]+)"\s+aria-current="page"/);
+    const marked = barCurrent(bar);
     if (!marked) problems.push(`${tool.name}: no switcher link is marked aria-current="page"`);
-    else if (marked[1] !== tool.href) {
+    else if (marked !== tool.href) {
       problems.push(
-        `${tool.name}: aria-current is on "${marked[1]}" but this page is "${tool.href}"`
+        `${tool.name}: aria-current is on "${marked}" but this page is "${tool.href}"`
       );
     }
   }
@@ -147,19 +162,19 @@ if (!gatedIndex) {
 
   /* 3a. Its own switcher carries every public tool, and marks itself. This is
      the one page whose bar differs from the other five. */
-  if (!/<nav class="ostb"/.test(gatedIndex)) {
+  const gatedBar = navBar(gatedIndex);
+  if (!gatedBar) {
     problems.push(`${GATED.name}: the switcher bar is missing from index.html`);
   } else {
     for (const other of TOOLS) {
-      const linked = new RegExp(`href="${other.href.replace(/\//g, "\\/")}"`).test(gatedIndex);
-      if (!linked) {
+      if (!barLinks(gatedBar, other.href)) {
         problems.push(`${GATED.name}: the switcher has no link to ${other.name} (${other.href})`);
       }
     }
-    const marked = gatedIndex.match(/href="([^"]+)"\s+aria-current="page"/);
+    const marked = barCurrent(gatedBar);
     if (!marked) problems.push(`${GATED.name}: no switcher link is marked aria-current="page"`);
-    else if (marked[1] !== GATED.href) {
-      problems.push(`${GATED.name}: aria-current is on "${marked[1]}" but this page is "${GATED.href}"`);
+    else if (marked !== GATED.href) {
+      problems.push(`${GATED.name}: aria-current is on "${marked}" but this page is "${GATED.href}"`);
     }
   }
 
@@ -206,8 +221,8 @@ if (sitemap && sitemap.includes(GATED.dir)) {
    deployed with a five-entry bar drops AI Notes on that page only. Until
    2 September 2026 this check asserted the opposite. */
 for (const tool of TOOLS) {
-  const index = read(path.join(root, tool.dir, "index.html"));
-  if (index && !new RegExp(`href="${GATED.href.replace(/\//g, "\\/")}"`).test(index)) {
+  const bar = navBar(read(path.join(root, tool.dir, "index.html")));
+  if (bar && !barLinks(bar, GATED.href)) {
     problems.push(
       `${tool.name}: the switcher has no link to ${GATED.name} (${GATED.href}). ` +
         `That tool will vanish from the bar on this page only.`
@@ -217,18 +232,130 @@ for (const tool of TOOLS) {
 
 const PREVIEW = [{ name: "Implant", dir: "implant", href: "/implant/", gate: "IMPLANT_USERS" }];
 
-/* --- 3e. the hub's worker must not cache a gated tool --------------------------
+/* --- 3e. the hub's worker must not cache a gated tool, or the API -------------
    Its scope is the whole origin, so on the very first visit to a gated page,
    before that page's own worker has installed, the hub worker is the one that
    sees the request. Unless it steps aside, the signed-in page goes into its
    cache and opens without the passcode from then on. It skipped AI Notes; it
-   did not skip the implant tool until 21 September 2026. */
-{
-  const hubSw = stripComments(read(path.join(root, "sw.js")) || "");
+   did not skip the implant tool until 21 September 2026.
+
+   This used to be a text search for startsWith("/ai-notes/"), which passed
+   while the bare path "/ai-notes" and every /api/ request (a GET /api/auth
+   session record, /api/transcribe polls) were still being cached. It now RUNS
+   the worker in a sandbox with fake caches and a fake network, fires fetch
+   events at it, and asserts on what it actually does. */
+const ORIGIN = "https://oralsurgeryassess.com";
+async function checkHubWorker() {
+  const src = read(path.join(root, "sw.js"));
+  if (!src) { problems.push("Hub sw.js is missing."); return; }
+  const hubCache = cacheNameOf(src);
+
+  const handlers = {};
+  const puts = [];
+  const deleted = [];
+  let keys = [];
+  const cacheObj = (name) => ({
+    put: async (req) => { puts.push(`${name} ${req.url || req}`); },
+    add: async () => {}, addAll: async () => {}, match: async () => undefined,
+  });
+  const caches = {
+    open: async (name) => cacheObj(name),
+    match: async () => undefined,
+    keys: async () => keys.slice(),
+    delete: async (k) => { deleted.push(k); return true; },
+  };
+  const response = (url) => {
+    const same = new URL(url).origin === ORIGIN;
+    return { ok: same, status: same ? 200 : 0, type: same ? "basic" : "opaque", url, clone() { return this; } };
+  };
+  const self = {
+    addEventListener: (type, fn) => { handlers[type] = fn; },
+    skipWaiting: async () => {},
+    clients: { claim: async () => {} },
+    location: new URL(ORIGIN + "/sw.js"),
+    caches,
+  };
+  try {
+    vm.runInNewContext(src, {
+      self, caches, fetch: async (req) => response(req.url || String(req)),
+      URL, Response, Request, Headers, Promise, console, setTimeout,
+    }, { timeout: 2000 });
+  } catch (err) {
+    problems.push(`Hub sw.js could not be run for checking: ${err.message}`);
+    return;
+  }
+  if (!handlers.fetch) { problems.push("Hub sw.js registers no fetch handler."); return; }
+  const settle = () => new Promise((r) => setImmediate(r));
+
+  /* One request through the handler: did it answer, and what did it store? */
+  async function fire(url, mode) {
+    const before = puts.length;
+    let responded = null;
+    const event = {
+      request: { url, method: "GET", mode, headers: new Headers() },
+      respondWith: (p) => { responded = Promise.resolve(p); },
+      waitUntil: () => {},
+    };
+    handlers.fetch(event);
+    if (responded) await responded.catch(() => {});
+    for (let i = 0; i < 5; i++) await settle();
+    return { responded: !!responded, stored: puts.slice(before) };
+  }
+
+  /* Must be left entirely to the browser: every gated tool, bare, slashed and
+     deeper (a .png under it included, which the asset rule would otherwise
+     take), and the whole of /api/. As a navigation and as a subresource. */
+  const hands_off = [];
   for (const gated of [GATED].concat(PREVIEW)) {
-    if (!hubSw.includes(`startsWith("${gated.href}")`)) {
-      problems.push(`Hub sw.js does not skip ${gated.href}. On a first visit it would cache the gated page, which would then open without the passcode.`);
+    const bare = gated.href.replace(/\/$/, "");
+    hands_off.push(bare, gated.href, gated.href + "index.html", gated.href + "icon.png", bare + "?x=1");
+  }
+  hands_off.push("/api", "/api/", "/api/auth", "/api/transcribe?jobId=J1", "/api/x.png");
+  const handled = [];
+  for (const p of hands_off) {
+    const modes = [];
+    for (const mode of ["navigate", "cors", "no-cors"]) {
+      const r = await fire(ORIGIN + p, mode);
+      if (r.responded || r.stored.length) modes.push(mode + (r.stored.length ? ", cached" : ""));
     }
+    if (modes.length) handled.push(`${p} (${modes.join("; ")})`);
+  }
+  if (handled.length) {
+    problems.push(
+      `Hub sw.js handles requests it must leave alone: ${handled.join(", ")}. ` +
+        `It must return before respondWith() for the gated tools, bare or slashed, and for /api/: ` +
+        `a cached gated page opens without the passcode, and a cached API answer is a stale session.`
+    );
+  }
+
+  /* The cache-first branch stores the hub's static files only: not an
+     arbitrary same-origin route, not another origin. */
+  for (const u of [ORIGIN + "/some-route?x=1", ORIGIN + "/data.json", "https://example.com/font.woff2"]) {
+    const r = await fire(u, "no-cors");
+    if (r.stored.length) problems.push(`Hub sw.js caches ${u}. The cache-first branch may only keep the hub's own static files.`);
+  }
+
+  /* And it still does its job, or the checks above prove nothing. */
+  const home = await fire(ORIGIN + "/", "navigate");
+  if (!home.responded || !home.stored.length) problems.push("Hub sw.js no longer caches the hub page on a navigation to /. The hub has lost its offline copy.");
+  const icon = await fire(ORIGIN + "/icon-192.png", "no-cors");
+  if (!icon.responded || !icon.stored.length) problems.push("Hub sw.js no longer caches /icon-192.png. The hub's static assets have lost their offline copy.");
+
+  /* Activation clears every older hub cache (older ones may hold a cached
+     /api/auth or a gated page) and nobody else's. */
+  if (handlers.activate && hubCache) {
+    keys = ["tma-hub-v1", "tma-hub-v14", hubCache, "tm-v1-4-25-g", "sedation-v11", "la-v0-14-2-i", "asa-v14"];
+    let done = null;
+    handlers.activate({ waitUntil: (p) => { done = Promise.resolve(p); } });
+    if (done) await done.catch(() => {});
+    for (let i = 0; i < 5; i++) await settle();
+    for (const k of keys) {
+      const hubOld = k.indexOf("tma-hub-") === 0 && k !== hubCache;
+      if (hubOld && !deleted.includes(k)) problems.push(`Hub sw.js does not delete the old cache "${k}" on activation.`);
+      if (!hubOld && deleted.includes(k)) problems.push(`Hub sw.js deletes "${k}" on activation. It may only clear its own old versions.`);
+    }
+  } else {
+    problems.push("Hub sw.js registers no activate handler, so old hub caches are never cleared.");
   }
 }
 
@@ -237,9 +364,11 @@ const PREVIEW = [{ name: "Implant", dir: "implant", href: "/implant/", gate: "IM
    complete bar is worth having, and nothing checked it until 20 September 2026
    (it had been missing AI Notes since 2 September). */
 const notFound = read(path.join(root, "404.html"));
-if (notFound) {
+const notFoundBar = navBar(notFound);
+if (notFound && !notFoundBar) problems.push(`404.html: the switcher bar is missing.`);
+if (notFoundBar) {
   for (const other of TOOLS.concat([GATED], PREVIEW)) {
-    if (!notFound.includes(`href="${other.href}"`)) {
+    if (!barLinks(notFoundBar, other.href)) {
       problems.push(`404.html: the switcher has no link to ${other.name} (${other.href}).`);
     }
   }
@@ -315,18 +444,19 @@ for (const tool of PREVIEW) {
   for (const api of ["localStorage", "sessionStorage", "indexedDB"]) {
     if (new RegExp(`\\b${api}\\b`).test(code)) problems.push(`${tool.name}: index.html references ${api}. It promises to store nothing.`);
   }
-  for (const other of TOOLS.concat([GATED, tool])) {
-    if (!new RegExp(`href="${other.href.replace(/\//g, "\\/")}"`).test(index)) {
+  const ownBar = navBar(index);
+  if (!ownBar) problems.push(`${tool.name}: the switcher bar is missing from index.html`);
+  for (const other of ownBar ? TOOLS.concat([GATED, tool]) : []) {
+    if (!barLinks(ownBar, other.href)) {
       problems.push(`${tool.name}: its switcher has no link to ${other.name} (${other.href}).`);
     }
   }
-  const marked = index.match(/href="([^"]+)"\s+aria-current="page"/);
-  if (!marked || marked[1] !== tool.href) problems.push(`${tool.name}: its own switcher link is not marked aria-current="page".`);
+  if (ownBar && barCurrent(ownBar) !== tool.href) problems.push(`${tool.name}: its own switcher link is not marked aria-current="page".`);
   // Linked from every other bar, exactly like a launched tool: the same
   // failure mode as check 4, so it is checked the same way.
   for (const other of TOOLS.concat([GATED])) {
-    const page = read(path.join(root, other.dir, "index.html"));
-    if (page && !page.includes(`href="${tool.href}"`)) {
+    const otherBar = navBar(read(path.join(root, other.dir, "index.html")));
+    if (otherBar && !barLinks(otherBar, tool.href)) {
       problems.push(`${other.name}: the switcher has no link to ${tool.name} (${tool.href}). That tool will vanish from the bar on this page only.`);
     }
   }
@@ -348,25 +478,32 @@ for (const tool of PREVIEW) {
 }
 
 /* --- report --- */
-console.log("");
-for (const n of notes) console.log("  " + n);
+checkHubWorker().then(report, (err) => {
+  problems.push(`Hub sw.js check crashed: ${err && err.stack}`);
+  report();
+});
 
-if (record) {
-  fs.writeFileSync(FINGERPRINTS, JSON.stringify(current, null, 2) + "\n");
-  console.log(`\n  Baseline recorded in ${path.basename(FINGERPRINTS)}:`);
-  for (const [dir, v] of Object.entries(current)) {
-    console.log(`    ${dir.padEnd(20)} ${v.hash}  ${v.cache}`);
-  }
+function report() {
   console.log("");
+  for (const n of notes) console.log("  " + n);
+
+  if (record) {
+    fs.writeFileSync(FINGERPRINTS, JSON.stringify(current, null, 2) + "\n");
+    console.log(`\n  Baseline recorded in ${path.basename(FINGERPRINTS)}:`);
+    for (const [dir, v] of Object.entries(current)) {
+      console.log(`    ${dir.padEnd(20)} ${v.hash}  ${v.cache}`);
+    }
+    console.log("");
+    process.exit(0);
+  }
+
+  if (problems.length) {
+    console.log("\n  SITE CHECK FAILED\n");
+    for (const p of problems) console.log("  - " + p);
+    console.log("");
+    process.exit(1);
+  }
+
+  console.log("\n  Site check passed: hub and four tools, switchers complete, caches in step,\n  AI Notes and the implant preview listed on the hub and in every bar, gated and storing nothing.\n");
   process.exit(0);
 }
-
-if (problems.length) {
-  console.log("\n  SITE CHECK FAILED\n");
-  for (const p of problems) console.log("  - " + p);
-  console.log("");
-  process.exit(1);
-}
-
-console.log("\n  Site check passed: hub and four tools, switchers complete, caches in step,\n  AI Notes and the implant preview listed on the hub and in every bar, gated and storing nothing.\n");
-process.exit(0);
