@@ -70,7 +70,11 @@ var SKIP = {
   bigEndian: "written in big-endian form, which this viewer does not read"
 };
 
-function parse(bytes, dicomParser) {
+function hasDicmPrefix(bytes) {
+  return bytes.length >= 132 && bytes[128] === 0x44 && bytes[129] === 0x49 && bytes[130] === 0x43 && bytes[131] === 0x4d;
+}
+
+function parse(bytes, dicomParser, label) {
   try { return dicomParser.parseDicom(bytes); }
   catch (e) {
     // A big-endian file parses as far as its header and then fails. Reading
@@ -80,6 +84,14 @@ function parse(bytes, dicomParser) {
       var head = dicomParser.readPart10Header(bytes);
       if (head && (head.string("x00020010") || "").replace(/\0/g, "").trim() === BIG_ENDIAN) return BIG_ENDIAN;
     } catch (e3) { /* not a part-10 file either */ }
+    // It says it is DICOM (the "DICM" prefix after the preamble) but cannot be
+    // read to the end: a copy cut short, or a damaged file. Setting it aside as
+    // "not part of the scan" would load the rest without it, one slice short
+    // at the top or bottom of the stack, so the whole load stops here.
+    if (hasDicmPrefix(bytes)) {
+      throw new ScanError(label + " is incomplete or damaged: it starts as a DICOM file but could not be read to the end. " +
+        "Copy or export the scan again.");
+    }
     // Some exports write bare datasets with no 128-byte preamble and no DICM
     // prefix. Those are almost always implicit little endian.
     // Anything parses as *something* this way, so only trust it if it holds a
@@ -153,9 +165,9 @@ function frameBytes(ds, pixel, f, nFrames, dicomParser) {
    Pixels are not decoded here: each slice carries a pixels() function, called
    once while the volume is filled, so a large compressed scan is never held
    decoded twice. */
-function readFile(buffer, dicomParser, Lossless) {
+function readFile(buffer, dicomParser, Lossless, label) {
   var bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  var ds = parse(bytes, dicomParser);
+  var ds = parse(bytes, dicomParser, label);
   if (ds === BIG_ENDIAN) return { skip: "bigEndian" };
   if (!ds) return { skip: "notDicom" };
 
@@ -177,6 +189,11 @@ function readFile(buffer, dicomParser, Lossless) {
   // worse than saying so.
   if (!(nFrames >= 1)) return { skip: "frames" };
   var signed = ds.uint16("x00280103") === 1;
+  // BitsStored: how many of the 16 bits hold the value. A 12-bit scan keeps
+  // its sign in bit 11, not bit 15, and may carry anything in the bits above.
+  // Missing or out of range is read as all 16.
+  var stored = ds.uint16("x00280101");
+  if (!(stored >= 1 && stored <= 16)) stored = 16;
   var n = rows * cols;
   if (!(n > 0)) return { skip: "format" };
   if (!lossless && pixel.length < n * 2 * nFrames) throw new ScanError("A slice is shorter than its own header says. The export may be incomplete.");
@@ -200,7 +217,7 @@ function readFile(buffer, dicomParser, Lossless) {
       series: series, rows: rows, cols: cols, ipp: ipp, row: row, col: col,
       // DICOM PixelSpacing is [between rows, between columns].
       rowSpacing: ps[0], colSpacing: ps[1],
-      slope: slope, intercept: intercept,
+      slope: slope, intercept: intercept, signed: signed, stored: stored,
       pixels: lossless ? decodeFrame.bind(null, ds, pixel, f, nFrames, rows, cols, signed, dicomParser, Lossless)
         : viewFrame.bind(null, bytes, pixel, f, n, signed)
     });
@@ -271,14 +288,24 @@ function decodeFrame(ds, pixel, f, nFrames, rows, cols, signed, dicomParser, Los
 /* Many files, or one multi-frame file -> one volume.
    Lossless is the lossless-JPEG decoder class; without it, compressed files
    are set aside with a reason.
+   names (optional): the file names, in the same order, so a damaged file can
+   be named; without them it is named by its place in the list.
    Returns { nx, ny, nz, spacing:[sx,sy,sz], origin, xDir, yDir, zDir, hu, warnings, skipped }.
    hu is an Int16Array of Hounsfield-like units, index = x + nx*(y + ny*z).
    16-bit, not 32: a large-field dental CBCT (800 x 800 x 600) is 0.77 GB this
    way and would be twice that as floats, on top of the files themselves. */
-export function loadSeries(buffers, dicomParser, Lossless) {
+/* The largest volume the viewer will build: 800 x 800 x 800 voxels, 1 GB as
+   16-bit. The large-field dental CBCT this was sized for (800 x 800 x 600) fits;
+   a header claiming more than this is refused with a reason rather than left to
+   exhaust the browser's memory. */
+var MAX_VOXELS = 800 * 800 * 800, MAX_VOXELS_TEXT = "800 x 800 x 800";
+
+export function loadSeries(buffers, dicomParser, Lossless, names) {
   var slices = [], skipped = {};
   for (var i = 0; i < buffers.length; i++) {
-    var s = readFile(buffers[i], dicomParser, Lossless);
+    var label = names && typeof names[i] === "string" && names[i] ? "The file \"" + names[i] + "\""
+      : "File " + (i + 1) + " of " + buffers.length;
+    var s = readFile(buffers[i], dicomParser, Lossless, label);
     if (s.skip) { skipped[s.skip] = (skipped[s.skip] || 0) + 1; continue; }
     Array.prototype.push.apply(slices, s.slices);
   }
@@ -347,15 +374,34 @@ export function loadSeries(buffers, dicomParser, Lossless) {
   }
 
   var nx = first.cols, ny = first.rows, nz = slices.length;
-  var hu = new Int16Array(nx * ny * nz);
+  if (nx * ny * nz > MAX_VOXELS) {
+    throw new ScanError("This scan is too large for the viewer (" + nx + " x " + ny + " x " + nz + " voxels; the limit is " +
+      MAX_VOXELS_TEXT + "). Export a smaller field of view, or at a coarser voxel size.");
+  }
+  var hu;
+  try { hu = new Int16Array(nx * ny * nz); }
+  catch (e) { throw new ScanError("There is not enough memory in this browser to open a scan this large (" + nx + " x " + ny + " x " + nz + " voxels)."); }
+  var clipped = 0;
   slices.forEach(function (s, z) {
     var base = z * nx * ny, raw = s.pixels(), sl = s.slope, ic = s.intercept;
+    // Only the low BitsStored bits are the value: keep those, and for signed
+    // data carry the sign from the top stored bit (a 12-bit -700 arrives as
+    // 3396 otherwise). 16-bit data is already right as read.
+    var shift = 32 - s.stored, narrow = s.stored < 16, signed = s.signed;
     for (var p = 0; p < nx * ny; p++) {
-      var v = Math.round(raw[p] * sl + ic);
-      hu[base + p] = v < -32768 ? -32768 : (v > 32767 ? 32767 : v);
+      var r = raw[p];
+      if (narrow) r = signed ? (r << shift) >> shift : (r << shift) >>> shift;
+      var v = Math.round(r * sl + ic);
+      if (v < -32768) { v = -32768; clipped++; } else if (v > 32767) { v = 32767; clipped++; }
+      hu[base + p] = v;
     }
     s.pixels = null;   // the file's bytes are the caller's to drop now
   });
+  if (clipped) {
+    warnings.push(clipped + " voxel value" + (clipped === 1 ? " was" : "s were") + " outside the range the viewer holds " +
+      "(-32768 to 32767) and " + (clipped === 1 ? "was" : "were") + " cut to the nearest end of it. The grey level at " +
+      (clipped === 1 ? "that point is" : "those points is") + " not the scanner's value.");
+  }
 
   return {
     nx: nx, ny: ny, nz: nz,
@@ -425,7 +471,14 @@ export function distanceMm(a, b) { return len(sub(a, b)); }
    axial view), in patient mm. The section's columns run buccal-lingual and its
    rows run up the patient's z. */
 export function crossSection(vol, point, along, widthMm, heightMm, step) {
-  var up = vol.zDir;
+  // Up is the patient's up (+z, towards the head), whichever way the slices
+  // were stacked. A stack that is not axial has no "up" along its normal, and
+  // its sections would come out sideways, so it is refused.
+  var zz = vol.zDir[2];
+  if (!(Math.abs(zz) >= 0.9)) {
+    throw new ScanError("This scan's slices are not axial, so cross-sections cannot be cut from it. Export it again as an axial series.");
+  }
+  var up = vol.zDir.map(function (c) { return (zz > 0 ? c : -c) || 0; });
   // remove any vertical component from the arch direction, then turn it 90 degrees in the axial plane
   var a = unit(sub(along, [up[0]*dot(along, up), up[1]*dot(along, up), up[2]*dot(along, up)]));
   // Two clicks on the same spot, or a direction straight up and down, give no
