@@ -89,7 +89,7 @@ export const CHECKLISTS = {
       { key: 'trismus',        ask: 'The clinician mentioned limited mouth opening (trismus) afterwards.', gap: 'Not mentioned: limited mouth opening afterwards.' },
       { key: 'ian',            ask: 'The clinician named the risk of altered sensation, numbness or tingling of the lip and chin (inferior alveolar nerve), and whether it can be temporary or permanent.', gap: 'Not mentioned: altered sensation of the lip and chin (inferior alveolar nerve), temporary or permanent.' },
       { key: 'lingual',        ask: 'The clinician named the risk of altered sensation or taste on the tongue (lingual nerve).', gap: 'Not mentioned: altered sensation or taste on the tongue (lingual nerve).' },
-      { key: 'sinus',          ask: 'For an UPPER third molar, the clinician mentioned the maxillary sinus — an opening into it (oro-antral communication), or a root displaced into it. Report this as found if the tooth in question is a lower, where it does not apply.', gap: 'Not mentioned, for an upper tooth: the sinus, an opening into it, or a root displaced into it.' },
+      { key: 'sinus',          ask: 'For an UPPER third molar, the clinician mentioned the maxillary sinus — an opening into it (oro-antral communication), or a root displaced into it. If the tooth in question is a lower, where it does not apply, report it as not applicable.', gap: 'Not mentioned, for an upper tooth: the sinus, an opening into it, or a root displaced into it.' },
       { key: 'adjacent',       ask: 'The clinician mentioned possible damage to the adjacent tooth or its restoration.', gap: 'Not mentioned: damage to the adjacent tooth or filling.' },
       { key: 'root-fragment',  ask: 'The clinician mentioned that a root fragment may fracture and be left, or that removal may be incomplete or need referral.', gap: 'Not mentioned: possible root fracture, retained fragment, or need for referral.' },
       // alternatives the clinician should have OFFERED
@@ -260,7 +260,13 @@ export function checklistGaps(consultTypeKey, report) {
  * "No, it shouldn't hurt afterwards" is the clinician answering a question —
  * and must not be swallowed by this.
  */
-const NEGATIVE = /^[\s"'\-—.]*(null|none|n\/?a|nil|nothing|no evidence|not (discussed|mentioned|found|said|stated|covered|addressed|raised|in the transcript))[\s"'\-—.]*$/i;
+// An item that does not apply (the sinus, for a lower tooth; pregnancy, where
+// it cannot arise) is reported as "Not applicable: <reason>", which is not a
+// gap. A bare "N/A" or "Not applicable" gives no reason, and a model that
+// writes it for an item that DID apply would hide the gap, so it still counts
+// as not found: the clinician dismisses a false line more easily than they
+// notice a missing one.
+const NEGATIVE = /^[\s"'\-—.]*(null|none|n\/?a|nil|nothing|no evidence|not applicable:?|not (discussed|mentioned|found|said|stated|covered|addressed|raised|in the transcript))[\s"'\-—.]*$/i;
 
 const NO_CONTENT = /^[\s"'\-—.·]*$/;
 

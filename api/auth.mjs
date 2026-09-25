@@ -15,7 +15,54 @@ import {
 
 const WINDOW_MS = 60_000;
 const MAX_ATTEMPTS = 8;
-const attempts = []; // timestamps, this instance only
+const MAX_CLIENTS = 1000;
+// Failed attempts per client address, this instance only: address -> timestamps.
+//
+// It used to be one list for everyone, and a successful sign-in counted too.
+// So eight wrong guesses from anyone, anywhere, locked every clinician out for
+// a minute, and eight colleagues signing in at the start of a session locked
+// out the ninth. Now only failures count, and only against the address they
+// came from.
+const attempts = new Map();
+// Exposed so the tests can check the map stays bounded without making a
+// thousand slow failed sign-ins.
+export const _throttle = { attempts, MAX_CLIENTS };
+
+// Vercel sets x-real-ip itself; x-forwarded-for is the fallback, first entry
+// only (the client end of the chain).
+function clientKey(req) {
+  const h = req.headers || {};
+  const real = typeof h['x-real-ip'] === 'string' ? h['x-real-ip'].trim() : '';
+  if (real) return real;
+  const fwd = typeof h['x-forwarded-for'] === 'string' ? h['x-forwarded-for'].split(',')[0].trim() : '';
+  return fwd || 'unknown';
+}
+
+// Recent failures for this address, dropping any that have aged out, and any
+// address with nothing left, so the map cannot grow without bound. If it is
+// still over MAX_CLIENTS, the addresses heard from longest ago go first.
+function recentFailures(key, now) {
+  for (const [k, times] of attempts) {
+    while (times.length && now - times[0] > WINDOW_MS) times.shift();
+    if (!times.length) attempts.delete(k);
+  }
+  while (attempts.size > MAX_CLIENTS) attempts.delete(attempts.keys().next().value);
+  return attempts.get(key) || [];
+}
+
+function recordFailure(key, now) {
+  const times = attempts.get(key) || [];
+  times.push(now);
+  attempts.delete(key);        // re-insert, so the map stays oldest-first
+  attempts.set(key, times);
+}
+
+function withdrawFailure(key, at) {
+  const times = attempts.get(key);
+  const i = times ? times.lastIndexOf(at) : -1;
+  if (i >= 0) times.splice(i, 1);
+  if (times && !times.length) attempts.delete(key);
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -69,12 +116,16 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'server_misconfigured' });
   }
 
+  // Checked before the passcode is compared, so a throttled address learns
+  // nothing from its next guess, right or wrong. The attempt is counted as a
+  // failure straight away and withdrawn if it succeeds: counted only after the
+  // comparison, a burst of guesses sent at once would all pass the check.
+  const client = clientKey(req);
   const now = Date.now();
-  while (attempts.length && now - attempts[0] > WINDOW_MS) attempts.shift();
-  if (attempts.length >= MAX_ATTEMPTS) {
+  if (recentFailures(client, now).length >= MAX_ATTEMPTS) {
     return res.status(429).json({ error: 'too_many_attempts' });
   }
-  attempts.push(now);
+  recordFailure(client, now);
 
   let body = req.body;
   if (typeof body === 'string') {
@@ -96,7 +147,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'invalid_passcode' });
   }
 
-  attempts.length = 0;
+  withdrawFailure(client, now);
   const token = await mintToken(secret, DEFAULT_TTL_SECONDS, who);
   res.setHeader('Set-Cookie', buildCookie(token, DEFAULT_TTL_SECONDS));
   return res.status(200).json({ ok: true, expiresIn: DEFAULT_TTL_SECONDS });

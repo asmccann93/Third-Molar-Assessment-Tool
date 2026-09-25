@@ -121,6 +121,23 @@ async function holder(req) {
   return { secret, who: (claims && claims.who) || null };
 }
 
+// The ticket is an HMAC over the job id AND its owner, and nothing records
+// who that owner was. So try every owner it could be: the caller, a
+// pre-multi-user session ("-"), and each clinician named in APP_USERS. The
+// initials are read here rather than through auth.mjs's parseUsers, which
+// logs about the passcodes; only the part before each colon matters.
+async function ticketSignedForAnyone(secret, jobId, who, ticket) {
+  const owners = new Set([who, null]);
+  for (const part of String(process.env.APP_USERS || '').split(',')) {
+    const i = part.indexOf(':');
+    if (i > 0) owners.add(part.slice(0, i).trim());
+  }
+  for (const owner of owners) {
+    if (await verifyJobTicket(secret, jobId, owner, ticket)) return true;
+  }
+  return false;
+}
+
 function ticketFrom(req) {
   const url = new URL(req.url, 'https://placeholder.local');
   const t = url.searchParams.get('ticket');
@@ -152,7 +169,14 @@ export default async function handler(req, res) {
 
     if (req.method === 'DELETE') {
       const jobId = jobIdFrom(req);
-      if (jobId && !(await verifyJobTicket(sessionSecret, jobId, who, ticketFrom(req)))) {
+      // Any genuine ticket will do here, not only the caller's own. Deleting
+      // hands nobody a transcript, and insisting on the owner meant a job was
+      // never deleted once the page asking was signed in as someone else (a
+      // shared surgery computer, a re-sign-in): the audio then sat at
+      // Speechmatics for a week. The ticket must still be one this server
+      // signed, so an id guessed or copied from a log cannot delete a
+      // colleague's job while it is still running.
+      if (jobId && !(await ticketSignedForAnyone(sessionSecret, jobId, who, ticketFrom(req)))) {
         return res.status(403).json({ error: 'job_not_yours' });
       }
       if (!jobId) {
@@ -258,6 +282,10 @@ async function submitJob(key, audio, contentType, via, domain = DOMAIN) {
     type: 'transcription',
     transcription_config: {
       language: 'en',
+      // UK spelling in the transcript ("anaesthetic", "haemorrhage"), which is
+      // what the note, the checklist and the clinician all use. Without it the
+      // global English model writes whichever spelling it likes.
+      output_locale: 'en-GB',
       ...(domain ? { domain } : {}),
 
       // "model", not "operating_point". The latter was the old field name and
@@ -387,15 +415,24 @@ async function pollToCompletion(key, jobId, res, budgetMs, ticket) {
     const status = r && r.ok ? (await r.json())?.job?.status : null;
 
     if (status === 'done') {
-      // finally, not sequential. If fetchTranscript throws — a network blip, a
-      // 500 from the provider — the old code returned an error and left the
-      // audio and transcript sitting on their side indefinitely.
+      // Collect, delete, THEN answer. If fetchTranscript throws — a network
+      // blip, a 500 from the provider — the job is still deleted, or the audio
+      // and transcript would sit on their side indefinitely. The delete must
+      // also finish before the response goes: this used to answer first and
+      // delete in a `finally`, and Vercel may freeze the function as soon as
+      // the response is sent, leaving the delete never made.
+      let turns;
       try {
-        const turns = await fetchTranscript(key, jobId);
-        return res.status(200).json({ status: 'done', turns });
-      } finally {
+        turns = await fetchTranscript(key, jobId);
+      } catch (err) {
         await deleteJob(key, jobId);
+        throw err;
       }
+      // A failed delete is logged inside deleteJob (job id and status only)
+      // and is not a reason to withhold the transcript: the clinician would
+      // lose the consultation and the job would still be there.
+      await deleteJob(key, jobId);
+      return res.status(200).json({ status: 'done', turns });
     }
     if (status === 'rejected' || status === 'expired' || status === 'deleted') {
       await deleteJob(key, jobId);
@@ -462,10 +499,26 @@ async function deleteJob(key, jobId) {
 
 // json-v2 gives a flat list of words and punctuation with a speaker label.
 // Collapse to speaker turns, which is what the extraction prompt reads.
+//
+// A turn also ends at a silence of TURN_SILENCE_S or more, not only at a change
+// of speaker. The clinician's goodbye and the dictation that follows it are the
+// same voice, so Speechmatics labels them alike, and they used to come back as
+// one turn starting before the moment Dictate was pressed. extract.mjs places
+// the dictation marker in front of the first turn starting at or after that
+// moment, so it landed after the dictation instead: dictated findings read as
+// things said to the patient, and nothing said so.
+//
+// Each turn also carries `words`: where each word starts in the text (`at`, a
+// character offset) and in the recording (`start`, seconds). A turn that still
+// straddles the Dictate press or a pause can then be split at the right word
+// rather than placed wholesale on one side of it.
+const TURN_SILENCE_S = 1.5;
+
 function toTurns(payload) {
   const results = Array.isArray(payload?.results) ? payload.results : [];
   const turns = [];
   let current = null;
+  let lastWordEnd = null;
 
   for (const item of results) {
     const alt = item?.alternatives?.[0];
@@ -473,18 +526,28 @@ function toTurns(payload) {
 
     const speaker = alt.speaker || 'UU';
     const isPunctuation = item.type === 'punctuation';
+    const start = Number.isFinite(item.start_time) ? item.start_time : null;
+    const silence = !isPunctuation && start !== null && lastWordEnd !== null && start - lastWordEnd >= TURN_SILENCE_S;
 
-    if (!current || (!isPunctuation && current.speaker !== speaker)) {
-      current = { speaker, text: '', start: item.start_time ?? null, end: item.end_time ?? null };
+    if (!current || (!isPunctuation && (current.speaker !== speaker || silence))) {
+      current = { speaker, text: '', start: item.start_time ?? null, end: item.end_time ?? null, words: [] };
       turns.push(current);
     }
 
-    current.text += (isPunctuation || current.text === '' ? '' : ' ') + alt.content;
+    const sep = isPunctuation || current.text === '' ? '' : ' ';
+    if (!isPunctuation && start !== null) current.words.push({ at: current.text.length + sep.length, start });
+    current.text += sep + alt.content;
     if (item.end_time != null) current.end = item.end_time;
+    if (!isPunctuation && Number.isFinite(item.end_time)) lastWordEnd = item.end_time;
   }
 
   return turns
-    .map((t) => ({ speaker: t.speaker, text: t.text.trim(), start: t.start, end: t.end }))
+    .map((t) => {
+      const lead = t.text.length - t.text.trimStart().length;
+      const text = t.text.trim();
+      const words = t.words.map((w) => ({ at: w.at - lead, start: w.start })).filter((w) => w.at >= 0 && w.at < text.length);
+      return { speaker: t.speaker, text, start: t.start, end: t.end, words };
+    })
     .filter((t) => t.text.length > 0);
 }
 

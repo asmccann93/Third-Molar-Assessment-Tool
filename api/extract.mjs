@@ -26,10 +26,10 @@
 // Fails closed: an unrecognised combination is rejected before any request is
 // signed, not after.
 
-import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS,
+import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS, notApplicableFields,
          buildSummarySystemPrompt, parseSummary, buildAskSystemPrompt,
          buildReferralSystemPrompt, buildReferralUserMessage, parseReferral,
-         buildPostopSystemPrompt, parsePostop } from './_prompt.mjs';
+         buildPostopSystemPrompt, parsePostop, asText, pauseMarker } from './_prompt.mjs';
 import { checklistGaps } from './_checklists.mjs';
 
 // 300 s, raised from 120 on 21 September 2026: a long implant or treatment-plan
@@ -83,6 +83,8 @@ export function checkResidency(modelId, region, policy) {
 }
 
 export default async function handler(req, res) {
+  // When the request arrived, so a retry can tell how much of the 300 s is left.
+  const arrivedAt = Date.now();
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
 
@@ -136,8 +138,19 @@ export default async function handler(req, res) {
     const dictationFromS = Number.isFinite(body?.dictationFromS) && body.dictationFromS >= 0
       ? Number(body.dictationFromS) : null;
     const MARKER = '[DICTATION \u2014 the clinician alone, after the patient left. Everything below is dictated to the record, not conversation.]';
-    let markerPlaced = false;
 
+    // Each pause goes into the transcript the same way, as a line of its own
+    // where it fell: the model reads lines, not times. In recording order; at
+    // the same point, the pause before the dictation (sort is stable).
+    const marks = [
+      ...pauses.map((p) => ({ atS: p.atRecordedMs / 1000, line: pauseMarker(p.forMs), dictation: false })),
+      ...(dictationFromS !== null ? [{ atS: dictationFromS, line: MARKER, dictation: true }] : [])
+    ].sort((a, b) => a.atS - b.atS);
+    const markLines = new Set(marks.map((m) => m.line));
+    let next = 0;               // the first marker not yet placed
+    let dictationInexact = false;
+
+    const hasWords = (s) => /[\p{L}\p{N}]/u.test(s);
     const lines = [];
     let sawTimes = false;
     for (const t of turns) {
@@ -146,21 +159,63 @@ export default async function handler(req, res) {
       // "<= 5 characters") silently removed "Yes.", "No.", "Okay." and "Sure."
       // — in a consent discussion, very often the patient's actual answer. A
       // dropped "No." reads to the model as the clinician carrying straight on.
-      if (!/[\p{L}\p{N}]/u.test(text)) continue;
-      if (Number.isFinite(t.start)) sawTimes = true;
-      if (dictationFromS !== null && !markerPlaced && Number.isFinite(t.start) && t.start >= dictationFromS) {
-        lines.push(MARKER);
-        markerPlaced = true;
+      if (!hasWords(text)) continue;
+      const speaker = t.speaker || 'UU';
+      const start = Number.isFinite(t.start) ? t.start : null;
+      const end = Number.isFinite(t.end) ? t.end : null;
+      if (start !== null) sawTimes = true;
+      while (next < marks.length && start !== null && start >= marks[next].atS) lines.push(marks[next++].line);
+
+      // A marker that falls INSIDE this turn: speech runs on across the Dictate
+      // press or the pause. Split the turn at the first word starting at or
+      // after it, where the word timings came with the turn. Without them, the
+      // marker goes in front of the whole turn: for the dictation that is the
+      // side that never presents dictated findings as said to the patient, and
+      // it is said in the gaps, because it can move the end of the
+      // conversation along with it.
+      const words = wordStarts(t.words, text);
+      let from = 0;
+      while (next < marks.length && start !== null && end !== null && marks[next].atS < end) {
+        const m = marks[next];
+        if (words) {
+          const w = words.find((x) => x.at >= from && x.start >= m.atS);
+          if (!w) break;   // every word left began before it: it goes before the next turn
+          const head = text.slice(from, w.at).trim();
+          if (hasWords(head)) lines.push(`[${speaker}] ${head}`);
+          from = w.at;
+        } else if (m.dictation) {
+          dictationInexact = true;
+        }
+        lines.push(m.line);
+        next++;
       }
-      lines.push(`[${t.speaker || 'UU'}] ${text}`);
+      const rest = text.slice(from).trim();
+      if (hasWords(rest)) lines.push(`[${speaker}] ${rest}`);
     }
-    // Dictate pressed but every turn started before it (e.g. no speech after):
-    // still say so, so the model does not look for dictation that is not there.
-    if (dictationFromS !== null && !markerPlaced && sawTimes) lines.push(MARKER);
-    const dictationLocated = dictationFromS === null || markerPlaced || sawTimes;
+    // Dictate pressed, or a pause taken, after every turn had started (e.g. no
+    // speech after): still say so, so the model does not look for dictation
+    // that is not there.
+    if (sawTimes) while (next < marks.length) lines.push(marks[next++].line);
+    const dictationLocated = dictationFromS === null || sawTimes;
     const transcript = lines.join('\n');
 
-    if (!transcript || lines.every((l) => l === MARKER)) return res.status(400).json({ error: 'empty_transcript' });
+    if (!transcript || lines.every((l) => markLines.has(l))) return res.status(400).json({ error: 'empty_transcript' });
+
+    // A speaker mapping the clinician corrected by hand. Untrusted input:
+    // labels and roles are both whitelisted, and a mapping that survives that
+    // is passed through verbatim. Every product takes it, not only the note:
+    // a summary that puts the patient's words in the dentist's mouth is the
+    // same error on a page the patient takes home.
+    const rawRoles = body?.speakerRoles;
+    const speakerRoles = {};
+    if (rawRoles && typeof rawRoles === 'object' && !Array.isArray(rawRoles)) {
+      for (const [k, v] of Object.entries(rawRoles)) {
+        if (/^S\d{1,2}$/.test(k) && (v === 'clinician' || v === 'patient' || v === 'other')) {
+          speakerRoles[k] = v;
+        }
+      }
+    }
+    const roles = Object.keys(speakerRoles).length ? speakerRoles : null;
 
     // A question about this consultation, answered from the transcript only.
     if (body?.kind === 'ask') {
@@ -171,8 +226,8 @@ export default async function handler(req, res) {
         max_tokens: 1024,
         temperature: 0,
         system: buildAskSystemPrompt(consultType),
-        messages: [{ role: 'user', content: `${buildUserMessage(transcript, pauses)}\n\nThe dentist asks: ${question}` }]
-      }, creds);
+        messages: [{ role: 'user', content: `${buildUserMessage(transcript, pauses, roles, { note: false, json: false })}\n\nThe dentist asks: ${question}` }]
+      }, creds, arrivedAt);
       if (raw?.stop_reason === 'max_tokens') {
         return res.status(502).json({ error: 'response_truncated', detail: 'The answer was cut off. Ask something narrower.' });
       }
@@ -189,8 +244,8 @@ export default async function handler(req, res) {
         max_tokens: 2048,
         temperature: 0,
         system: buildSummarySystemPrompt(consultType),
-        messages: [{ role: 'user', content: buildUserMessage(transcript, pauses) }]
-      }, creds);
+        messages: [{ role: 'user', content: buildUserMessage(transcript, pauses, roles, { note: false }) }]
+      }, creds, arrivedAt);
       if (raw?.stop_reason === 'max_tokens') {
         return res.status(502).json({ error: 'response_truncated', detail: 'The summary was cut off. Try again.' });
       }
@@ -216,8 +271,8 @@ export default async function handler(req, res) {
         max_tokens: 2048,
         temperature: 0,
         system: buildPostopSystemPrompt(consultType),
-        messages: [{ role: 'user', content: buildReferralUserMessage(note, '', buildUserMessage(transcript, pauses)) }]
-      }, creds);
+        messages: [{ role: 'user', content: buildReferralUserMessage(note, '', buildUserMessage(transcript, pauses, roles, { note: false })) }]
+      }, creds, arrivedAt);
       if (raw?.stop_reason === 'max_tokens') {
         return res.status(502).json({ error: 'response_truncated', detail: 'The instructions were cut off. Try again.' });
       }
@@ -248,28 +303,14 @@ export default async function handler(req, res) {
         max_tokens: 2048,
         temperature: 0,
         system: buildReferralSystemPrompt(consultType),
-        messages: [{ role: 'user', content: buildReferralUserMessage(note, context, buildUserMessage(transcript, pauses)) }]
-      }, creds);
+        messages: [{ role: 'user', content: buildReferralUserMessage(note, context, buildUserMessage(transcript, pauses, roles, { note: false })) }]
+      }, creds, arrivedAt);
       if (raw?.stop_reason === 'max_tokens') {
         return res.status(502).json({ error: 'response_truncated', detail: 'The referral was cut off. Try again.' });
       }
       const text = (raw?.content || []).filter((b) => b && b.type === 'text').map((b) => b.text).join('');
       return res.status(200).json({ status: 'done', referral: parseReferral(text) });
     }
-
-    // A speaker mapping the clinician corrected by hand and asked us to redraft
-    // with. Untrusted input: labels and roles are both whitelisted, and a
-    // mapping that survives that is passed through verbatim.
-    const rawRoles = body?.speakerRoles;
-    const speakerRoles = {};
-    if (rawRoles && typeof rawRoles === 'object' && !Array.isArray(rawRoles)) {
-      for (const [k, v] of Object.entries(rawRoles)) {
-        if (/^S\d{1,2}$/.test(k) && (v === 'clinician' || v === 'patient' || v === 'other')) {
-          speakerRoles[k] = v;
-        }
-      }
-    }
-    const roles = Object.keys(speakerRoles).length ? speakerRoles : null;
 
     const payload = {
       anthropic_version: 'bedrock-2023-05-31',
@@ -284,7 +325,7 @@ export default async function handler(req, res) {
       messages: [{ role: 'user', content: buildUserMessage(transcript, pauses, roles) }]
     };
 
-    const raw = await invokeModel(payload, creds);
+    const raw = await invokeModel(payload, creds, arrivedAt);
 
     if (raw?.stop_reason === 'max_tokens') {
       return res.status(502).json({
@@ -299,7 +340,7 @@ export default async function handler(req, res) {
       .join('');
 
     const note = parseNote(text, consultType); // throws on malformed output
-    assertShape(note);            // and on output of the wrong shape
+    assertShape(note, consultType); // and on output of the wrong shape
 
     // The procedure checklist. The model reported what it FOUND; the wording
     // of what it did not find is the clinician's, from _checklists.mjs, so no
@@ -320,6 +361,10 @@ export default async function handler(req, res) {
       note.gaps.unshift('You pressed Dictate, but the transcript came back without timings, so the ' +
         'dictated part could not be separated from the conversation. Check that nothing you dictated ' +
         'has been recorded as if it were said to the patient.');
+    } else if (dictationInexact) {
+      note.gaps.unshift('You pressed Dictate part-way through a stretch of speech, so the start of the ' +
+        'dictated part could not be placed exactly. Check that nothing said to the patient has been ' +
+        'treated as dictated, and nothing dictated as said to the patient.');
     }
 
     return res.status(200).json({ status: 'done', note });
@@ -333,43 +378,12 @@ export default async function handler(req, res) {
   }
 }
 
-/**
- * parseNote checks that every field is PRESENT. This checks that every field is
- * the right TYPE, which is a different failure and a worse one.
- *
- * A field returned as an object used to pass parseNote, render as
- * "[object Object]", and, because it was not null, go unreported as a gap: a
- * risk that was genuinely discussed vanished while the note called itself
- * complete. So the wrong shape was refused, and the note with it.
- *
- * Since 21 September 2026 (the clinical lead's decision) the two shapes the
- * model actually produces are laid out as text instead, because the risks
- * field is labelled "per option" and invites exactly them:
- *   - a list of strings  -> one item per line, in the model's order;
- *   - an object whose values are strings -> one "option: text" line per key,
- *     so the option each risk belongs to is kept, in the model's words.
- * Nothing is added, reordered or reworded. Anything deeper (a list of objects,
- * an object of lists, numbers standing in for text) is still refused: laying
- * that out would mean choosing a structure the model did not give.
- */
-function asText(v) {
-  if (Array.isArray(v)) {
-    const items = v.filter((x) => x !== null && x !== undefined);
-    if (!items.every((x) => typeof x === 'string')) return undefined;
-    const lines = items.map((x) => x.trim()).filter(Boolean);
-    return lines.length ? lines.join('\n') : null;
-  }
-  if (v && typeof v === 'object') {
-    const entries = Object.entries(v).filter(([, x]) => x !== null && x !== undefined);
-    if (!entries.every(([, x]) => typeof x === 'string')) return undefined;
-    const lines = entries.map(([k, x]) => [String(k).trim(), x.trim()]).filter(([, x]) => x)
-      .map(([k, x]) => (k ? `${k}: ${x}` : x));
-    return lines.length ? lines.join('\n') : null;
-  }
-  return undefined;
-}
-
-function assertShape(note) {
+/* asText lays out a list or an object of strings as text; see _prompt.mjs. */
+function assertShape(note, consultType) {
+  // The same fields parseNote leaves out of its blank check. A recall's
+  // `risks: []` is not a risk left blank, it is a field that does not apply;
+  // listing it told the clinician to check for something that was never due.
+  const skip = new Set(notApplicableFields(consultType));
   for (const [key, label] of [...FIELDS, ...DICTATED_FIELDS]) {
     const v = note[key];
     if (v === null || v === undefined) continue;
@@ -380,7 +394,7 @@ function assertShape(note) {
     }
     note[key] = laid;
     // Laid out as nothing (an empty list, say): blank, so it must be listed.
-    if (laid === null) note.gaps.push(`${label}: left blank in the draft; check whether it came up`);
+    if (laid === null && !skip.has(key)) note.gaps.push(`${label}: left blank in the draft; check whether it came up`);
   }
   if (!Array.isArray(note.gaps)) throw new Error('gaps is not an array');
   note.gaps = note.gaps.map((g) => {
@@ -393,7 +407,7 @@ function assertShape(note) {
 
 /* ---------- Bedrock ---------- */
 
-async function invokeModel(payload, creds) {
+async function invokeModel(payload, creds, arrivedAt = Date.now()) {
   const host = `bedrock-runtime.${REGION}.amazonaws.com`;
 
   // TWO different paths, deliberately. This is the whole subtlety of SigV4 here.
@@ -436,8 +450,17 @@ async function invokeModel(payload, creds) {
   // mean "try again" (throttled, 5xx, or no answer at all). A refusal about the
   // request itself (4xx other than 429) is not retried: it would fail the same
   // way. Each attempt is signed afresh, because the signature carries the time.
+  //
+  // But only while there is time for the retry to finish. A long draft that
+  // failed at 250 s used to be retried anyway; Vercel killed the function at
+  // 300 s, and the page got a bare 504 with no JSON in place of the real error.
+  // After RETRY_CUTOFF_MS the first failure is reported as it is: a full draft
+  // can take a couple of minutes, and 120 s plus a wait still leaves that.
   const RETRY = new Set([429, 500, 502, 503, 504]);
   const waits = [2000, 6000];
+  const RETRY_CUTOFF_MS = 120_000;
+  const timeToRetry = (attempt) =>
+    attempt < waits.length && Date.now() - arrivedAt + waits[attempt] <= RETRY_CUTOFF_MS;
   let r;
   for (let attempt = 0; ; attempt++) {
     const h = attempt === 0 ? headers : await signRequest({
@@ -447,10 +470,10 @@ async function invokeModel(payload, creds) {
     try {
       r = await fetch(`https://${host}${wirePath}`, { method: 'POST', headers: h, body: bodyText });
     } catch (e) {
-      if (attempt < waits.length) { await sleep(waits[attempt]); continue; }
+      if (timeToRetry(attempt)) { await sleep(waits[attempt]); continue; }
       throw new Error('Could not reach the drafting service: ' + String((e && e.message) || e).slice(0, 200));
     }
-    if (r.ok || !RETRY.has(r.status) || attempt >= waits.length) break;
+    if (r.ok || !RETRY.has(r.status) || !timeToRetry(attempt)) break;
     console.warn('extract: bedrock', r.status, '- retrying');
     await sleep(waits[attempt]);
   }
@@ -458,10 +481,27 @@ async function invokeModel(payload, creds) {
     // Generous limit on purpose. On a signature mismatch AWS returns the exact
     // canonical string it expected, which is the fastest way to find the
     // difference — and truncating at 300 characters threw that away twice.
+    //
+    // But that canonical string carries the x-amz-security-token header, and
+    // this body used to go back to the browser whole, and into the log. It now
+    // goes only to the log, with anything that looks like a credential
+    // redacted; the page is told the status and nothing else.
     const detail = (await r.text().catch(() => '')).slice(0, 1500);
-    throw new Error(`bedrock ${r.status}: ${detail}`);
+    console.error(`extract: bedrock ${r.status}:`, redactCredentials(detail));
+    throw new Error(`bedrock ${r.status}: the drafting service returned an error`);
   }
   return r.json();
+}
+
+// The session token's value, the access key id in a Credential= scope, a
+// Signature=, and any bare AWS access key id. The shape of the request stays
+// readable; the secrets do not.
+export function redactCredentials(text) {
+  return String(text)
+    .replace(/(x-amz-security-token\s*[:=]\s*)[^\s'",;&]+/gi, '$1[redacted]')
+    .replace(/(Credential=)[^\s'",;&]+/gi, '$1[redacted]')
+    .replace(/(Signature=)[^\s'",;&]+/gi, '$1[redacted]')
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{12,}\b/g, '[redacted]');
 }
 
 /* ---------- SigV4 ---------- */
@@ -533,6 +573,14 @@ async function signRequest({ method, host, path, body, region, service, creds, e
 }
 
 /* ---------- helpers ---------- */
+
+// Word timings from transcribe.mjs, where the turn carries them. From the
+// browser, so untrusted: only offsets inside this turn's text, with a time.
+function wordStarts(words, text) {
+  if (!Array.isArray(words)) return null;
+  const out = words.filter((w) => w && Number.isInteger(w.at) && w.at >= 0 && w.at < text.length && Number.isFinite(w.start));
+  return out.length ? out : null;
+}
 
 // Overridable so the tests do not wait for real seconds.
 export const _retry = { sleepMs: null };

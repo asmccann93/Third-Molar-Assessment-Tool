@@ -66,7 +66,7 @@ export const CONSULT_TYPES = {
     // every such recall at parseNote, deterministically.
     notApplicable: ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'patientFactors', 'decision'],
     emphasis:
-      'There is usually NO consent discussion in a recall: no procedure proposed, no alternatives weighed, no risks named, so no patient-specific factors making a risk material, and no decision taken. Leave those fields null and do NOT add gaps for them — they do not apply to this kind of appointment. If a treatment WAS proposed and discussed, fill them normally. ' +
+      'There is usually NO consent discussion in a recall: no procedure proposed, no alternatives weighed, no risks or benefits named, no costs discussed, so no patient-specific factors making a risk material, and no decision taken. Leave those fields (proposed, alternatives, risks, benefits, costs, patientFactors, decision) null and do NOT add gaps for them — they do not apply to this kind of appointment. If a treatment WAS proposed and discussed, fill them normally. ' +
       'The other fields still apply to a recall — reason for attendance, medical history, the patient\'s own questions, information given and next step: if one of those is empty, leave it null AND add a gaps entry for it, as usual. ' +
       'Routine examination. Expect findings, oral hygiene advice, lifestyle advice ' +
       '(smoking, alcohol, diet), radiographic justification, and a recall interval.',
@@ -266,7 +266,9 @@ implant surgery — the implant log.
 
 The clinician can pause the recording, typically to examine or treat the patient,
 and resume for the post-operative discussion. When that has happened you are told
-so before the transcript, with the point in the recording where each gap falls.
+so before the transcript. Where the timing allows, a line beginning [PAUSED —
+(for example [PAUSED — about 12 minutes not recorded]) marks the point in the
+transcript where each gap falls; otherwise the gaps are listed by time.
 
 A paused recording is spliced. The audio either side of a gap is contiguous in the
 transcript but was NOT spoken contiguously — minutes or an hour of unrecorded
@@ -370,6 +372,8 @@ function checklistSection(consultTypeKey) {
 
 Rules: evidence must come from the CLINICIAN's speech unless the item says otherwise. Do not treat the patient raising something as the clinician having named it. Do not infer: "we went through the risks" is null for every specific risk. Every key must appear.
 
+If an item does not apply to this patient or tooth (the item says when), give exactly "Not applicable: " followed by the reason, e.g. "Not applicable: lower tooth". Never "N/A" alone: that reads as not found.
+
 ${lines}`;
 }
 
@@ -377,7 +381,24 @@ ${lines}`;
  * User message
  * ------------------------------------------------------------------ */
 
-export function buildUserMessage(transcript, pauses, speakerRoles) {
+const minutes = (ms) => {
+  const m = Math.round(ms / 60000);
+  return m < 1 ? 'under a minute' : `${m} minute${m === 1 ? '' : 's'}`;
+};
+
+/* The line extract.mjs puts into the transcript where a pause falls. The
+   transcript carries no times, so "paused at 1:35" told the model nothing it
+   could find; a line in the transcript itself is where it reads. */
+export function pauseMarker(forMs) {
+  const m = minutes(forMs);
+  return `[PAUSED — ${m === 'under a minute' ? m : 'about ' + m} not recorded]`;
+}
+
+/* `note: false` for the summary, post-op sheet, referral and Ask, whose system
+   prompts have no PAUSED RECORDINGS section and no speakerConfidence to set:
+   they get the one rule that matters in a line of its own. `json: false` for
+   Ask, which answers in prose. */
+export function buildUserMessage(transcript, pauses, speakerRoles, { note = true, json = true } = {}) {
   // A mapping the clinician corrected by hand. Stated first so it is read
   // before the transcript that produced the wrong answer last time.
   const confirmed = speakerRoles && typeof speakerRoles === 'object' && !Array.isArray(speakerRoles)
@@ -386,23 +407,28 @@ export function buildUserMessage(transcript, pauses, speakerRoles) {
         .map(([k, v]) => `${k} is the ${v}`)
     : [];
   const roles = confirmed.length
-    ? `CONFIRMED MAPPING, corrected by the clinician who was present: ${confirmed.join('; ')}.\nUse it exactly. Report it back unchanged and set speakerConfidence to "high".\n\n`
+    ? `CONFIRMED MAPPING, corrected by the clinician who was present: ${confirmed.join('; ')}.\nUse it exactly.${note ? ' Report it back unchanged and set speakerConfidence to "high".' : ''}\n\n`
     : '';
+  const tail = json ? '\n\nReturn the JSON object.' : '';
 
   const list = Array.isArray(pauses) ? pauses.filter((p) => p && p.forMs > 1000) : [];
   if (!list.length) {
-    return `${roles}Transcript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>\n\nReturn the JSON object.`;
+    return `${roles}Transcript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>${tail}`;
   }
-  const mins = (ms) => {
-    const m = Math.round(ms / 60000);
-    return m < 1 ? 'under a minute' : `${m} minute${m === 1 ? '' : 's'}`;
-  };
   const at = (ms) => {
     const t = Math.round(ms / 1000);
     return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
   };
-  const lines = list.map((p) => `- at ${at(p.atRecordedMs)} into the recording, paused for ${mins(p.forMs)}`).join('\n');
-  return `${roles}This recording was PAUSED and resumed. The transcript is spliced: the audio either side of each gap below is contiguous in the transcript but was not spoken contiguously.\n\n${lines}\n\nApply the PAUSED RECORDINGS rules.\n\nTranscript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>\n\nReturn the JSON object.`;
+  // Marked in the transcript wherever it had the timings to do it. Where it
+  // did not, the times are still worth giving: they are all there is.
+  const marked = /^\[PAUSED — /m.test(String(transcript));
+  const where = marked
+    ? 'Each gap is marked in the transcript by a line reading [PAUSED — ...] at the point where it falls.'
+    : list.map((p) => `- at ${at(p.atRecordedMs)} into the recording, paused for ${minutes(p.forMs)}`).join('\n');
+  const rule = note
+    ? 'Apply the PAUSED RECORDINGS rules.'
+    : `Never present things either side of ${marked ? 'a PAUSED line' : 'a gap'} as said one after the other.`;
+  return `${roles}This recording was PAUSED and resumed. The transcript is spliced: the audio either side of each gap ${marked ? '' : 'below '}is contiguous in the transcript but was not spoken contiguously.\n\n${where}\n\n${rule}\n\nTranscript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>${tail}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -441,6 +467,47 @@ function parseObject(cleaned) {
     throw new Error(`Model returned ${parsed === null ? 'null' : Array.isArray(parsed) ? 'an array' : 'a ' + typeof parsed}, not a JSON object`);
   }
   return parsed;
+}
+
+/**
+ * parseNote checks that every field is PRESENT. assertShape in extract.mjs
+ * checks that every field is the right TYPE, which is a different failure and a
+ * worse one, and this is what it lays out.
+ *
+ * A field returned as an object used to pass parseNote, render as
+ * "[object Object]", and, because it was not null, go unreported as a gap: a
+ * risk that was genuinely discussed vanished while the note called itself
+ * complete. So the wrong shape was refused, and the note with it.
+ *
+ * Since 21 September 2026 (the clinical lead's decision) the two shapes the
+ * model actually produces are laid out as text instead, because the risks
+ * field is labelled "per option" and invites exactly them:
+ *   - a list of strings  -> one item per line, in the model's order;
+ *   - an object whose values are strings -> one "option: text" line per key,
+ *     so the option each risk belongs to is kept, in the model's words.
+ * Nothing is added, reordered or reworded. Anything deeper (a list of objects,
+ * an object of lists, numbers standing in for text) is still refused: laying
+ * that out would mean choosing a structure the model did not give.
+ *
+ * Here rather than in extract.mjs since 25 September 2026, so the summary,
+ * post-op and referral parsers lay out the same shapes by the same rules: a
+ * post-op "avoid" given as a list used to refuse the whole sheet.
+ */
+export function asText(v) {
+  if (Array.isArray(v)) {
+    const items = v.filter((x) => x !== null && x !== undefined);
+    if (!items.every((x) => typeof x === 'string')) return undefined;
+    const lines = items.map((x) => x.trim()).filter(Boolean);
+    return lines.length ? lines.join('\n') : null;
+  }
+  if (v && typeof v === 'object') {
+    const entries = Object.entries(v).filter(([, x]) => x !== null && x !== undefined);
+    if (!entries.every(([, x]) => typeof x === 'string')) return undefined;
+    const lines = entries.map(([k, x]) => [String(k).trim(), x.trim()]).filter(([, x]) => x)
+      .map(([k, x]) => (k ? `${k}: ${x}` : x));
+    return lines.length ? lines.join('\n') : null;
+  }
+  return undefined;
 }
 
 export function parseNote(raw, consultTypeKey) {
@@ -575,6 +642,8 @@ THE RULE THAT MATTERS MOST: include only what was actually said in the consultat
 
 Never invent a name, date, cost, or number that was not spoken. Never say "your dentist recommends" unless the dentist did. If the recording was paused, do not imply that things either side of the pause happened one after the other.
 
+If a line reading [DICTATION ...] appears in the transcript, everything after it is the dentist's own notes, dictated after the patient left. None of it was said to the patient, so nothing from it goes into this document — not the facts, and never the dentist's remarks, impressions or opinions about the patient.
+
 Consult type: ${type ? type.label : 'Not specified'}
 
 Return ONLY a JSON object with exactly these keys, each a string or null:
@@ -594,8 +663,9 @@ export function parseSummary(raw) {
   for (const [key, label] of SUMMARY_FIELDS) {
     const v = parsed[key];
     if (v === undefined || v === null) { out[key] = null; continue; }
-    if (typeof v !== 'string') throw new Error(`Summary field "${key}" (${label}) came back as ${typeof v}, not text`);
-    out[key] = v;
+    const text = typeof v === 'string' ? v : asText(v);
+    if (text === undefined) throw new Error(`Summary field "${key}" (${label}) came back as ${Array.isArray(v) ? 'an array' : typeof v}, not text`);
+    out[key] = text;
   }
   return out;
 }
@@ -646,6 +716,8 @@ Write in the second person, to the patient ("you", "your tooth"). Short sentence
 
 Never invent a phone number, an opening time, a drug, a dose, or a timescale. If the clinician said "ring the practice" without saying when, write that and no more.
 
+If a line reading [DICTATION ...] appears in the transcript, everything after it is the dentist's own notes, dictated after the patient left. None of it was said to the patient, so nothing from it goes into this document — not the facts, and never the dentist's remarks, impressions or opinions about the patient.
+
 Consult type: ${type ? type.label : 'Not specified'}
 
 Return ONLY a JSON object with exactly these keys:
@@ -668,8 +740,9 @@ export function parsePostop(raw) {
   for (const [key, label] of POSTOP_FIELDS) {
     const v = parsed[key];
     if (v === undefined || v === null) { out[key] = null; continue; }
-    if (typeof v !== 'string') throw new Error(`Post-op field "${key}" (${label}) came back as ${typeof v}, not text`);
-    out[key] = v;
+    const text = typeof v === 'string' ? v : asText(v);
+    if (text === undefined) throw new Error(`Post-op field "${key}" (${label}) came back as ${Array.isArray(v) ? 'an array' : typeof v}, not text`);
+    out[key] = text;
   }
   return out;
 }
@@ -761,6 +834,23 @@ export function buildReferralUserMessage(note, context, transcriptMessage) {
   return parts.join('\n');
 }
 
+/* Red flags used to be dropped to [] whenever they were not a list of strings,
+   so one returned as a single string, or as {"quote": "..."} objects, vanished
+   and the referral showed no warning at all. A missing warning on an
+   urgent-pathway check is the worst way for this to fail. Now a string is one
+   flag, an object is laid out as text by asText, and anything else refuses the
+   referral rather than dropping what it might have said. */
+function redFlagList(v) {
+  if (v === undefined || v === null) return [];
+  if (typeof v === 'string') return v.trim() ? [v.trim()] : [];
+  if (!Array.isArray(v)) throw new Error(`Referral redFlags came back as ${typeof v}, not a list`);
+  return v.filter((f) => f !== null && f !== undefined).map((f) => {
+    const text = typeof f === 'string' ? f : asText(f);
+    if (text === undefined) throw new Error(`A referral red flag came back as ${Array.isArray(f) ? 'an array' : typeof f}, not text`);
+    return (text || '').replace(/\n/g, '; ').trim();
+  }).filter(Boolean);
+}
+
 export function parseReferral(raw) {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   const parsed = parseObject(cleaned);
@@ -768,14 +858,11 @@ export function parseReferral(raw) {
   for (const [key, label] of REFERRAL_FIELDS) {
     const v = parsed[key];
     if (v === undefined || v === null) { out[key] = null; continue; }
-    if (typeof v !== 'string') throw new Error(`Referral field "${key}" (${label}) came back as ${typeof v}, not text`);
-    out[key] = v;
+    const text = typeof v === 'string' ? v : asText(v);
+    if (text === undefined) throw new Error(`Referral field "${key}" (${label}) came back as ${Array.isArray(v) ? 'an array' : typeof v}, not text`);
+    out[key] = text;
   }
-  // A non-array, or entries that are not strings, means the model ignored the
-  // shape. Drop them rather than render junk as a clinical warning.
-  out.redFlags = Array.isArray(parsed.redFlags)
-    ? parsed.redFlags.filter((f) => typeof f === 'string' && f.trim()).map((f) => f.trim())
-    : [];
+  out.redFlags = redFlagList(parsed.redFlags);
   return out;
 }
 
