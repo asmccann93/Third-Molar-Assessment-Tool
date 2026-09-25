@@ -28,9 +28,11 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      # Full history: a push can carry several commits, and the cache step
+      # below compares against the commit BEFORE the push, not just HEAD~1.
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -71,9 +73,31 @@ jobs:
         run: node tests/implant.mjs
 
       - name: Cache names must move when a tool changes
+        env:
+          # The tip of main before this push; all zeros when the branch is new.
+          # Pushes only: on a pull request's later pushes `before` is the PR's
+          # previous head, which would fail a bump already made earlier in the PR.
+          PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: |
-          before=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+          # Compare against everything this push brought in, not just its last
+          # commit: a push of three commits used to check only the third, so an
+          # index.html edited in the first went unchecked. For a pull request
+          # HEAD is the merge commit and HEAD~1 is the base branch, so HEAD~1
+          # already covers the whole PR.
+          before=""
+          if [ -n "$PUSH_BEFORE" ] && ! echo "$PUSH_BEFORE" | grep -qE '^0+$' \
+             && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            before="$PUSH_BEFORE"
+          else
+            before=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+          fi
           if [ -z "$before" ]; then echo "No previous commit - nothing to compare."; exit 0; fi
+          echo "Comparing $before..HEAD"
+          # The CACHE constant's value, as site-check.js reads it (either quote style).
+          cache_of() {
+            grep -oE "CACHE[[:space:]]*=[[:space:]]*[\"'][^\"']+[\"']" \
+              | head -n1 | sed -E "s/.*[\"']([^\"']+)[\"']\$/\\1/" || true
+          }
           fail=0
           # ai-notes is deliberately NOT in this list. Its service worker has no
           # CACHE constant and never will - it caches nothing, which is the
@@ -90,13 +114,20 @@ jobs:
             else idx="$dir/index.html"; sw="$dir/sw.js"; fi
             if [ ! -f "$idx" ]; then continue; fi
             if ! git diff --quiet "$before" HEAD -- "$idx"; then
-              if git diff --quiet "$before" HEAD -- "$sw"; then
-                echo "FAIL  $idx changed but $sw did not."
+              # Any edit to sw.js used to count as a bump. A comment change is
+              # not one: browsers only drop the old copy when the NAME moves.
+              old=$( (git show "$before:$sw" 2>/dev/null || true) | cache_of)
+              new=$(cache_of < "$sw" 2>/dev/null || true)
+              if [ -z "$new" ]; then
+                echo "FAIL  $idx changed and no CACHE constant could be read from $sw."
+                fail=1
+              elif [ "$old" = "$new" ]; then
+                echo "FAIL  $idx changed but the CACHE in $sw is still \"$new\"."
                 echo "      Installed browsers will keep serving the old page."
                 echo "      Bump the CACHE constant in $sw."
                 fail=1
               else
-                echo "ok    $idx changed, $sw changed too"
+                echo "ok    $idx changed, CACHE ${old:-(none)} -> $new"
               fi
             fi
           done
@@ -143,6 +174,32 @@ jobs:
               [ "$code" = "200" ] && echo "      The implant gate is OPEN. Treat as urgent."
               fail=1
             fi
+          done
+
+          # The bare paths, without the trailing slash, are a different URL to
+          # the middleware matcher and to the service workers. They must never
+          # answer 200 either: a 401 straight away, or a redirect (Vercel uses
+          # 308) to the slashed path, which must then answer 401.
+          for p in "/implant" "/ai-notes"; do
+            out=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "$SITE$p")
+            code=${out%% *}; loc=${out#* }
+            case "$code" in
+              401)
+                echo "ok    $p  401" ;;
+              301|302|303|307|308)
+                final=$(curl -s -L --max-redirs 5 -o /dev/null -w "%{http_code}" "$SITE$p")
+                if [ "$final" = "401" ]; then
+                  echo "ok    $p  $code -> $loc  401"
+                else
+                  echo "FAIL  $p  $code -> $loc  $final  - expected the redirect to end in 401."
+                  [ "$final" = "200" ] && echo "      The gate is OPEN on the bare path. Treat as urgent."
+                  fail=1
+                fi ;;
+              *)
+                echo "FAIL  $p  $code  - expected 401, or a redirect ending in 401."
+                [ "$code" = "200" ] && echo "      The gate is OPEN on the bare path. Treat as urgent."
+                fail=1 ;;
+            esac
           done
 
           code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE/ai-notes/")
