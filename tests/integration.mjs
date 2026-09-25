@@ -321,6 +321,34 @@ async function testTranscribe() {
     ok('and is deleted once collected', calls.filter((c) => c.method === 'DELETE' && c.url.includes('jobT')).length === 1);
   }
 
+  // The delete has to be MADE before the answer goes back. Vercel may freeze
+  // the function once the response is sent, so a delete left for a `finally`
+  // after it may never reach Speechmatics, and the consultation stays there.
+  {
+    for (const [label, delStatus] of [['succeeds', 200], ['is refused', 500]]) {
+      const order = [];
+      stubFetch(async (c) => {
+        order.push(`${c.method} ${c.url.includes('/transcript') ? 'transcript' : c.url.split('/').pop()}`);
+        if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobO' } };
+        if (c.method === 'GET' && c.url.endsWith('/jobs/jobO')) return { status: 200, body: { job: { status: 'done' } } };
+        if (c.method === 'GET' && c.url.includes('/transcript')) return { status: 200, body: TURNS_PAYLOAD };
+        if (c.method === 'DELETE') return { status: delStatus, body: {} };
+        return { status: 404, body: {} };
+      });
+      res = mockRes();
+      const sent = res.json.bind(res);
+      res.json = (b) => { order.push('RESPONSE'); return sent(b); };
+      const quiet = console.error; console.error = () => {};
+      await handler(mockReq({ headers: { 'content-type': 'audio/webm' }, body: M4A(5000) }), res);
+      console.error = quiet;
+      const del = order.findIndex((e) => e.startsWith('DELETE'));
+      ok(`when the delete ${label}, it is made before the transcript is sent back`,
+        del !== -1 && del < order.indexOf('RESPONSE') && del > order.indexOf('GET transcript'), order.join(', '));
+      ok(`and the clinician still gets the transcript when the delete ${label}`,
+        res.statusCode === 200 && res.body?.turns?.[0]?.text === 'Extraction today.', `${res.statusCode}`);
+    }
+  }
+
   // A body the platform handed over as a string rather than a Buffer.
   calls = stubFetch(async (c) => {
     if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobC' } };
@@ -768,6 +796,15 @@ async function testExtract() {
     res.statusCode === 200 && res.body?.note?.reasonForAttendance === null &&
       (res.body?.note?.gaps || []).some((g) => /^Reason for attendance.*left blank in the draft/.test(g)),
     `${res.statusCode} ${JSON.stringify(res.body?.note?.gaps)}`);
+  // The backstop in assertShape skips the same fields parseNote does. A recall
+  // whose risks came back as an empty list used to be told to check for risks.
+  stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ ...recallNote, risks: [], alternatives: [] }) }], stop_reason: 'end_turn' } }));
+  res = mockRes();
+  await handler(mockReq({ body: { turns, consultType: 'exam-recall' } }), res);
+  ok('a recall with risks as an empty list drafts with no gap for a field that does not apply',
+    res.statusCode === 200 && res.body?.note?.risks === null && res.body?.note?.alternatives === null &&
+      !(res.body?.note?.gaps || []).some((g) => /^(Material risks|Reasonable alternatives)/.test(g)),
+    `${res.statusCode} ${JSON.stringify(res.body?.note?.gaps)}`);
   ok('the model is told never to leave a key out',
     /Every key below must appear[^\n]*never leave a key out/.test(sys0));
 
@@ -917,13 +954,13 @@ async function testExtract() {
   ok('an unstated section comes back null rather than "nil of note"', res.body?.referral?.background === null);
   ok('red flags are carried through as spoken words', Array.isArray(res.body?.referral?.redFlags) && res.body.referral.redFlags[0] === 'trismus for a week');
 
-  // A model that ignores the array shape must not have junk rendered as a
-  // clinical warning.
+  // A single red flag given as a string, not a list, used to be dropped to an
+  // empty list: the warning vanished. It is one flag.
   stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify({ situation: 'x', background: null, assessment: null, recommendation: null, redFlags: 'trismus' }) }], stop_reason: 'end_turn' } }));
   res = mockRes();
   await handler(mockReq({ body: { turns, consultType: 'third-molar', kind: 'referral', note: { reasonForAttendance: 'Crowding.' } } }), res);
-  ok('a redFlags value that is not an array becomes an empty list, not a warning',
-    Array.isArray(res.body?.referral?.redFlags) && res.body.referral.redFlags.length === 0);
+  ok('a redFlags value given as one string is kept as one flag, not dropped',
+    res.statusCode === 200 && JSON.stringify(res.body?.referral?.redFlags) === '["trismus"]', JSON.stringify(res.body?.referral?.redFlags));
 
   // The referral is a transform of the note, not a second read of the transcript.
   // Asking for one before the note exists is refused rather than guessed at.
@@ -1156,6 +1193,40 @@ async function testExtract() {
     res = mockRes();
     await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
     ok('a retry still carries a valid signature', res.statusCode === 200 && typeof secondAuth === 'string' && /^AWS4-HMAC-SHA256 /.test(secondAuth), String(secondAuth).slice(0, 40));
+    // A failure late in the 300 s is reported, not retried into Vercel's kill:
+    // that came back as a bare 504 with no JSON and no reason.
+    {
+      const realNow = Date.now;
+      let late = 0;
+      Date.now = () => realNow() + late;
+      try {
+        for (const [label, fail] of [['a 503', 503], ['a dropped connection', 'net']]) {
+          late = 0;
+          const calls = stubFetch(async () => {
+            late = 250_000;   // this attempt took the request to 250 s
+            if (fail === 'net') throw new Error('socket hang up');
+            return { status: fail, body: { message: 'ServiceUnavailable' } };
+          });
+          res = mockRes();
+          await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+          ok(`${label} at 250 s is not retried, and the real error comes back as JSON`,
+            res.statusCode === 502 && calls.length === 1 &&
+              (fail === 'net' ? /Could not reach the drafting service/ : /bedrock 503/).test(res.body?.detail || ''),
+            `${res.statusCode} after ${calls.length} calls: ${String(res.body?.detail).slice(0, 60)}`);
+        }
+        late = 0;
+        let n = 0;
+        const calls = stubFetch(async () => {
+          late = 30_000;
+          return ++n === 1 ? { status: 503, body: {} } : { status: 200, body: { content: [{ type: 'text', text: JSON.stringify(goodNote) }], stop_reason: 'end_turn' } };
+        });
+        res = mockRes();
+        await handler(mockReq({ body: { turns, consultType: 'endo' } }), res);
+        ok('but a failure at 30 s is still retried', res.statusCode === 200 && calls.length === 2, `${res.statusCode} after ${calls.length} calls`);
+      } finally {
+        Date.now = realNow;
+      }
+    }
     ex._retry.sleepMs = null;
     ok('the function has room for a long draft and its retries (300 s)', ex.config.maxDuration === 300, String(ex.config.maxDuration));
   }
@@ -1376,6 +1447,25 @@ async function testMiddleware() {
   r = await middleware(req('/implant/viewer.js', { accept: '*/*', cookie: await asWho('SM') }));
   ok('the viewer bundle is gated too, not just the page', r?.status === 403, `got ${r?.status}`);
 
+  // The matcher sends the bare path here too, and Vercel serves the tool's
+  // index.html for it. Leaving the slash off must not be a way in.
+  r = await middleware(req('/implant', { cookie: await asWho('SM') }));
+  ok('/implant without the slash is shut to someone else as well', r?.status === 403, `got ${r?.status}`);
+  r = await middleware(req('/implant', { accept: 'application/json', cookie: await asWho('SM') }));
+  ok('and a non-page request for it too', r?.status === 403, `got ${r?.status}`);
+  r = await middleware(req('/implant'));
+  ok('/implant without the slash, not signed in: the passcode form, naming the tool',
+    r?.status === 401 && (await r.clone().text()).includes('Implant Case Assessment'), `got ${r?.status}`);
+  r = await middleware(req('/implant', { cookie: await asWho('AM') }));
+  ok('/implant without the slash still opens for the named clinician', r === undefined, `got ${r?.status}`);
+  r = await middleware(req('/implantation-notes'));
+  ok('a path that only starts with the same letters is not treated as the tool', r?.status === 401 &&
+    !(await r.clone().text()).includes('Implant Case Assessment'), `got ${r?.status}`);
+  r = await middleware(req('/ai-notes'));
+  ok('/ai-notes without the slash still needs a session', r?.status === 401, `got ${r?.status}`);
+  r = await middleware(req('/ai-notes', { cookie: await asWho('SM') }));
+  ok('and opens with one', r === undefined, `got ${r?.status}`);
+
   r = await middleware(req('/implant/sw.js', { accept: '*/*' }));
   ok('but its service worker stays reachable, so the caching one can be evicted', r === undefined, `got ${r?.status}`);
 
@@ -1389,7 +1479,7 @@ async function testMiddleware() {
   for (const open of ['/', '/third-molar/', '/sedation/', '/local-anaesthetic/', '/asa-assessment/', '/404.html']) {
     ok(`the matcher leaves ${open} alone`, !covered(open));
   }
-  for (const shut of ['/implant/', '/implant/viewer.js', '/ai-notes/', '/api/auth']) {
+  for (const shut of ['/implant/', '/implant', '/implant/viewer.js', '/ai-notes/', '/ai-notes', '/api/auth']) {
     ok(`the matcher covers ${shut}`, covered(shut));
   }
 
@@ -1447,6 +1537,38 @@ async function testMultiUser() {
     headers: { cookie: 'ai_notes_session=' + (await mintToken(S, 3600, 'AM')) } }), res);
   ok('one clinician cannot poll another\'s transcript',
     res.statusCode === 403 && res.body?.error === 'job_not_yours', `${res.statusCode} ${JSON.stringify(res.body)}`);
+
+  // Deleting is different: it hands nobody a transcript. A job whose page is
+  // now signed in as someone else must still be deletable, or it sits at
+  // Speechmatics for a week. The ticket must still be one this server signed.
+  {
+    const savedUsers = process.env.APP_USERS;
+    process.env.APP_USERS = 'AM:longenough1,MM:alsolongenough';
+    const asAM = { cookie: 'ai_notes_session=' + (await mintToken(S, 3600, 'AM')) };
+    let calls = stubFetch(async () => ({ status: 200, body: {} }));
+    res = mockRes();
+    await transcribe(mockReq({ method: 'DELETE', url: '/api/transcribe?jobId=job-9&ticket=' + theirs, headers: asAM }), res);
+    ok('a colleague\'s signed ticket can delete the job',
+      res.statusCode === 200 && calls.some((c) => c.method === 'DELETE' && c.url.includes('job-9')), `${res.statusCode} ${JSON.stringify(res.body)}`);
+    const legacyTicket = await mintJobTicket(S, 'job-8', null);
+    calls = stubFetch(async () => ({ status: 200, body: {} }));
+    res = mockRes();
+    await transcribe(mockReq({ method: 'DELETE', url: '/api/transcribe?jobId=job-8&ticket=' + legacyTicket, headers: asAM }), res);
+    ok('so can a ticket from a pre-multi-user session',
+      res.statusCode === 200 && calls.some((c) => c.method === 'DELETE' && c.url.includes('job-8')), `${res.statusCode}`);
+    res = mockRes();
+    await transcribe(mockReq({ method: 'GET', url: '/api/transcribe?jobId=job-9&ticket=' + theirs, headers: asAM }), res);
+    ok('but that ticket still cannot fetch the colleague\'s transcript', res.statusCode === 403, `${res.statusCode}`);
+    for (const [label, bad] of [['a forged ticket', 'f'.repeat(64)],
+                                ['a ticket signed with another secret', await mintJobTicket('a-different-secret', 'job-9', 'MM')],
+                                ['a ticket for another job', await mintJobTicket(S, 'job-7', 'MM')]]) {
+      calls = stubFetch(async () => ({ status: 200, body: {} }));
+      res = mockRes();
+      await transcribe(mockReq({ method: 'DELETE', url: '/api/transcribe?jobId=job-9&ticket=' + bad, headers: asAM }), res);
+      ok(`${label} still cannot delete a job`, res.statusCode === 403 && !calls.some((c) => c.method === 'DELETE'), `${res.statusCode}`);
+    }
+    if (savedUsers === undefined) delete process.env.APP_USERS; else process.env.APP_USERS = savedUsers;
+  }
 
   res = mockRes();
   await transcribe(mockReq({ method: 'GET', url: '/api/transcribe?jobId=job-9',
@@ -1593,6 +1715,265 @@ async function testAuth() {
   ok('repeated guesses eventually throttle', throttled);
 }
 
+/* ================================================================
+   Second review sweep, 25 September 2026: one block per finding.
+   ================================================================ */
+async function testSweep2() {
+  section('Second review sweep — dictation split, pauses, parsers, throttle');
+  process.env.SESSION_SECRET = 'secret-for-tests';
+  process.env.SPEECHMATICS_API_KEY = 'test-key';
+  process.env.AWS_ACCESS_KEY_ID = 'AKIAtest';
+  process.env.AWS_SECRET_ACCESS_KEY = 'secrettest';
+  const { default: transcribe } = await import('../api/transcribe.mjs');
+  const { default: extract } = await import('../api/extract.mjs');
+  const pm = await import('../api/_prompt.mjs');
+  const { checklistGaps } = await import('../api/_checklists.mjs');
+  const { FIELDS } = pm;
+  const goodNote = Object.fromEntries(FIELDS.map(([k]) => [k, 'Recorded.']));
+  goodNote.gaps = [];
+  let sent = null;
+  const bedrock = (text) => stubFetch(async (c, opts) => {
+    sent = JSON.parse(opts.body);
+    return { status: 200, body: { content: [{ type: 'text', text }], stop_reason: 'end_turn' } };
+  });
+  const userMsg = () => sent?.messages?.[0]?.content || '';
+  const w = (c, st, en, sp) => ({ type: 'word', start_time: st, end_time: en, alternatives: [{ content: c, speaker: sp }] });
+  const pn = (c, sp) => ({ type: 'punctuation', alternatives: [{ content: c, speaker: sp }] });
+
+  // --- 1. the clinician's goodbye and the dictation after it are one voice ---
+  // Conversation to 20 s; goodbye at 18-19 s; Dictate pressed at 21 s;
+  // dictation from 24 s. Speechmatics labels it all S1.
+  const results = [
+    w('Any', 10, 10.3, 'S2'), w('other', 10.3, 10.6, 'S2'), w('questions', 10.6, 11, 'S2'), pn('?', 'S2'),
+    w('No', 12, 12.3, 'S1'), pn(',', 'S1'), w('see', 18, 18.3, 'S1'), w('you', 18.3, 18.6, 'S1'), w('soon', 18.6, 19, 'S1'), pn('.', 'S1'),
+    w('Lower', 24, 24.3, 'S1'), w('left', 24.3, 24.6, 'S1'), w('eight', 24.6, 25, 'S1'), w('mesioangular', 25, 26, 'S1'), pn('.', 'S1'),
+  ];
+  stubFetch(async (c) => {
+    if (c.method === 'POST' && c.url.endsWith('/jobs')) return { status: 201, body: { id: 'jobSil' } };
+    if (c.method === 'GET' && c.url.endsWith('/jobs/jobSil')) return { status: 200, body: { job: { status: 'done' } } };
+    if (c.method === 'GET' && c.url.includes('/transcript')) return { status: 200, body: { results } };
+    if (c.method === 'DELETE') return { status: 200, body: {} };
+    return { status: 404, body: {} };
+  });
+  let res = mockRes();
+  await transcribe(mockReq({ headers: { 'content-type': 'audio/ogg' }, body: OGG(5000) }), res);
+  const turns = res.body?.turns || [];
+  ok('a silence of 1.5 s or more ends a turn, even with the same speaker either side',
+    turns.length === 4 && turns[2]?.text === 'see you soon.' && turns[3]?.text === 'Lower left eight mesioangular.',
+    JSON.stringify(turns.map((t) => t.text)));
+  ok('and every turn carries both its start and its end',
+    turns.length > 0 && turns.every((t) => Number.isFinite(t.start) && Number.isFinite(t.end)) && turns[3]?.start === 24 && turns[3]?.end === 26,
+    JSON.stringify(turns.map((t) => [t.start, t.end])));
+  ok('and where each word starts, in the text and in the recording',
+    JSON.stringify(turns[3]?.words?.slice(0, 2)) === '[{"at":0,"start":24},{"at":6,"start":24.3}]', JSON.stringify(turns[3]?.words));
+
+  bedrock(JSON.stringify(goodNote));
+  res = mockRes();
+  await extract(mockReq({ body: { turns, consultType: 'third-molar', dictationFromS: 21 } }), res);
+  let um = userMsg();
+  ok('so the dictation marker lands between the goodbye and the dictation',
+    um.indexOf('see you soon') > -1 && um.indexOf('see you soon') < um.indexOf('[DICTATION') && um.indexOf('[DICTATION') < um.indexOf('Lower left eight'),
+    um.slice(um.indexOf('<transcript>'), um.indexOf('</transcript>')));
+
+  // A turn that still straddles the Dictate press is split at the first word
+  // at or after it, where the words came with the turn...
+  const straddle = { speaker: 'S1', text: 'see you soon. Lower left eight.', start: 18, end: 20.5,
+    words: [{ at: 0, start: 18 }, { at: 4, start: 18.3 }, { at: 8, start: 18.6 }, { at: 14, start: 19.8 }, { at: 20, start: 20 }, { at: 25, start: 20.2 }] };
+  bedrock(JSON.stringify(goodNote));
+  res = mockRes();
+  await extract(mockReq({ body: { turns: [{ speaker: 'S2', text: 'Thanks.', start: 10, end: 11 }, straddle], consultType: 'third-molar', dictationFromS: 19.5 } }), res);
+  um = userMsg();
+  ok('a turn straddling the Dictate press is split at the first word after it',
+    /\[S1\] see you soon\.\n\[DICTATION[^\n]*\]\n\[S1\] Lower left eight\./.test(um), um.slice(um.indexOf('<transcript>'), um.indexOf('</transcript>')));
+  ok('and a split made at a word needs no warning', !res.body?.note?.gaps?.some((g) => /could not be placed exactly/.test(g)), JSON.stringify(res.body?.note?.gaps));
+
+  // ...and without word timings the marker goes in front of the whole turn, and says so.
+  bedrock(JSON.stringify(goodNote));
+  res = mockRes();
+  const { words: _drop, ...bare } = straddle;
+  await extract(mockReq({ body: { turns: [{ speaker: 'S2', text: 'Thanks.', start: 10, end: 11 }, bare], consultType: 'third-molar', dictationFromS: 19.5 } }), res);
+  um = userMsg();
+  ok('without word timings, a straddling turn goes after the marker, not before it',
+    um.indexOf('[DICTATION') > -1 && um.indexOf('[DICTATION') < um.indexOf('see you soon') && um.indexOf('Thanks.') < um.indexOf('[DICTATION'),
+    um.slice(um.indexOf('<transcript>'), um.indexOf('</transcript>')));
+  ok('and the gap list says the start of the dictation could not be placed exactly',
+    /pressed Dictate part-way through[\s\S]*could not be placed exactly/.test(res.body?.note?.gaps?.[0] || ''), JSON.stringify(res.body?.note?.gaps));
+
+  // --- 2. referral red flags in the wrong shape are kept, or refused, never dropped ---
+  ok('a red flag given as a string is one flag',
+    JSON.stringify(pm.parseReferral('{"situation":"x","redFlags":"Non-healing ulcer left lateral tongue, 4 weeks"}').redFlags) === '["Non-healing ulcer left lateral tongue, 4 weeks"]');
+  ok('red flags given as objects are laid out as text',
+    JSON.stringify(pm.parseReferral('{"situation":"x","redFlags":[{"quote":"lump in the neck"}]}').redFlags) === '["quote: lump in the neck"]');
+  for (const bad of ['{"redFlags":42}', '{"redFlags":[7]}', '{"redFlags":[{"quote":["a"]}]}', '{"redFlags":{"quote":"lump"}}']) {
+    let msg = null;
+    try { pm.parseReferral(bad); } catch (e) { msg = e.message; }
+    ok(`red flags as ${bad.slice(12, 24)} refuse the referral loudly rather than vanish`, msg !== null && /red ?flag/i.test(msg), String(msg));
+  }
+
+  // --- 3. pauses are marked in the transcript, where the model reads ---
+  const paused = [
+    { speaker: 'S1', text: 'I will just have a look now.', start: 80, end: 82 },
+    { speaker: 'S1', text: 'That all looks fine.', start: 96, end: 98 },
+  ];
+  bedrock(JSON.stringify(goodNote));
+  res = mockRes();
+  await extract(mockReq({ body: { turns: paused, consultType: 'third-molar', pauses: [{ atRecordedMs: 95000, forMs: 600000 }] } }), res);
+  um = userMsg();
+  ok('a pause is marked by a PAUSED line before the first turn after it',
+    /have a look now\.\n\[PAUSED — about 10 minutes not recorded\]\n\[S1\] That all looks fine\./.test(um), um.slice(um.indexOf('<transcript>'), um.indexOf('</transcript>')));
+  ok('and the preamble points to that line instead of a time the transcript never shows',
+    /marked in the transcript by a line reading \[PAUSED/.test(um) && !/into the recording/.test(um), um.slice(0, 300));
+  ok('the note prompt\'s PAUSED RECORDINGS section refers to the marker line',
+    /PAUSED RECORDINGS[\s\S]{0,400}a line beginning \[PAUSED —[\s\S]{0,200}otherwise the gaps are listed by time/.test(sent?.system || ''));
+  // Speech running on across the pause point is split at the word, too.
+  bedrock(JSON.stringify(goodNote));
+  res = mockRes();
+  await extract(mockReq({ body: { turns: [{ speaker: 'S1', text: 'Just a look. All fine.', start: 90, end: 97,
+    words: [{ at: 0, start: 90 }, { at: 5, start: 90.4 }, { at: 7, start: 90.6 }, { at: 13, start: 95.2 }, { at: 17, start: 95.6 }] }],
+    consultType: 'third-molar', pauses: [{ atRecordedMs: 95000, forMs: 600000 }] } }), res);
+  ok('a turn running across a pause is split at the first word after it',
+    /\[S1\] Just a look\.\n\[PAUSED[^\n]*\]\n\[S1\] All fine\./.test(userMsg()), userMsg().slice(userMsg().indexOf('<transcript>')));
+  for (const kind of ['summary', 'postop', 'referral', 'ask']) {
+    bedrock(kind === 'ask' ? 'It was not discussed.' : '{}');
+    res = mockRes();
+    await extract(mockReq({ body: { kind, question: 'Was dry socket mentioned?', turns: paused, consultType: 'third-molar', note: { proposed: 'XLA LL8' },
+      pauses: [{ atRecordedMs: 95000, forMs: 600000 }] } }), res);
+    um = userMsg();
+    ok(`${kind}: the pause rule is given in a line, not by naming a section its prompt does not have`,
+      !/Apply the PAUSED RECORDINGS rules/.test(um) && /Never present things either side of a PAUSED line as said one after the other/.test(um) && /\[PAUSED —/.test(um),
+      um.slice(0, 300));
+  }
+
+  // --- 4. list- or object-valued fields in the other documents are laid out, not refused ---
+  ok('asText is shared from _prompt.mjs', typeof pm.asText === 'function');
+  let po = null;
+  try { po = pm.parsePostop('{"avoid":["Smoking for 48 hours","Hot drinks today"],"pain":"Ibuprofen 400 mg"}'); } catch (e) { po = { err: e.message }; }
+  ok('post-op: a list is laid out one item per line', po?.avoid === 'Smoking for 48 hours\nHot drinks today' && po?.pain === 'Ibuprofen 400 mg', JSON.stringify(po));
+  let su = null;
+  try { su = pm.parseSummary('{"whatToExpect":["Some swelling","Stiffness"],"whatWeDiscussed":[]}'); } catch (e) { su = { err: e.message }; }
+  ok('summary: a list is laid out, and an empty one is blank', su?.whatToExpect === 'Some swelling\nStiffness' && su?.whatWeDiscussed === null, JSON.stringify(su));
+  let rf = null;
+  try { rf = pm.parseReferral('{"situation":{"problem":"pain LL8"}}'); } catch (e) { rf = { err: e.message }; }
+  ok('referral: an object of strings is laid out as "key: text"', rf?.situation === 'problem: pain LL8', JSON.stringify(rf));
+  let deep = null;
+  try { pm.parsePostop('{"avoid":[{"what":"smoking"}]}'); } catch (e) { deep = e.message; }
+  ok('and anything deeper is still refused, by field', /Post-op field "avoid"/.test(deep || ''), String(deep));
+  bedrock('{"avoid":["Smoking","Straws"]}');
+  res = mockRes();
+  await extract(mockReq({ body: { kind: 'postop', turns: paused, consultType: 'third-molar', note: { proposed: 'XLA LL8' } } }), res);
+  ok('through the handler, a listed "avoid" no longer costs the whole sheet',
+    res.statusCode === 200 && res.body?.postop?.avoid === 'Smoking\nStraws', `${res.statusCode} ${JSON.stringify(res.body)}`);
+
+  // --- 5. the sign-in throttle is per address and counts only failures ---
+  process.env.APP_USERS = 'AM:correct-horse-battery,MM:battery-staple-horse';
+  const authMod = await import('../api/auth.mjs');
+  const auth = authMod.default;
+  const signIn = async (passcode, headers) => { const r = mockRes(); await auth(mockReq({ body: { passcode }, headers }), r); return r.statusCode; };
+  const statuses = [];
+  for (let i = 0; i < 8; i++) statuses.push(await signIn('wrong-guess-' + i, { 'x-real-ip': '203.0.113.9' }));
+  ok('eight wrong guesses from one address are each refused', statuses.every((s) => s === 401), statuses.join(','));
+  ok('that address is then throttled, even with a correct passcode',
+    (await signIn('correct-horse-battery', { 'x-real-ip': '203.0.113.9' })) === 429);
+  ok('while a clinician at another address signs in as normal',
+    (await signIn('correct-horse-battery', { 'x-real-ip': '198.51.100.7' })) === 200);
+  ok('and x-forwarded-for is keyed by its first entry',
+    (await signIn('battery-staple-horse', { 'x-forwarded-for': '198.51.100.8, 203.0.113.9' })) === 200);
+  const many = [];
+  for (let i = 0; i < 10; i++) many.push(await signIn(i % 2 ? 'correct-horse-battery' : 'battery-staple-horse', { 'x-real-ip': '198.51.100.20' }));
+  ok('successful sign-ins do not count towards the limit', many.every((s) => s === 200), many.join(','));
+  if (authMod._throttle) {
+    const { attempts, MAX_CLIENTS } = authMod._throttle;
+    const now = Date.now();
+    for (let i = 0; i < MAX_CLIENTS + 200; i++) attempts.set('10.0.' + i, [now]);
+    for (let i = 0; i < 50; i++) attempts.set('10.9.' + i, [now - 120_000]);
+    await signIn('correct-horse-battery', { 'x-real-ip': '198.51.100.30' });
+    ok('the record of failed attempts stays bounded', attempts.size <= MAX_CLIENTS && !attempts.has('10.9.0'), String(attempts.size));
+    attempts.clear();
+  } else ok('the record of failed attempts stays bounded', false, 'no _throttle export');
+
+  // --- 6. the dentist's private remarks stay out of the patient's documents ---
+  for (const [name, sp] of [['summary', pm.buildSummarySystemPrompt('third-molar')], ['post-op', pm.buildPostopSystemPrompt('third-molar')]]) {
+    // The patient's documents carry only what was said to the patient, so the
+    // dictation (said after they left) is kept out entirely, facts included.
+    ok(`${name} prompt: nothing from the dictated section goes into a patient's document`,
+      /\[DICTATION \.\.\.\][\s\S]{0,200}None of it was said to the patient, so nothing from it goes into this document/.test(sp));
+  }
+
+  // --- 7. Ask is not told to return JSON ---
+  bedrock('It was not discussed.');
+  res = mockRes();
+  await extract(mockReq({ body: { kind: 'ask', question: 'Was dry socket mentioned?', turns: paused, consultType: 'third-molar' } }), res);
+  ok('an Ask message does not end "Return the JSON object."', res.statusCode === 200 && !/Return the JSON object/.test(userMsg()), userMsg().slice(-120));
+  ok('while the note still does', /Return the JSON object\.$/.test(pm.buildUserMessage('[S1] Hello')));
+
+  // --- 8. a recall's inapplicable fields are all named in its prompt ---
+  {
+    const sp = pm.buildSystemPrompt('exam-recall', 'standard');
+    const at = sp.indexOf('There is usually NO consent');
+    const emphasis = sp.slice(at, sp.indexOf('The other fields still apply', at));
+    const missing = pm.notApplicableFields('exam-recall').filter((f) => !emphasis.includes(f));
+    ok('exam/recall: every field that does not apply is named among "do NOT add gaps"', at > -1 && missing.length === 0, missing.join(', '));
+  }
+
+  // --- 9. an item that does not apply is "Not applicable: <reason>", not a gap ---
+  ok('the checklist prompt gives the exact wording for an item that does not apply',
+    /exactly "Not applicable: " followed by the reason/.test(pm.buildSystemPrompt('third-molar')));
+  const sinusGap = (v) => checklistGaps('third-molar', { 'pain-swelling': 'expect swelling', sinus: v }).some((g) => /sinus/.test(g));
+  ok('"Not applicable: lower tooth" is not a gap', !sinusGap('Not applicable: lower tooth'));
+  ok('a bare "Not applicable" gives no reason and is still a gap', sinusGap('Not applicable') && sinusGap('Not applicable:') && sinusGap('N/A'));
+  bedrock(JSON.stringify({ ...goodNote, checklist: { 'pain-swelling': 'expect swelling', sinus: 'Not applicable: lower tooth' } }));
+  res = mockRes();
+  await extract(mockReq({ body: { turns: paused, consultType: 'third-molar' } }), res);
+  ok('through the handler, the lower tooth gets no sinus line in "not said"',
+    res.statusCode === 200 && !res.body?.note?.notSaid?.some((g) => /sinus/.test(g)) && res.body.note.notSaid.some((g) => /bleeding/.test(g)),
+    JSON.stringify(res.body?.note?.notSaid));
+
+  // --- 10. Bedrock's error body never reaches the browser, and its secrets never reach the log ---
+  {
+    const token = 'FwoGZXIvYXdzEXAMPLESESSIONTOKEN0123456789';
+    const bodyText = `{"message":"The request signature we calculated does not match. The Canonical String for this request should have been 'POST\\n/model/x/invoke\\n\\nx-amz-security-token:${token}\\n' Authorization: AWS4-HMAC-SHA256 Credential=ASIAEXAMPLEKEY12345/20260925/eu-west-2/bedrock/aws4_request, SignedHeaders=host, Signature=abcdef0123456789"}`;
+    stubFetch(async () => ({ status: 403, body: bodyText }));
+    const logged = []; const quiet = console.error; console.error = (...a) => logged.push(a.join(' '));
+    res = mockRes();
+    await extract(mockReq({ body: { turns: paused, consultType: 'third-molar' } }), res);
+    console.error = quiet;
+    const detail = JSON.stringify(res.body);
+    ok('a Bedrock refusal tells the page the status and nothing more',
+      res.statusCode === 502 && /bedrock 403/.test(detail) && !/Canonical|signature we calculated|x-amz-security-token|ASIA/.test(detail), detail);
+    const log = logged.join('\n');
+    ok('the body is still logged, for diagnosis', /Canonical String/.test(log), log.slice(0, 200));
+    ok('with the session token, credential and signature redacted',
+      !log.includes(token) && !log.includes('ASIAEXAMPLEKEY12345') && !log.includes('abcdef0123456789') && /\[redacted\]/.test(log), log.slice(0, 400));
+  }
+
+  // --- 11. UK spelling from Speechmatics ---
+  {
+    let cfg = null;
+    stubFetch(async (c, opts) => {
+      if (c.method === 'POST' && c.url.endsWith('/jobs')) { cfg = JSON.parse(opts.body.get('config')); return { status: 201, body: { id: 'jobGB' } }; }
+      if (c.method === 'GET' && c.url.endsWith('/jobs/jobGB')) return { status: 200, body: { job: { status: 'done' } } };
+      if (c.method === 'GET' && c.url.includes('/transcript')) return { status: 200, body: TURNS_PAYLOAD };
+      return { status: 200, body: {} };
+    });
+    res = mockRes();
+    await transcribe(mockReq({ headers: { 'content-type': 'audio/ogg' }, body: OGG(5000) }), res);
+    ok('the transcription asks for en-GB output', cfg?.transcription_config?.output_locale === 'en-GB' && cfg?.transcription_config?.language === 'en',
+      JSON.stringify(cfg?.transcription_config?.output_locale));
+  }
+
+  // --- 12. a corrected speaker mapping reaches every product, whitelisted ---
+  for (const kind of ['summary', 'postop', 'referral', 'ask']) {
+    bedrock(kind === 'ask' ? 'It was not discussed.' : '{}');
+    res = mockRes();
+    await extract(mockReq({ body: { kind, question: 'Who spoke first?', turns: paused, consultType: 'third-molar', note: { proposed: 'XLA LL8' },
+      speakerRoles: { S1: 'patient', S2: 'clinician', S3: 'boss', x: 'patient', S999: 'other' } } }), res);
+    um = userMsg();
+    ok(`${kind}: the corrected speaker mapping is passed on, whitelisted`,
+      /CONFIRMED MAPPING[^\n]*S1 is the patient; S2 is the clinician\./.test(um) && !/boss|x is the|S999/.test(um) && !/speakerConfidence/.test(um),
+      um.slice(0, 200));
+  }
+}
+
 /* ---------- run ---------- */
 const realFetch = globalThis.fetch;
 try {
@@ -1601,6 +1982,7 @@ try {
   await testMiddleware();
   await testMultiUser();
 await testAuth();
+  await testSweep2();
 } finally {
   globalThis.fetch = realFetch;
 }

@@ -494,7 +494,7 @@ function jpegLossless(values, rows, cols, precision = 16) {
 // position in its own group; pixels either uncompressed or lossless JPEG with
 // an empty offset table and one fragment per frame.
 function dicomMulti({ rows, cols, frames, iop = [1, 0, 0, 0, 1, 0], ps, slope = 1, intercept = -1000, lossless = false,
-  splitFragments = false, withOffsets = false, perFrameRescale = null, sharedRescaleToo = false, padAfterEnd = 0, trailer = null, framesTag = null, corrupt = -1, perFrameIop = null, signed = false }) {
+  splitFragments = false, withOffsets = false, perFrameRescale = null, sharedRescaleToo = false, padAfterEnd = 0, trailer = null, framesTag = null, corrupt = -1, perFrameIop = null, signed = false, stored = 16, claim = null }) {
   const enc = new TextEncoder();
   const cat = (arrs) => { const n = arrs.reduce((a, b) => a + b.length, 0), o = new Uint8Array(n); let k = 0; arrs.forEach((b) => { o.set(b, k); k += b.length; }); return o; };
   const pad = (b, vr) => (b.length % 2 ? Uint8Array.from([...b, vr === 'UI' || vr === 'OB' ? 0 : 32]) : b);
@@ -535,7 +535,7 @@ function dicomMulti({ rows, cols, frames, iop = [1, 0, 0, 0, 1, 0], ps, slope = 
     pixelEl = el(0x7fe0, 0x10, 'OW', new Uint8Array(all.buffer));
   } else {
     const jpegs = frames.map((fr, f) => {
-      let j = jpegLossless(signed ? Uint16Array.from(fr.raw, (v) => v & 0xffff) : fr.raw, rows, cols);
+      let j = jpegLossless(signed ? Uint16Array.from(fr.raw, (v) => v & ((1 << stored) - 1)) : fr.raw, rows, cols, stored);
       if (f === corrupt) j = Uint8Array.from(j.subarray(0, 40));
       if (padAfterEnd) j = Uint8Array.from([...j, ...Array(padAfterEnd).fill(0)]);
       if (trailer) j = Uint8Array.from([...j, ...trailer]);
@@ -561,8 +561,8 @@ function dicomMulti({ rows, cols, frames, iop = [1, 0, 0, 0, 1, 0], ps, slope = 
     el(0x10, 0x10, 'PN', 'SENTINEL^MUST-NOT-DISPLAY'), el(0x10, 0x20, 'LO', 'SENTINEL-ID'), el(0x10, 0x30, 'DA', '19000101'),
     el(0x20, 0x0e, 'UI', '1.2.3.998'),
     el(0x28, 0x02, 'US', 1), el(0x28, 0x04, 'CS', 'MONOCHROME2'), el(0x28, 0x08, 'IS', framesTag === null ? String(frames.length) : framesTag),
-    el(0x28, 0x10, 'US', rows), el(0x28, 0x11, 'US', cols),
-    el(0x28, 0x100, 'US', 16), el(0x28, 0x101, 'US', 16), el(0x28, 0x102, 'US', 15), el(0x28, 0x103, 'US', signed ? 1 : 0),
+    el(0x28, 0x10, 'US', claim ? claim.rows : rows), el(0x28, 0x11, 'US', claim ? claim.cols : cols),
+    el(0x28, 0x100, 'US', 16), el(0x28, 0x101, 'US', stored), el(0x28, 0x102, 'US', stored - 1), el(0x28, 0x103, 'US', signed ? 1 : 0),
     sq(0x5200, 0x9229, [shared]), sq(0x5200, 0x9230, perFrame),
     pixelEl
   ]);
@@ -746,6 +746,101 @@ function dicomMulti({ rows, cols, frames, iop = [1, 0, 0, 0, 1, 0], ps, slope = 
   const signedScan = load([dicomMulti({ rows: 4, cols: 4, lossless: true, signed: true, intercept: 0,
     frames: [0, 1, 2].map((k) => ({ ipp: [0, 0, k * 0.5], raw: new Int16Array(16).fill(-700) })), ps: [0.5, 0.5] })]);
   ok('signed pixel values survive lossless JPEG (-700 stays -700)', signedScan && signedScan.hu && signedScan.hu.every((v) => v === -700), signedScan && (signedScan.message || signedScan.hu[0]));
+}
+
+/* ------------------------------------------------------------------ */
+section('Review of 25 September: checks not made, stored bits, orientation, damaged files');
+{
+  const { L } = boot();
+  const r = L.evaluate({ tooth: 36, md: '7.5', bl: '7.5', dia: '4', len: '10', timing: 'healed' });
+  ok('at a nerve site, an implant with no bone height is not rated Straightforward', r.rating !== 'Straightforward' && /Incomplete/.test(r.rating), `${r.rating} (score ${r.score})`);
+  ok('and the unmade apex-to-canal check is listed as not checked', r.unknown.some((u) => /^Not checked: Apex to the inferior alveolar canal \(needs available bone height/.test(u)), r.unknown.slice(-2).join(' | '));
+  const t = L.planText(r);
+  ok('the copied plan carries both the incomplete rating and the unmade check',
+    /Complexity: Incomplete: nerve clearance not checked/.test(t) && /Not checked: Apex to the inferior alveolar canal/.test(t), t.split('\n').filter((x) => /Complexity|Not recorded/.test(x)).join(' | '));
+  const d = L.evaluate({ tooth: 36, dia: '4' });
+  ok('a diameter alone lists every check it could not make, with what each needed',
+    ['Clearance to each adjacent tooth (needs space between the adjacent teeth)', 'Bone left buccally and lingually (needs bone width)',
+      'Apex to the inferior alveolar canal (needs implant length and available bone height']
+      .every((x) => d.unknown.some((u) => u.startsWith('Not checked: ' + x))), d.unknown.filter((u) => /Not checked/.test(u)).join(' | '));
+  const inv = L.evaluate({ tooth: 36, ht: '65', len: '10' });
+  ok('an invalid height is named as the reason the nerve check was not made', inv.rating !== 'Straightforward' &&
+    inv.unknown.some((u) => /Not checked: Apex.*\(the value entered is not valid\)/.test(u)), inv.unknown.slice(-1)[0]);
+  const up = L.evaluate({ tooth: 26, dia: '4', len: '10' });
+  ok('away from a nerve the rating stands, but the unmade check is still listed',
+    up.rating === 'Straightforward' && up.unknown.some((u) => /^Not checked: Implant length within the bone below the sinus floor/.test(u)), up.rating);
+  ok('a complete nerve check is still rated normally, with nothing listed as not checked',
+    L.evaluate({ tooth: 36, ht: '12', len: '10' }).rating === 'Straightforward' &&
+    !L.evaluate({ tooth: 36, ht: '12', len: '10' }).unknown.some((u) => /Not checked: Apex/.test(u)));
+  ok('with no implant proposed, nothing is listed as not checked', !L.evaluate({ tooth: 36, md: '7' }).unknown.some((u) => /Not checked/.test(u)));
+  const adv = L.evaluate({ tooth: 36, timing: 'present', smoking: 'heavy', dia: '4', len: '10' });
+  ok('a higher band is not lowered by an unmade check, and the check is still listed', adv.rating === 'Advanced' && adv.unknown.some((u) => /Not checked: Apex/.test(u)), adv.rating);
+}
+{
+  const { win, doc } = boot();
+  const root = () => doc.getElementById('root').textContent;
+  const setTooth = (t) => { const sel = $(doc, '#tooth'); sel.value = t; sel.dispatchEvent(new win.Event('change', { bubbles: true })); };
+  const type = (id, v) => { const el = $(doc, '#in-' + id); el.value = v; el.dispatchEvent(new win.Event('input', { bubbles: true })); };
+  click($(doc, '[data-act="begin"]'));
+  setTooth('36');
+  click($(doc, '[data-act="next"]')); click($(doc, '[data-act="next"]')); click($(doc, '[data-act="next"]'));
+  type('dia', '4'); type('len', '10');
+  click($(doc, '[data-act="next"]'));
+  ok('on the plan page, the rating shows as incomplete and the check as not made',
+    /Incomplete: nerve clearance not checked/.test(root()) && /Not checked: Apex to the inferior alveolar canal/.test(root()) && !/Straightforward/.test(root().split('Complexity score so far')[0]), root().slice(0, 300));
+}
+{
+  const V = await import('data:text/javascript;base64,' + Buffer.from(viewerSrc).toString('base64'));
+  const load = (list, names) => { try { return V.loadSeries(list, V.dicomParser, V.Lossless, names); } catch (e) { return e; } };
+  const three = (raw) => [0, 1, 2].map((k) => ({ ipp: [0, 0, k * 0.5], raw }));
+  const first = (v) => (v && v.hu ? v.hu[0] : v && v.message);
+
+  // BitsStored 12, signed: -700 is 0xD44 in 12 bits, which reads as 3396 if the sign is taken from bit 15.
+  const s12j = load([dicomMulti({ rows: 4, cols: 4, lossless: true, signed: true, stored: 12, intercept: 0, frames: three(new Int16Array(16).fill(-700)), ps: [0.5, 0.5] })]);
+  ok('12-bit signed lossless JPEG: -700 stays -700', s12j && s12j.hu && s12j.hu.every((v) => v === -700), first(s12j));
+  const s12u = load([dicomMulti({ rows: 4, cols: 4, signed: true, stored: 12, intercept: 0, frames: three(new Int16Array(16).fill(-700 & 0xfff)), ps: [0.5, 0.5] })]);
+  ok('12-bit signed, uncompressed, not sign-extended: -700 stays -700', s12u && s12u.hu && s12u.hu.every((v) => v === -700), first(s12u));
+  const s12x = load([dicomMulti({ rows: 4, cols: 4, signed: true, stored: 12, intercept: 0, frames: three(new Int16Array(16).fill(-700)), ps: [0.5, 0.5] })]);
+  ok('12-bit signed, uncompressed, already sign-extended: -700 stays -700', s12x && s12x.hu && s12x.hu.every((v) => v === -700), first(s12x));
+  const u12 = load([dicomMulti({ rows: 4, cols: 4, stored: 12, intercept: -1000, frames: three(new Uint16Array(16).fill(0xf000 | 1500)), ps: [0.5, 0.5] })]);
+  ok('12-bit unsigned: bits above the stored ones are ignored (1500 - 1000 = 500)', u12 && u12.hu && u12.hu.every((v) => v === 500), first(u12));
+
+  // Values that do not fit in 16 bits are cut, and the load says so.
+  const big = load([dicomMulti({ rows: 4, cols: 4, intercept: 0, frames: three(Uint16Array.from({ length: 16 }, (_, i) => (i < 8 ? 30000 : 50000))), ps: [0.5, 0.5] })]);
+  ok('unsigned values above 32767 are reported when they are cut to fit',
+    big && big.hu && big.hu[15] === 32767 && big.warnings.some((w) => /24 voxel values were outside the range/.test(w)), big && (big.message || JSON.stringify(big.warnings)));
+  const fits = load([dicomMulti({ rows: 4, cols: 4, intercept: -10000, frames: three(new Uint16Array(16).fill(40000)), ps: [0.5, 0.5] })]);
+  ok('and nothing is reported when every value fits after rescale (40000 - 10000)', fits && fits.hu && fits.hu[0] === 30000 && fits.warnings.length === 0, fits && (fits.message || JSON.stringify(fits.warnings)));
+
+  // Up on a cross-section is the patient's up, however the slices were stacked.
+  const stack = (iop, pos, n = 6) => [...Array(n).keys()].map((k) => dicomSlice({ rows: 4, cols: 4, ipp: pos(k), iop, ps: [0.5, 0.5],
+    raw: new Int16Array(16).fill(1024 + 100 * k), slope: 1, intercept: -1024, instance: k + 1 }));
+  const flipped = load(stack([1, 0, 0, 0, -1, 0], (k) => [0, 0, k * 0.5]));
+  let cs = null; try { cs = V.crossSection(flipped, [0.75, -0.75, 1.25], [1, 0, 0], 1, 2, 0.5); } catch (e) { cs = e; }
+  ok('with the stack normal pointing down (IOP 1,0,0,0,-1,0), the section is not upside down',
+    cs && cs.v && cs.v[2] > 0.99 && cs.data[0] > cs.data[cs.data.length - 1], cs && (cs.message || JSON.stringify(cs.v)));
+  const sag = load(stack([0, 1, 0, 0, 0, -1], (k) => [k * 0.5, 0, 0]));
+  let sc = null; try { V.crossSection(sag, [1.25, 0.75, -0.75], [0, 1, 0], 1, 1, 0.5); sc = 'drew'; } catch (e) { sc = e; }
+  ok('a sagittal stack is refused for cross-sections, not drawn sideways', sc instanceof V.ScanError && /not axial/.test(sc.message), sc && (sc.message || sc));
+  const cor = load(stack([1, 0, 0, 0, 0, -1], (k) => [0, k * 0.5, 0]));
+  let cc = null; try { V.crossSection(cor, [0.75, 1.25, -0.75], [1, 0, 0], 1, 1, 0.5); cc = 'drew'; } catch (e) { cc = e; }
+  ok('and so is a coronal one', cc instanceof V.ScanError && /not axial/.test(cc.message), cc && (cc.message || cc));
+
+  // A file cut short is named, not set aside as "not part of the scan".
+  const five = stack([1, 0, 0, 0, 1, 0], (k) => [0, 0, k * 0.5], 5);
+  for (const cut of [2, 40, 300]) {
+    const r = load([...five.slice(0, 4), five[4].slice(0, five[4].length - cut)]);
+    ok(`a DICOM file cut short by ${cut} bytes is refused and named (not loaded one slice short)`,
+      r instanceof V.ScanError && /File 5 of 5 is incomplete or damaged/.test(r.message), r && (r.message || 'loaded, nz ' + r.nz));
+  }
+  const named = load([five[0].slice(0, 300), ...five.slice(1)], ['a.dcm', 'b.dcm', 'c.dcm', 'd.dcm', 'e.dcm']);
+  ok('with file names given, the damaged file is named by its name', named instanceof V.ScanError && /"a\.dcm" is incomplete or damaged/.test(named.message), named && (named.message || 'loaded'));
+  ok('a file that is not DICOM at all is still just set aside',
+    (() => { const r = load([...five, new TextEncoder().encode('readme')]); return r && r.nz === 5 && r.warnings.some((w) => /set aside/.test(w)); })());
+
+  // A header claiming a volume too big to hold is refused with a reason.
+  const huge = load([dicomMulti({ rows: 4, cols: 4, lossless: true, claim: { rows: 65535, cols: 65535 }, frames: three(new Uint16Array(16).fill(1000)), ps: [0.5, 0.5] })]);
+  ok('a volume over the size limit is refused with a plain reason, not a crash', huge instanceof V.ScanError && /too large for the viewer/.test(huge.message), huge && (huge.message || 'loaded'));
 }
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);

@@ -30,7 +30,9 @@ const section = (t) => console.log(`\n${t}\n${'-'.repeat(t.length)}`);
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------- boot the page with the browser bits stubbed ---------- */
-async function boot({ session = { authenticated: true, expiresIn: 40000 }, onFetch } = {}) {
+// `hook` runs last in beforeParse, so a test can replace a stub or add a browser
+// feature jsdom lacks before the page's script sees the window.
+async function boot({ session = { authenticated: true, expiresIn: 40000 }, onFetch, hook } = {}) {
   const calls = [];
   const dom = new JSDOM(html, {
     runScripts: 'dangerously',
@@ -134,6 +136,7 @@ async function boot({ session = { authenticated: true, expiresIn: 40000 }, onFet
           configurable: true, writable: true
         });
       } catch { win.__reloadUnstubbed = true; }
+      if (hook) hook(win);
     }
   });
   await tick(60);
@@ -675,6 +678,13 @@ async function testDerivedAndDictation() {
   let offset = 0;
   win.Date.now = () => realNow() + offset;
   offset += 90 * 1000;                 // 90 s of conversation
+  // The dictation point is taken from the AUDIO the encoder has reported, not
+  // the clock, so the stub's last page says 90 s of audio were encoded. Sent
+  // before Pause (nothing is encoded while paused) and synchronously before the
+  // tap, so no stub page can land in between. Dictate from a pause starts where
+  // the pause was recorded.
+  { const node = win.__encoder.instances[win.__encoder.instances.length - 1];
+    node.port.onmessage({ data: { message: 'page', page: new Uint8Array(100), samplePosition: 90 * 48000 } }); }
   click($(doc, 'pause'));
   await tick(30);
   offset += 40 * 60 * 1000;            // 40 min of surgery, paused
@@ -1063,7 +1073,8 @@ async function testNotSaidPanel() {
   // no note, and that was silently closable.
   const src2 = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
   ok('closing the tab warns while a transcript is held, note or no note',
-    /if \(S\.note \|\| S\.busy \|\| S\.turns \|\| S\.heldAudio\) \{/.test(src2));
+    /function holding\(\) \{\s*return !!\(S\.note \|\| S\.turns \|\| S\.heldAudio \|\| S\.busy/.test(src2) &&
+    /'beforeunload'[\s\S]{0,900}?if \(holding\(\)\)/.test(src2));
   ok('and the patient-summary request cannot hang the button for ever',
     /SUMMARY_TIMEOUT_MS/.test(src2) && /ctrl\.abort\(\)/.test(src2));
 
@@ -2006,7 +2017,8 @@ async function testRepeatedFailureSaysRetryingWontHelp() {
   const ctx = await boot({
     onFetch: async (entry) => {
       if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns }) };
-      if (entry.url.includes('/api/extract')) return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed', detail: 'Bedrock unavailable' }) };
+      // An answer the model could not make a note of: the failure that repeats.
+      if (entry.url.includes('/api/extract')) return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed', detail: 'Model did not return valid JSON' }) };
     }
   });
   const { doc, win } = ctx;
@@ -2555,6 +2567,8 @@ await testMicCheck();
 await testMicCheckFailureModes();
 await testMicTestClosesBeforeRecording();
 await testMicCheckHonoursClear();
+await testMicCheckContextMadeInTheTap();
+await testSecondMicCheckWins();
 await testDerivedButtonsRecoverForTheNextPatient();
 await testWakeLockHonoursClear();
 await testEveryAsyncPathHonoursTheGeneration();
@@ -2601,7 +2615,7 @@ async function testPausedMeterIsFrozen() {
   ok('while the label says the same thing',
     /Paused/.test($(doc, 'recbar-label').textContent), $(doc, 'recbar-label').textContent);
   ok('and a pause is not reported as a muted microphone',
-    !/No sound detected/.test($(doc, 'level-note').textContent), $(doc, 'level-note').textContent);
+    !/No s(ound|ignal)/.test($(doc, 'level-note').textContent), $(doc, 'level-note').textContent);
 
   click($(doc, 'pause'));
   await tick(60);
@@ -3042,6 +3056,7 @@ async function testTranscriptionCanBeRetriedFromTheHeldRecording() {
 }
 
 await testPausedMeterIsFrozen();
+await testQuietSpeechIsNotSilence();
 await testPollingRidesOutABlip();
 await testTranscriptionCanBeRetriedFromTheHeldRecording();
 await testLeavingWarnsWhileAnythingIsHeld();
@@ -3049,6 +3064,1324 @@ await testRedraftInterruptedByClear();
 await testNotePreferencesDoNotFollowThePatientOut();
 await testStyles();
 await testPolish();
+await testStartRunsOnce();
+await testLockAsksWhileAnythingIsHeld();
+await testFailedSwapPutsTheMappingBack();
+await testRecordingBarStartsClean();
+await testOldRecorderCannotStopTheNextOne();
+await testDerivedFromTheReplacedNoteIsDropped();
+await testAskButtonRecovers();
+await testMicCheckSaysWhatActuallyWentWrong();
+await testClearRemovesSiteAndFlags();
+await testFailedJobDeleteIsRetried();
+await testLineBreaksSurviveEditing();
+await testRedraftAsksBeforeLosingWork();
+await testDerivedRequestsCarryTheCorrectedSpeakers();
+await testExpiredSessionNeverSaysReloadOverADraft();
+await testTopBarLinksAskWhileAnythingIsHeld();
+await testPatientDocumentsPrintOnTheirOwn();
+await testConsentCopyIsWhatIsShown();
+await testTransientFailuresAreNotCalledDeterministic();
+await testExpiredDuringRedraftSaysHowToRedraft();
+await testDictationPointFollowsTheAudio();
+await testAudioIsWokenAndAMicDropIsSaid();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
+
+/**
+ * The silence warning read the signal at 8-bit precision and wanted a peak
+ * above 4/128 (about -30 dBFS). Quiet speech from a desk microphone never gets
+ * there, so it said "No sound detected" through a consultation that was
+ * recording perfectly (seen 25 Sept at 19:24 into a real one). It is for a
+ * muted or dead microphone, which delivers exact zeros — so that is what it
+ * now looks for, and the bar is drawn in decibels so quiet speech shows.
+ */
+async function testQuietSpeechIsNotSilence() {
+  section('Quiet speech is not reported as a muted microphone');
+  const ctx = await boot({
+    onFetch: async (entry) => {
+      if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (entry.url.includes('/api/extract')) return { ok: true, status: 200, json: async () => ({ status: 'done', note: { reasonForAttendance: 'x', gaps: [] } }) };
+    }
+  });
+  const { doc, win } = ctx;
+  // What the analyser hands back, switchable mid-recording. 0.005 is about
+  // -46 dBFS: ordinary speech a metre from a desk microphone, and below the
+  // old byte threshold (it reads back as 128 +/- 0 or 1).
+  let amp = 0.005;
+  win.AudioContext.prototype.createAnalyser = function () {
+    return {
+      fftSize: 512, connect() {},
+      getFloatTimeDomainData(a) { for (let i = 0; i < a.length; i++) a[i] = (i % 2 ? amp : -amp); },
+      getByteTimeDomainData(a) { a.fill(128 + Math.round(amp * 128)); }
+    };
+  };
+  win.requestAnimationFrame = (fn) => win.setTimeout(fn, 4);
+  win.cancelAnimationFrame = (id) => win.clearTimeout(id);
+  // Move the page's clock on without waiting for it.
+  const realNow = win.Date.now.bind(win.Date);
+  let skew = 0;
+  win.Date.now = () => realNow() + skew;
+
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click($(doc, 'types').children[0]);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+
+  skew += 20000;                                   // 20 s of quiet talking
+  await tick(60);
+  ok('quiet speech for 20 s does not raise the muted-microphone warning',
+    !/No s(ound|ignal)/.test($(doc, 'level-note').textContent), $(doc, 'level-note').textContent);
+  const w = parseFloat($(doc, 'level').style.width);
+  ok('and fills a visible part of the bar, not a sliver', w > 15 && w < 50, $(doc, 'level').style.width);
+
+  amp = 0;                                         // microphone muted
+  await tick(60);
+  skew += 16000;
+  await tick(60);
+  ok('a microphone giving nothing at all for over 15 s is reported',
+    /No signal from the microphone/.test($(doc, 'level-note').textContent), $(doc, 'level-note').textContent);
+  ok('and the bar is empty', $(doc, 'level').style.width === '0%', $(doc, 'level').style.width);
+
+  amp = 0.005;
+  await tick(60);
+  ok('and the warning clears as soon as the signal is back',
+    !/No s(ound|ignal)/.test($(doc, 'level-note').textContent), $(doc, 'level-note').textContent);
+
+  win.Date.now = realNow;
+  click($(doc, 'stop'));
+  await tick(200);
+}
+
+/**
+ * Safari runs an audio context only if it was created inside the tap. The
+ * check made its context after the permission prompt, so on an iPad the level
+ * bar stayed flat over a working microphone and the note blamed the mic.
+ */
+async function testMicCheckContextMadeInTheTap() {
+  section('The mic check makes its audio context inside the tap');
+  const { doc, win } = await boot();
+  win.__mic.devices = [{ kind: 'audioinput', deviceId: 'built-in', label: 'Mic' }];
+  let made = 0, madeBeforeGrant = null;
+  const Real = win.AudioContext;
+  win.AudioContext = class extends Real { constructor() { super(); made++; } };
+  let release;
+  const pending = new Promise((r) => { release = r; });
+  win.navigator.mediaDevices.getUserMedia = async () => {
+    await pending;
+    madeBeforeGrant = made;
+    const track = { stop() {}, getSettings: () => ({ deviceId: 'built-in' }) };
+    return { getTracks: () => [track], getAudioTracks: () => [track] };
+  };
+  click($(doc, 'mic-test'));
+  ok('the context exists before the permission prompt is answered', made === 1, String(made));
+  release();
+  await tick(80);
+  ok('and it is the one the check uses — no second context after the grant',
+    made === 1 && madeBeforeGrant === 1, `made ${made}, before grant ${madeBeforeGrant}`);
+  ok('the check is running, not reporting a missing meter',
+    !/would not draw/.test($(doc, 'mic-note').textContent), $(doc, 'mic-note').textContent);
+}
+
+/**
+ * Pressing the check twice, or picking another microphone while the first is
+ * still asking: the first finished later, took over, and left a stream open
+ * that nothing closed.
+ */
+async function testSecondMicCheckWins() {
+  section('A second mic check leaves exactly one microphone open');
+  const { doc, win } = await boot();
+  win.__mic.devices = [{ kind: 'audioinput', deviceId: 'built-in', label: 'Mic' }];
+  let open = 0, closedCtx = 0;
+  const Real = win.AudioContext;
+  win.AudioContext = class extends Real { close() { closedCtx++; return super.close(); } };
+  const releases = [];
+  win.navigator.mediaDevices.getUserMedia = async () => {
+    await new Promise((r) => releases.push(r));
+    open++;
+    const track = { stop() { open--; }, getSettings: () => ({ deviceId: 'built-in' }) };
+    return { getTracks: () => [track], getAudioTracks: () => [track] };
+  };
+  click($(doc, 'mic-test'));
+  await tick(10);
+  click($(doc, 'mic-test'));
+  await tick(10);
+  releases[1]();                       // the second answers first
+  await tick(60);
+  releases[0]();                       // then the first, late
+  await tick(80);
+  ok('only one microphone is left open', open === 1, `open: ${open}`);
+  ok('and the stale check closed its own audio context', closedCtx >= 1, `closed: ${closedCtx}`);
+  click($(doc, 'clear'));
+  await tick(60);
+  ok('and Clear closes that one', open === 0, `open: ${open}`);
+}
+
+/* ================================================================
+   Second-round review fixes
+   ================================================================ */
+
+// Consent and a consult type, through the real controls. `find` picks the type.
+function armStart(doc, win, find = /Third molar/) {
+  $(doc, 'consent').checked = true;
+  $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
+  click([...$(doc, 'types').children].find((b) => find.test(b.textContent)));
+}
+
+// A getUserMedia that records which streams are still open.
+function trackStreams(win) {
+  const streams = [];
+  win.navigator.mediaDevices.getUserMedia = async (c) => {
+    win.__mic.constraints.push(c);
+    const s = { stopped: false };
+    const t = { stop() { s.stopped = true; }, getSettings: () => ({ deviceId: 'built-in' }) };
+    s.getTracks = () => [t];
+    s.getAudioTracks = () => [t];
+    streams.push(s);
+    return s;
+  };
+  return streams;
+}
+
+/**
+ * A double tap on Start ran the handler twice. The second run overwrote the
+ * first's stream, recorder and 250 ms ticker, which then ran forever; thirty
+ * minutes later that ticker hit the length limit and stopped every later
+ * recording and mic check four times a second.
+ */
+async function testStartRunsOnce() {
+  section('A double-tapped Start records once and leaves nothing running');
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/auth') && e.method === 'GET') {
+        await tick(30);
+        return { ok: true, status: 200, json: async () => ({ authenticated: true, expiresIn: 40000 }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  const streams = trackStreams(win);
+  const si = win.setInterval.bind(win), ci = win.clearInterval.bind(win);
+  const tickers = new Set();
+  win.setInterval = (f, ms, ...a) => { const id = si(f, ms, ...a); if (ms === 250) tickers.add(id); return id; };
+  win.clearInterval = (id) => { tickers.delete(id); return ci(id); };
+
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(5);
+  click($(doc, 'start'));
+  await tick(200);
+  ok('only one encoder is started', win.__encoder.instances.length === 1, String(win.__encoder.instances.length));
+  ok('only one microphone stream is opened', streams.length === 1, String(streams.length));
+  ok('only one ticker is running', tickers.size === 1, String(tickers.size));
+
+  click($(doc, 'stop'));
+  await tick(300);
+  ok('after Stop, no microphone is left open', streams.every((s) => s.stopped),
+    streams.map((s) => s.stopped).join(','));
+  ok('and no ticker is left running', tickers.size === 0, String(tickers.size));
+
+  // Every way out releases it: a cancelled session prompt must not jam Start.
+  const c2 = await boot({ session: { authenticated: true, expiresIn: 60 } });
+  let answer = false;
+  c2.win.confirm = () => answer;
+  armStart(c2.doc, c2.win);
+  await tick();
+  click($(c2.doc, 'start'));
+  await tick(80);
+  ok('cancelling the session prompt starts nothing', $(c2.doc, 'recording').classList.contains('hidden'));
+  answer = true;
+  click($(c2.doc, 'start'));
+  await tick(120);
+  ok('and the next tap on Start still works', !$(c2.doc, 'recording').classList.contains('hidden'));
+}
+
+/**
+ * Lock asked first only for a note or a recording in the 'recording' state. A
+ * paused recording, one transcribing, and a recording held for a retry after a
+ * failure were all destroyed without a word.
+ */
+async function testLockAsksWhileAnythingIsHeld() {
+  section('Lock asks before destroying anything held');
+  // Lock signs out after wiping; that request is the sign it went ahead.
+  const locked = (c) => c.calls.some((x) => x.method === 'DELETE' && x.url.includes('/api/auth'));
+
+  // 1. Paused mid-appointment.
+  let ctx = await boot();
+  let asked = 0;
+  ctx.win.confirm = () => { asked++; return false; };
+  armStart(ctx.doc, ctx.win);
+  await tick();
+  click($(ctx.doc, 'start'));
+  await tick(80);
+  click($(ctx.doc, 'pause'));
+  await tick(20);
+  click($(ctx.doc, 'lock'));
+  await tick(50);
+  ok('Lock asks before destroying a paused recording', asked === 1, `asked ${asked} times`);
+  ok('and saying no keeps it', !$(ctx.doc, 'recording').classList.contains('hidden') &&
+    !locked(ctx));
+
+  // 2. Transcription failed; the recording is held for a retry.
+  ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') {
+        return { ok: false, status: 502, json: async () => ({ error: 'transcription_failed' }) };
+      }
+    }
+  });
+  asked = 0;
+  ctx.win.confirm = (m) => { if (/Lock/.test(m)) { asked++; return false; } return true; };
+  armStart(ctx.doc, ctx.win);
+  await tick();
+  click($(ctx.doc, 'start'));
+  await tick(60);
+  click($(ctx.doc, 'stop'));
+  await tick(200);
+  ok('a failed transcription offers the retry', !$(ctx.doc, 'error-actions').classList.contains('hidden'));
+  click($(ctx.doc, 'lock'));
+  await tick(50);
+  ok('Lock asks before destroying the recording held for that retry', asked === 1, `asked ${asked} times`);
+  ok('and saying no keeps the retry', !$(ctx.doc, 'error-actions').classList.contains('hidden') &&
+    !locked(ctx));
+
+  // 3. Nothing held: no prompt to click through.
+  ctx = await boot();
+  asked = 0;
+  ctx.win.confirm = () => { asked++; return true; };
+  click($(ctx.doc, 'lock'));
+  await tick(50);
+  ok('with nothing held, Lock does not ask', asked === 0 && locked(ctx));
+}
+
+/**
+ * "Swap them and redraft" failing left the swapped mapping in place while the
+ * page said the note was unchanged; and because it bumped S.gen, the summary
+ * already being drafted was voided with its button stuck on "Drafting...".
+ */
+async function testFailedSwapPutsTheMappingBack() {
+  section('A failed speaker swap leaves the mapping and the other documents as they were');
+  const NOTE = { reasonForAttendance: 'Pain.', proposed: 'Removal.', decision: 'Proceed.', gaps: [],
+    speakers: { S1: 'clinician', S2: 'patient' } };
+  let release;
+  const stall = new Promise((r) => { release = r; });
+  let drafts = 0;
+  const bodies = [];
+  const ctx = await boot({
+    onFetch: async (e, o) => {
+      if (e.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(o.body);
+        if (b.kind === 'summary') {
+          await stall;
+          return { ok: true, status: 200, json: async () => ({ summary: { whatWeDiscussed: 'SUMMARY ARRIVED' } }) };
+        }
+        drafts++;
+        bodies.push(b);
+        if (drafts === 2) return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed', detail: 'Bedrock busy' }) };
+        return { ok: true, status: 200, json: async () => ({ note: NOTE }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+
+  click($(doc, 'make-summary'));
+  await tick(20);
+  click($(doc, 'swap-speakers'));
+  await tick(150);
+  ok('the swap redraft failed and says the note is unchanged',
+    /unchanged/.test($(doc, 'error-body').textContent), $(doc, 'error-body').textContent.slice(0, 80));
+  release();
+  await tick(60);
+  ok('the summary requested before the swap still arrives',
+    /SUMMARY ARRIVED/.test($(doc, 'summary-text').textContent));
+  ok('and its button is not left on "Drafting..."',
+    $(doc, 'make-summary').textContent === 'Patient summary' && !$(doc, 'make-summary').disabled,
+    JSON.stringify($(doc, 'make-summary').textContent));
+
+  click(doc.querySelector('#template-picker button[data-template="soap"]'));
+  await tick(20);
+  ok('the banner does not claim a mapping that was never applied',
+    !/confirmed by you/.test(doc.getElementById('speaker-map').textContent) &&
+    /swap them and redraft/.test((doc.getElementById('swap-speakers') || {}).textContent || ''),
+    doc.getElementById('speaker-map').textContent.slice(0, 80));
+
+  click(doc.querySelector('.length-picker:not(#template-picker) button[data-length="brief"]'));
+  await tick(150);
+  ok('and the next length change does not send the swapped roles',
+    drafts === 3 && bodies[2].speakerRoles === undefined, JSON.stringify(bodies[2] && bodies[2].speakerRoles));
+}
+
+/**
+ * The timer line and the recording bar kept the last state they were given:
+ * "Paused — nothing is being recorded" under a resumed recording, and a new
+ * recording after a failed transcription opening on "Dictating — the patient
+ * has left".
+ */
+async function testRecordingBarStartsClean() {
+  section('The recording bar and timer line describe the recording now running');
+  let ctx = await boot();
+  armStart(ctx.doc, ctx.win);
+  await tick();
+  click($(ctx.doc, 'start'));
+  await tick(80);
+  click($(ctx.doc, 'pause'));
+  await tick(20);
+  ok('pausing says so', /Paused/.test($(ctx.doc, 'timer-note').textContent));
+  click($(ctx.doc, 'pause'));
+  await tick(300);
+  ok('resuming takes the "Paused" line away', !/Paused/.test($(ctx.doc, 'timer-note').textContent),
+    $(ctx.doc, 'timer-note').textContent);
+  click($(ctx.doc, 'pause'));
+  await tick(20);
+  click($(ctx.doc, 'dictate'));
+  await tick(300);
+  ok('and so does Dictate, which also resumes', !/Paused/.test($(ctx.doc, 'timer-note').textContent),
+    $(ctx.doc, 'timer-note').textContent);
+
+  ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') {
+        return { ok: false, status: 502, json: async () => ({ error: 'transcription_failed' }) };
+      }
+    }
+  });
+  armStart(ctx.doc, ctx.win);
+  await tick();
+  click($(ctx.doc, 'start'));
+  await tick(80);
+  click($(ctx.doc, 'dictate'));
+  await tick(20);
+  click($(ctx.doc, 'pause'));
+  await tick(20);
+  click($(ctx.doc, 'stop'));
+  await tick(200);
+  ok('the transcription failed, back on the setup screen', /Transcription failed/.test($(ctx.doc, 'error-title').textContent));
+  click($(ctx.doc, 'start'));
+  await tick(120);
+  ok('the next recording is labelled as a conversation',
+    $(ctx.doc, 'recbar-label').textContent === 'Recording — conversation only',
+    $(ctx.doc, 'recbar-label').textContent);
+  ok('and its timer line is not the last one\'s "Paused"',
+    !/Paused/.test($(ctx.doc, 'timer-note').textContent) && !$(ctx.doc, 'timer').classList.contains('paused'),
+    $(ctx.doc, 'timer-note').textContent);
+}
+
+/**
+ * After Discard the old recorder can take ENCODER_DONE_MS to report that it has
+ * stopped. It used to tear down the microphone before checking whose it was,
+ * so a recording started in the meantime was silently killed.
+ */
+async function testOldRecorderCannotStopTheNextOne() {
+  section('A discarded recorder finishing late cannot stop the next recording');
+  let transcribes = 0;
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) {
+        transcribes++;
+        return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      }
+      if (e.url.includes('/api/extract')) {
+        return { ok: true, status: 200, json: async () => ({ note: { gaps: [], reasonForAttendance: 'x' } }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  // ENCODER_DONE_MS is 15 s. Shrink exactly that timer, and nothing else.
+  const realST = win.setTimeout.bind(win);
+  win.setTimeout = (fn, ms, ...a) => realST(fn, ms === 15000 ? 150 : ms, ...a);
+  const streams = trackStreams(win);
+
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(80);
+  // The old encoder's flush never answers, so its stop comes from the fallback.
+  const old = win.__encoder.instances[0];
+  const post = old.port.postMessage;
+  old.port.postMessage = (msg) => { if (msg.command !== 'done') post.call(old.port, msg); };
+  click($(doc, 'discard'));
+  await tick(30);
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  ok('the next recording is running', !$(doc, 'recording').classList.contains('hidden') && streams.length === 2);
+  await tick(300);                      // the old recorder's fallback lands now
+  ok('its microphone is still open after the old recorder stops', !streams[1].stopped);
+  click($(doc, 'stop'));
+  await tick(400);
+  ok('and Stop still sends it for transcription', transcribes === 1 &&
+    !$(doc, 'draft').classList.contains('hidden'), `transcribe calls: ${transcribes}`);
+}
+
+/**
+ * S.gen only moves for a new patient. A referral or post-op sheet requested
+ * before a length change came back after it and filled its panel from the
+ * note that had just been replaced.
+ */
+async function testDerivedFromTheReplacedNoteIsDropped() {
+  section('A referral or post-op sheet built from a replaced note is dropped');
+  const NOTE = { reasonForAttendance: 'Pain.', proposed: 'Removal.', decision: 'Proceed.', gaps: [] };
+  let release;
+  const stall = new Promise((r) => { release = r; });
+  let drafts = 0, referrals = 0;
+  const ctx = await boot({
+    onFetch: async (e, o) => {
+      if (e.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(o.body);
+        if (b.kind === 'referral') {
+          referrals++;
+          if (referrals === 1) await stall;
+          return { ok: true, status: 200, json: async () => ({ referral: { situation: 'BUILT FROM ' + b.note.proposed,
+            background: null, assessment: null, recommendation: null, redFlags: [] } }) };
+        }
+        if (b.kind === 'postop') {
+          await stall;
+          return { ok: true, status: 200, json: async () => ({ postop: { expect: 'POSTOP FROM ' + b.note.proposed } }) };
+        }
+        drafts++;
+        return { ok: true, status: 200, json: async () => ({ note: { ...NOTE, proposed: drafts === 1 ? 'OLD' : 'NEW' } }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+
+  click($(doc, 'make-referral'));
+  click($(doc, 'make-postop'));
+  await tick(20);
+  click(doc.querySelector('.length-picker:not(#template-picker) button[data-length="brief"]'));
+  await tick(150);
+  ok('the note was redrafted', drafts === 2 && /NEW/.test($(doc, 'fields').textContent));
+  release();
+  await tick(60);
+  ok('the referral from the old note does not appear',
+    $(doc, 'referral-box').classList.contains('hidden') && !/BUILT FROM OLD/.test($(doc, 'referral-text').textContent),
+    $(doc, 'referral-text').textContent.slice(0, 60));
+  ok('nor does the post-op sheet',
+    $(doc, 'postop-box').classList.contains('hidden') && !/POSTOP FROM OLD/.test($(doc, 'postop-text').textContent),
+    $(doc, 'postop-text').textContent.slice(0, 60));
+  click($(doc, 'make-referral'));
+  await tick(80);
+  ok('and asking again builds it from the note on screen', /BUILT FROM NEW/.test($(doc, 'referral-text').textContent),
+    $(doc, 'referral-text').textContent.slice(0, 60));
+}
+
+/**
+ * The Ask button put back whatever label it found, so a second Enter while the
+ * first question was out, or a Clear mid-question, left it on "Asking..." for
+ * the rest of the session.
+ */
+async function testAskButtonRecovers() {
+  section('The Ask button never stays on "Asking..."');
+  const NOTE = { reasonForAttendance: 'Pain.', proposed: 'Removal.', decision: 'Proceed.', gaps: [] };
+  let release, asks = 0;
+  let stall = new Promise((r) => { release = r; });
+  const ctx = await boot({
+    onFetch: async (e, o) => {
+      if (e.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(o.body);
+        if (b.kind === 'ask') {
+          asks++;
+          await stall;
+          return { ok: true, status: 200, json: async () => ({ answer: 'Yes.' }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ note: NOTE }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  const consult = async () => {
+    armStart(doc, win);
+    await tick();
+    click($(doc, 'start'));
+    await tick(60);
+    click($(doc, 'stop'));
+    await tick(300);
+  };
+  await consult();
+  const enter = () => $(doc, 'ask-input').dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  $(doc, 'ask-input').value = 'Did I mention nerve damage?';
+  enter();
+  await tick(5);
+  enter();
+  await tick(20);
+  ok('a second Enter while asking sends nothing more', asks === 1, `${asks} asks`);
+  release();
+  await tick(60);
+  ok('and the button reads "Ask" once the answer is in', $(doc, 'ask-go').textContent === 'Ask',
+    JSON.stringify($(doc, 'ask-go').textContent));
+
+  stall = new Promise((r) => { release = r; });
+  $(doc, 'ask-input').value = 'And the cost?';
+  click($(doc, 'ask-go'));
+  await tick(20);
+  click($(doc, 'clear'));
+  await tick(20);
+  release();
+  await tick(60);
+  await consult();
+  ok('after a Clear mid-question, the next patient\'s Ask button reads "Ask"',
+    $(doc, 'ask-go').textContent === 'Ask' && !$(doc, 'ask-go').disabled,
+    JSON.stringify($(doc, 'ask-go').textContent));
+}
+
+/**
+ * Every microphone failure was reported as a refused permission, so an
+ * unplugged headset or a microphone held by a video call sent the clinician
+ * to the padlock to fix a setting that was already right.
+ */
+async function testMicCheckSaysWhatActuallyWentWrong() {
+  section('The mic check says what actually went wrong');
+  const failWith = (win, name, onlyPinned) => {
+    const real = win.navigator.mediaDevices.getUserMedia;
+    win.navigator.mediaDevices.getUserMedia = async (c) => {
+      win.__mic.constraints.push(c);
+      if (!onlyPinned || (c && c.audio && c.audio.deviceId)) {
+        const e = new Error('nope');
+        e.name = name;
+        throw e;
+      }
+      return real(c);
+    };
+  };
+
+  // 1. The chosen microphone has been unplugged.
+  const ctx = await boot();
+  const { doc, win } = ctx;
+  win.__mic.devices = [
+    { kind: 'audioinput', deviceId: 'built-in', label: 'Mic' },
+    { kind: 'audioinput', deviceId: 'headset', label: 'Headset' }
+  ];
+  click($(doc, 'mic-test'));
+  await tick(60);
+  $(doc, 'mic-picker').value = 'headset';
+  $(doc, 'mic-picker').dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(60);
+  win.__mic.devices = [{ kind: 'audioinput', deviceId: 'built-in', label: 'Mic' }];
+  failWith(win, 'OverconstrainedError', true);
+  let made = 0;
+  const Real = win.AudioContext;
+  win.AudioContext = class extends Real { constructor() { super(); made++; } };
+  click($(doc, 'mic-test'));
+  await tick(80);
+  const note = $(doc, 'mic-note').textContent;
+  ok('an unplugged microphone is not blamed on the padlock', !/padlock/.test(note), note);
+  ok('the check falls back to the default input and says so',
+    /gone/.test(note) && /Say something/.test(note), note);
+  const last = win.__mic.constraints[win.__mic.constraints.length - 1];
+  ok('by asking again without the missing device', last && last.audio && !last.audio.deviceId, JSON.stringify(last));
+  ok('reusing the audio context made in the tap', made === 1, `contexts made: ${made}`);
+
+  // 2. Another app holds the microphone.
+  const c2 = await boot();
+  failWith(c2.win, 'NotReadableError');
+  click($(c2.doc, 'mic-test'));
+  await tick(60);
+  ok('a microphone in use says another app may have it',
+    /another app/i.test($(c2.doc, 'mic-note').textContent) && !/padlock/.test($(c2.doc, 'mic-note').textContent),
+    $(c2.doc, 'mic-note').textContent);
+
+  // 3. A real refusal still points at the padlock.
+  const c3 = await boot();
+  failWith(c3.win, 'NotAllowedError');
+  click($(c3.doc, 'mic-test'));
+  await tick(60);
+  ok('a refused permission still points at the padlock', /padlock/.test($(c3.doc, 'mic-note').textContent),
+    $(c3.doc, 'mic-note').textContent);
+
+  // 4. Start says the same.
+  const c4 = await boot();
+  failWith(c4.win, 'NotReadableError');
+  armStart(c4.doc, c4.win);
+  await tick();
+  click($(c4.doc, 'start'));
+  await tick(100);
+  ok('Start reports a busy microphone as busy, not blocked',
+    $(c4.doc, 'error-title').textContent === 'Microphone in use' && /another app/i.test($(c4.doc, 'error-body').textContent),
+    $(c4.doc, 'error-title').textContent);
+}
+
+/**
+ * Clear hid the site check and the referral's red flags but left their text in
+ * the page — the one thing wipe() promises not to do.
+ */
+async function testClearRemovesSiteAndFlags() {
+  section('Clear removes the site check and the referral flags from the page');
+  const NOTE = { reasonForAttendance: 'Pain.', proposed: 'Removal.', decision: 'Proceed.', gaps: [], teeth: ['LL8-UNIQUETOOTH'] };
+  const ctx = await boot({
+    onFetch: async (e, o) => {
+      if (e.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(o.body);
+        if (b.kind === 'referral') {
+          return { ok: true, status: 200, json: async () => ({ referral: { situation: 's', redFlags: ['numb lip UNIQUEFLAG'] } }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ note: NOTE }) };
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+  click($(doc, 'make-referral'));
+  await tick(60);
+  ok('the site and the flag are shown', doc.body.innerHTML.includes('UNIQUETOOTH') && doc.body.innerHTML.includes('UNIQUEFLAG'));
+  click($(doc, 'clear'));
+  await tick(30);
+  ok('after Clear the site is gone from the DOM', !doc.body.innerHTML.includes('UNIQUETOOTH'));
+  ok('and so is the red flag', !doc.body.innerHTML.includes('UNIQUEFLAG'));
+}
+
+/**
+ * The DELETE for an abandoned Speechmatics job was fire-and-forget: if it
+ * failed (an expired sign-in, a dropped connection) the job id was forgotten
+ * anyway and the audio stayed on the provider with nothing left to delete it.
+ */
+async function testFailedJobDeleteIsRetried() {
+  section('A job whose delete failed is deleted later, and never polled for the next patient');
+  let deletes = 0;
+  const polled = [];
+  let phase = 1;
+  const ctx = await boot({
+    onFetch: async (c) => {
+      if (c.url.includes('/api/transcribe') && c.method === 'POST') {
+        return phase === 1
+          ? { ok: false, status: 202, json: async () => ({ status: 'pending', jobId: 'keepme1', ticket: 'k'.repeat(64) }) }
+          : { ok: false, status: 202, json: async () => ({ status: 'pending', jobId: 'next2', ticket: 'n'.repeat(64) }) };
+      }
+      if (c.url.includes('/api/transcribe') && c.method === 'GET') {
+        polled.push(c.url);
+        return phase === 1
+          ? { ok: true, status: 200, json: async () => ({ status: 'running' }) }
+          : { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
+      }
+      if (c.url.includes('/api/transcribe') && c.method === 'DELETE') {
+        deletes++;
+        return deletes === 1
+          ? { ok: false, status: 401, json: async () => ({ error: 'unauthorised' }) }
+          : { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      if (c.url.includes('/api/extract')) {
+        return { ok: true, status: 200, json: async () => ({ note: { reasonForAttendance: 'x', gaps: [] } }) };
+      }
+    }
+  });
+  const { doc, win, calls } = ctx;
+  const delsFor = (id) => calls.filter((c) => c.method === 'DELETE' && c.url.includes(id)).length;
+
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(150);
+  click($(doc, 'clear'));
+  await tick(80);
+  ok('Clear tries to delete the job', delsFor('keepme1') === 1);
+
+  // The next patient. POLL_MS is 5 s; shrink exactly that timer.
+  phase = 2;
+  const realST = win.setTimeout.bind(win);
+  win.setTimeout = (fn, ms, ...a) => realST(fn, ms === 5000 ? 2 : ms, ...a);
+  const pollsBefore = polled.length;
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'stop'));
+  await tick(300);
+  ok('the refused delete is tried again rather than forgotten', delsFor('keepme1') === 2, String(delsFor('keepme1')));
+  ok('the next patient\'s transcription polls only its own job',
+    polled.slice(pollsBefore).length > 0 && polled.slice(pollsBefore).every((u) => u.includes('next2')),
+    JSON.stringify(polled.slice(pollsBefore)));
+  ok('and the draft arrives', !$(doc, 'draft').classList.contains('hidden'));
+
+  click($(doc, 'clear'));
+  await tick(80);
+  ok('once the delete succeeds it is forgotten', delsFor('keepme1') === 2 && delsFor('next2') === 0,
+    `keepme1 ${delsFor('keepme1')}, next2 ${delsFor('next2')}`);
+}
+
+/* ================================================================
+   Third-round review fixes
+   ================================================================ */
+
+// Declarations, not consts: the tests run from the list above, before this
+// part of the module has been evaluated.
+function json200(body) { return { ok: true, status: 200, json: async () => body }; }
+function longTurns() {
+  return Array.from({ length: 12 }, (_, i) => ({ speaker: i % 2 ? 'S2' : 'S1', start: i * 5,
+    text: 'We discussed the treatment and the risks at some length today.' }));
+}
+function fieldPre(doc, label) {
+  return [...doc.querySelectorAll('#fields pre')].find((p) => p.getAttribute('aria-label') === label);
+}
+
+async function toDraft(ctx) {
+  armStart(ctx.doc, ctx.win);
+  await tick();
+  click($(ctx.doc, 'start'));
+  await tick(60);
+  click($(ctx.doc, 'stop'));
+  await tick(300);
+}
+
+/**
+ * Enter in a contenteditable box inserts a <div> (Chrome) or a <br> (Safari,
+ * Firefox), not a line break, and every read of the box used textContent,
+ * which drops both. Two lines typed on screen reached the record as one.
+ */
+async function testLineBreaksSurviveEditing() {
+  section('Line breaks typed into an editable box survive into the copy');
+  const NOTE = { reasonForAttendance: 'Pain.', proposed: 'Removal.', risks: 'Numbness.', decision: 'Proceed.', gaps: [] };
+  const ctx = await boot({
+    onFetch: async (e, o) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(o.body);
+        if (b.kind === 'postop') return json200({ postop: { pain: 'Paracetamol.' } });
+        if (b.kind === 'summary') return json200({ summary: { whatWeDiscussed: 'Removal.' } });
+        if (b.kind === 'referral') return json200({ referral: { situation: 'Pain.' } });
+        return json200({ note: NOTE });
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  await toDraft(ctx);
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+
+  // Exactly what Chrome leaves in the box after typing with Enter.
+  const risks = fieldPre(doc, 'Material risks named, per option');
+  risks.innerHTML = 'Numbness.<div>Infection.</div><div><br></div><div>Dry socket.</div>';
+  risks.dispatchEvent(new win.Event('input', { bubbles: true }));
+  click(risks.closest('.field').querySelector('.copy'));
+  await tick(30);
+  ok('Enter in a note field is a line break in the field\'s copy',
+    copied === 'Material risks named, per option\nNumbness.\nInfection.\n\nDry socket.', JSON.stringify(copied));
+  click($(doc, 'copy-all'));
+  await tick(30);
+  ok('and in Copy whole note', /Numbness\.\nInfection\.\n\nDry socket\./.test(copied), JSON.stringify(copied.slice(0, 200)));
+
+  // Safari and Firefox insert <br>.
+  for (const [make, box, copy, name] of [
+    ['make-postop', 'postop-text', 'copy-postop', 'post-op instructions'],
+    ['make-summary', 'summary-text', 'copy-summary', 'patient summary'],
+    ['make-referral', 'referral-text', 'copy-referral', 'referral']
+  ]) {
+    click($(doc, make));
+    await tick(60);
+    $(doc, box).innerHTML = 'First line.<br>Second line.';
+    $(doc, box).dispatchEvent(new win.Event('input', { bubbles: true }));
+    copied = '';
+    click($(doc, copy));
+    await tick(30);
+    ok(`a line break in the ${name} is kept when it is copied`, copied === 'First line.\nSecond line.', JSON.stringify(copied));
+  }
+
+  // Where the browser has it, the boxes are plaintext-only, so a typed line
+  // break stays a line break in the first place.
+  const plain = await boot({
+    hook(w) {
+      Object.defineProperty(w.HTMLElement.prototype, 'contentEditable', {
+        configurable: true,
+        get() { return this.getAttribute('contenteditable') || 'inherit'; },
+        set(v) { this.setAttribute('contenteditable', String(v)); }
+      });
+    },
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) return json200({ note: NOTE });
+    }
+  });
+  await toDraft(plain);
+  ok('note fields are plaintext-only where the browser supports it',
+    fieldPre(plain.doc, 'Material risks named, per option')?.getAttribute('contenteditable') === 'plaintext-only');
+  ok('and so are the summary, post-op and referral boxes',
+    ['summary-text', 'postop-text', 'referral-text'].every((id) => $(plain.doc, id).getAttribute('contenteditable') === 'plaintext-only'));
+  ok('the focus ring covers plaintext-only fields too', /\.field pre\[contenteditable="plaintext-only"\]:focus/.test(html));
+}
+
+/**
+ * "Swap them and redraft" replaced an edited note without asking, and never
+ * reset the edit flag, so the next length change warned about edits that no
+ * longer existed. And a redraft by either route cleared an edited post-op sheet,
+ * summary or referral, and the typed referral context, without a word.
+ */
+async function testRedraftAsksBeforeLosingWork() {
+  section('A redraft asks before it throws away anything the clinician wrote');
+  const NOTE = { reasonForAttendance: 'Pain.', proposed: 'Removal.', risks: 'Numbness.', decision: 'Proceed.', gaps: [],
+    speakers: { S1: 'patient', S2: 'clinician' }, speakerConfidence: 'low' };
+  let drafts = 0, failNext = false;
+  const ctx = await boot({
+    onFetch: async (e, o) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(o.body);
+        if (b.kind === 'postop') return json200({ postop: { pain: 'Paracetamol.' } });
+        drafts++;
+        if (failNext) { failNext = false; return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed', detail: 'Bedrock busy' }) }; }
+        return json200({ note: { ...NOTE, speakers: b.speakerRoles || NOTE.speakers } });
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  const asked = [];
+  let answer = false;
+  win.confirm = (m) => { asked.push(m); return answer; };
+  await toDraft(ctx);
+  const length = (l) => doc.querySelector(`.length-picker:not(#template-picker) button[data-length="${l}"]`);
+
+  const edit = (text) => {
+    const pre = fieldPre(doc, 'Material risks named, per option');
+    pre.textContent = text;
+    pre.dispatchEvent(new win.Event('input', { bubbles: true }));
+  };
+  edit('MY CAREFUL CORRECTION');
+  click($(doc, 'swap-speakers'));
+  await tick(150);
+  ok('swapping the speakers on an edited note asks first', asked.length === 1, String(asked.length));
+  ok('and saying no leaves the note, edit and all', drafts === 1 && /MY CAREFUL CORRECTION/.test($(doc, 'fields').textContent));
+
+  answer = true;
+  click($(doc, 'swap-speakers'));
+  await tick(150);
+  ok('saying yes redrafts', drafts === 2, String(drafts));
+  asked.length = 0;
+  click(length('brief'));
+  await tick(150);
+  ok('and the new note is not treated as edited: no question on the next length change',
+    asked.length === 0 && drafts === 3, `${asked.length} asked, ${drafts} drafts`);
+
+  // Documents made from the note, and the referral context.
+  click($(doc, 'make-postop'));
+  await tick(60);
+  $(doc, 'postop-text').textContent += '\nNo smoking for 72 hours.';
+  $(doc, 'postop-text').dispatchEvent(new win.Event('input', { bubbles: true }));
+  $(doc, 'referral-context').value = 'Typed context';
+  answer = false;
+  asked.length = 0;
+  click(length('full'));
+  await tick(150);
+  ok('an edited post-op sheet and typed referral context are asked about, once',
+    asked.length === 1 && /post-op/.test(asked[0]) && /referral/.test(asked[0]), JSON.stringify(asked));
+  ok('and saying no keeps both, with no redraft',
+    drafts === 3 && /No smoking for 72 hours/.test($(doc, 'postop-text').textContent) &&
+    !$(doc, 'postop-box').classList.contains('hidden') && $(doc, 'referral-context').value === 'Typed context');
+  asked.length = 0;
+  click($(doc, 'swap-speakers'));
+  await tick(150);
+  ok('the swap asks about them too', asked.length === 1 && /post-op/.test(asked[0]) && drafts === 3, JSON.stringify(asked));
+
+  // A swap that fails leaves the edited note, and its edit flag, in place.
+  answer = true;
+  click(length('full'));
+  await tick(150);
+  edit('SECOND CORRECTION');
+  failNext = true;
+  click($(doc, 'swap-speakers'));
+  await tick(150);
+  ok('a failed swap keeps the edited note', /SECOND CORRECTION/.test($(doc, 'fields').textContent));
+  asked.length = 0;
+  click(length('brief'));
+  await tick(150);
+  ok('and still asks before a later redraft replaces it', asked.length === 1 && /edits to the note/.test(asked[0]), JSON.stringify(asked));
+}
+
+/**
+ * The note request sent the clinician's corrected speaker mapping; the summary,
+ * post-op sheet, referral and Ask did not, and guessed the speakers again.
+ */
+async function testDerivedRequestsCarryTheCorrectedSpeakers() {
+  section('Every request made from the transcript carries the corrected speakers');
+  const NOTE = { reasonForAttendance: 'Pain.', proposed: 'Removal.', decision: 'Proceed.', gaps: [],
+    speakers: { S1: 'patient', S2: 'clinician' }, speakerConfidence: 'low' };
+  const bodies = [];
+  const ctx = await boot({
+    onFetch: async (e, o) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(o.body);
+        bodies.push(b);
+        if (b.kind === 'summary') return json200({ summary: { whatWeDiscussed: 'x' } });
+        if (b.kind === 'ask') return json200({ answer: 'yes' });
+        if (b.kind === 'postop') return json200({ postop: { pain: 'x' } });
+        if (b.kind === 'referral') return json200({ referral: { situation: 'x' } });
+        return json200({ note: NOTE });
+      }
+    }
+  });
+  const { doc } = ctx;
+  await toDraft(ctx);
+  $(doc, 'ask-input').value = 'Did I mention cost?';
+  click($(doc, 'ask-go'));
+  await tick(60);
+  ok('before any correction, nothing is sent', bodies.find((b) => b.kind === 'ask')?.speakerRoles === undefined);
+  click($(doc, 'swap-speakers'));
+  await tick(150);
+  bodies.length = 0;
+  click($(doc, 'make-summary')); await tick(60);
+  $(doc, 'ask-input').value = 'Did I mention cost?';
+  click($(doc, 'ask-go')); await tick(60);
+  click($(doc, 'make-postop')); await tick(60);
+  click($(doc, 'make-referral')); await tick(60);
+  for (const kind of ['summary', 'ask', 'postop', 'referral']) {
+    const b = bodies.find((x) => x.kind === kind);
+    ok(`the ${kind} request sends the corrected mapping`,
+      b?.speakerRoles?.S1 === 'clinician' && b?.speakerRoles?.S2 === 'patient', JSON.stringify(b?.speakerRoles));
+  }
+}
+
+/**
+ * The header said "Reload the page to sign in again" with a draft or a paused
+ * recording on screen. Reloading destroys it.
+ */
+async function testExpiredSessionNeverSaysReloadOverADraft() {
+  section('An expired session never advises reloading over a held consultation');
+  const minutely = [];
+  const ctx = await boot({
+    session: { authenticated: true, expiresIn: 30 },
+    hook(w) {
+      const si = w.setInterval.bind(w);
+      w.setInterval = (fn, ms, ...a) => { if (ms === 60000) minutely.push(fn); return si(fn, ms, ...a); };
+    },
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) return json200({ note: { reasonForAttendance: 'x', gaps: [] } });
+    }
+  });
+  const { doc } = ctx;
+  await toDraft(ctx);
+  minutely.forEach((f) => f());
+  const note = $(doc, 'session-note').textContent;
+  ok('with a draft held, it says to sign in in a new tab', /new tab/.test(note) && !/Reload the page/.test(note), note);
+  click($(doc, 'clear'));
+  await tick(40);
+  minutely.forEach((f) => f());
+  ok('with nothing held, reloading is the advice again',
+    /Reload the page to sign in again/.test($(doc, 'session-note').textContent), $(doc, 'session-note').textContent);
+}
+
+/**
+ * iPad Safari shows no leave-page prompt, so a tap on another tool in the top
+ * bar mid-consultation went straight through and pagehide destroyed it all.
+ */
+async function testTopBarLinksAskWhileAnythingIsHeld() {
+  section('The top-bar links ask before leaving a held consultation');
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) return json200({ note: { reasonForAttendance: 'KEEP ME', gaps: [] } });
+    }
+  });
+  const { doc, win } = ctx;
+  const asked = [];
+  let answer = false;
+  win.confirm = (m) => { asked.push(m); return answer; };
+  const link = doc.querySelector('.ostb a[href="/sedation/"]');
+  // Follow the link; report whether the page stopped it. jsdom cannot navigate,
+  // so the window listener, which runs after the page's own, always stops it.
+  const follow = (init = {}) => {
+    let prevented = null;
+    const stop = (e) => { prevented = e.defaultPrevented; e.preventDefault(); };
+    win.addEventListener('click', stop);
+    link.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true, ...init }));
+    win.removeEventListener('click', stop);
+    return prevented;
+  };
+
+  ok('with nothing held, the link just goes', follow() === false && asked.length === 0);
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  click($(doc, 'pause'));
+  await tick(20);
+  ok('with a paused recording, it asks and staying stops the navigation', follow() === true && asked.length === 1);
+  ok('and the recording is still held', !$(doc, 'recording').classList.contains('hidden') && $(doc, 'pause').textContent === 'Resume');
+  asked.length = 0;
+  ok('a tap that opens a new tab is not asked about', follow({ ctrlKey: true }) === false && asked.length === 0);
+  click($(doc, 'pause'));
+  await tick(20);
+  click($(doc, 'stop'));
+  await tick(300);
+  answer = true;
+  ok('with a draft, agreeing lets the navigation through', follow() === false && asked.length === 1);
+  const unload = new win.Event('beforeunload', { cancelable: true });
+  win.dispatchEvent(unload);
+  ok('and it is destroyed at once, so the unload prompt does not ask a second time',
+    !unload.defaultPrevented && !/KEEP ME/.test($(doc, 'fields').textContent));
+}
+
+/**
+ * The post-op sheet is handed to the patient, and printing it printed the whole
+ * clinical record. Its own Print button prints it on its own.
+ */
+async function testPatientDocumentsPrintOnTheirOwn() {
+  section('The post-op sheet and summary print on their own');
+  let summaryFails = false;
+  const ctx = await boot({
+    onFetch: async (e, o) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(o.body);
+        if (b.kind === 'postop') return json200({ postop: { pain: 'Paracetamol.' } });
+        if (b.kind === 'summary') return summaryFails
+          ? { ok: false, status: 502, json: async () => ({ error: 'x', detail: 'Bedrock busy' }) }
+          : json200({ summary: { whatWeDiscussed: 'Removal.' } });
+        return json200({ note: { reasonForAttendance: 'x', gaps: [] } });
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  const printed = [];
+  // As a browser does: beforeprint as print starts. afterprint is fired below,
+  // separately, because on an iPad print() returns before the page is printed.
+  win.print = () => { printed.push(doc.body.className); win.dispatchEvent(new win.Event('beforeprint')); };
+
+  const printCss = [...doc.styleSheets].flatMap((s) => [...s.cssRules])
+    .filter((r) => r.media && /print/.test(r.media.mediaText)).map((r) => r.cssText).join('\n').replace(/\s+/g, ' ');
+  ok('in print, the post-op class hides everything outside the draft',
+    /body\.print-postop \.wrap > :not\(#draft\)/.test(printCss), printCss.slice(-600));
+  ok('everything in the draft but the documents card',
+    /body\.print-postop #draft > :not\(#derived\)/.test(printCss));
+  ok('and everything in that card but the post-op sheet',
+    /body\.print-postop #derived > :not\(#postop-box\)/.test(printCss));
+  ok('the summary has the same three rules',
+    /body\.print-summary \.wrap > :not\(#draft\)/.test(printCss) && /body\.print-summary #draft > :not\(#derived\)/.test(printCss) &&
+    /body\.print-summary #derived > :not\(#summary-box\)/.test(printCss));
+
+  await toDraft(ctx);
+  click($(doc, 'make-postop'));
+  await tick(60);
+  ok('the post-op sheet has a Print button', !!$(doc, 'print-postop'));
+  if (!$(doc, 'print-postop') || !$(doc, 'print-summary')) return;   // report, do not crash the run
+  click($(doc, 'print-postop'));
+  ok('which prints with only the post-op sheet showing', printed.length === 1 && /\bprint-postop\b/.test(printed[0]), JSON.stringify(printed));
+  ok('the class survives print() returning, which on an iPad is before the page prints',
+    doc.body.classList.contains('print-postop'));
+  win.dispatchEvent(new win.Event('afterprint'));
+  ok('and comes off after printing', !doc.body.classList.contains('print-postop'));
+
+  // A browser that never fires afterprint must not leave Ctrl+P printing one sheet.
+  click($(doc, 'print-postop'));
+  win.dispatchEvent(new win.Event('beforeprint'));   // an ordinary Ctrl+P, later
+  ok('a print the button did not start prints the whole record', !doc.body.classList.contains('print-postop'));
+
+  click($(doc, 'make-summary'));
+  await tick(60);
+  click($(doc, 'print-summary'));
+  ok('the patient summary prints on its own too', /\bprint-summary\b/.test(printed[printed.length - 1] || ''), JSON.stringify(printed));
+  win.dispatchEvent(new win.Event('afterprint'));
+
+  // A failed summary leaves its error text in the box; that is not printed.
+  click($(doc, 'clear'));
+  await tick(40);
+  summaryFails = true;
+  await toDraft(ctx);
+  click($(doc, 'make-summary'));
+  await tick(60);
+  const before = printed.length;
+  click($(doc, 'print-summary'));
+  ok('the error text of a failed summary is not printed for the patient', printed.length === before);
+}
+
+/**
+ * Copy consent text rebuilt the text at copy time, so after a field edit the
+ * box on screen and the clipboard disagreed.
+ */
+async function testConsentCopyIsWhatIsShown() {
+  section('The consent text copied is the consent text shown');
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) return json200({ note: { proposed: 'Removal.', risks: 'RISKS-ORIGINAL', decision: 'Proceed.', gaps: [] } });
+    }
+  });
+  const { doc, win } = ctx;
+  await toDraft(ctx);
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  click($(doc, 'make-consent'));
+  const pre = fieldPre(doc, 'Material risks named, per option');
+  pre.textContent = 'RISKS-EDITED';
+  pre.dispatchEvent(new win.Event('input', { bubbles: true }));
+  ok('editing a field updates the consent text on screen', /RISKS-EDITED/.test($(doc, 'consent-text').textContent));
+  click($(doc, 'copy-consent'));
+  await tick(30);
+  ok('and the copy is exactly what is shown', copied === $(doc, 'consent-text').textContent.trim() && /RISKS-EDITED/.test(copied));
+}
+
+/**
+ * Two 401s, or two 504s, were reported as "drafting is deterministic ... write
+ * the note by hand". Neither says anything about the transcript.
+ */
+async function testTransientFailuresAreNotCalledDeterministic() {
+  section('A sign-in or gateway failure is not called deterministic');
+  for (const [name, res] of [
+    ['401', () => ({ ok: false, status: 401, json: async () => ({ error: 'unauthenticated' }) })],
+    ['504', () => ({ ok: false, status: 504, json: async () => { throw new SyntaxError('Unexpected token <'); } })]
+  ]) {
+    const ctx = await boot({
+      onFetch: async (e) => {
+        if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: longTurns() });
+        if (e.url.includes('/api/extract')) return res();
+      }
+    });
+    const { doc } = ctx;
+    await toDraft(ctx);
+    click($(doc, 'retry'));
+    await tick(150);
+    const body = $(doc, 'error-body').textContent;
+    ok(`a second ${name} does not say retrying is pointless`, !/deterministic|by hand/.test(body), body.slice(0, 160));
+    ok('and still offers the retry', !$(doc, 'error-actions').classList.contains('hidden'));
+  }
+}
+
+/**
+ * A 401 during a length change or a swap said "press Try drafting again" in a
+ * panel that has no such button.
+ */
+async function testExpiredDuringRedraftSaysHowToRedraft() {
+  section('A sign-in lapse during a redraft says how to redraft');
+  let n = 0;
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) {
+        n++;
+        return n === 1 ? json200({ note: { reasonForAttendance: 'KEPT', gaps: [] } })
+                       : { ok: false, status: 401, json: async () => ({ error: 'unauthenticated' }) };
+      }
+    }
+  });
+  const { doc } = ctx;
+  await toDraft(ctx);
+  click(doc.querySelector('.length-picker:not(#template-picker) button[data-length="full"]'));
+  await tick(150);
+  const body = $(doc, 'error-body').textContent;
+  ok('it does not point at a button this panel does not show',
+    !/Try drafting again/.test(body) && $(doc, 'error-actions').classList.contains('hidden'), body);
+  ok('it says the note is unchanged and to sign in in a new tab', /unchanged/.test(body) && /new tab/.test(body) && /not reload/.test(body), body);
+  ok('and the note is still there', /KEPT/.test($(doc, 'fields').textContent));
+}
+
+/**
+ * The Dictate point and pause positions came from the wall clock. When the
+ * encoder stalls (an iPad backgrounded), the clock runs on while nothing is
+ * captured, so the point landed after the dictation had begun in the audio.
+ */
+async function testDictationPointFollowsTheAudio() {
+  section('The Dictate point and pauses are placed on the audio, not the clock');
+  let body = null;
+  const ctx = await boot({
+    onFetch: async (e, o) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) { body = JSON.parse(o.body); return json200({ note: { reasonForAttendance: 'x', gaps: [] } }); }
+    }
+  });
+  const { doc, win } = ctx;
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  const realNow = win.Date.now.bind(win.Date);
+  let offset = 0;
+  win.Date.now = () => realNow() + offset;
+  // 30 s of audio encoded, then the encoder stalls for two minutes.
+  const node = win.__encoder.instances[win.__encoder.instances.length - 1];
+  clearInterval(node._timer);
+  await tick(20);                      // let pages already on their way land first
+  node.port.onmessage({ data: { message: 'page', page: new Uint8Array(100), samplePosition: 30 * 48000 } });
+  offset += 120 * 1000;
+  click($(doc, 'pause'));
+  await tick(20);
+  offset += 5 * 1000;                  // long enough to be reported
+  click($(doc, 'dictate'));
+  await tick(20);
+  click($(doc, 'stop'));
+  await tick(300);
+  ok('the pause is placed where the audio was, not two minutes later',
+    body && body.pauses.length === 1 && body.pauses[0].atRecordedMs >= 30000 && body.pauses[0].atRecordedMs <= 30800,
+    JSON.stringify(body && body.pauses));
+  ok('the dictation point is where the audio was, not where the clock was',
+    body && body.dictationFromS >= 30 && body.dictationFromS <= 30.8, String(body && body.dictationFromS));
+  // Resume resets the encoder's page clock, so without this the dictation could
+  // start up to a second before the pause and pull the patient's last words in.
+  ok('and Dictate pressed from a pause starts exactly where the pause was recorded',
+    body && body.pauses.length === 1 && body.dictationFromS === body.pauses[0].atRecordedMs / 1000,
+    JSON.stringify(body && { d: body.dictationFromS, p: body.pauses }));
+}
+
+/**
+ * After a phone call or an app switch, an iPad leaves the audio context
+ * suspended and nothing resumed it; and a microphone that dropped out mid-
+ * recording just showed a flat bar.
+ */
+async function testAudioIsWokenAndAMicDropIsSaid() {
+  section('A suspended audio context is resumed, and a lost microphone is said');
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+    }
+  });
+  const { doc, win } = ctx;
+  const ctxs = [];
+  const Base = win.AudioContext;
+  win.AudioContext = class extends Base { constructor() { super(); ctxs.push(this); } };
+  const ended = [];
+  win.navigator.mediaDevices.getUserMedia = async () => {
+    const t = { stop() {}, getSettings: () => ({ deviceId: 'default' }),
+      addEventListener(type, fn) { if (type === 'ended') ended.push(fn); } };
+    return { getTracks: () => [t], getAudioTracks: () => [t] };
+  };
+  armStart(doc, win);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  const ac = ctxs[ctxs.length - 1];
+  ok('the recording is running', !!ac && !$(doc, 'recording').classList.contains('hidden'));
+
+  ac.state = 'interrupted';
+  doc.dispatchEvent(new win.Event('visibilitychange'));
+  ok('coming back to the tab resumes an interrupted context', ac.state === 'running', ac.state);
+  ac.state = 'suspended';
+  click($(doc, 'pause'));
+  ok('so does Pause', ac.state === 'running');
+  ac.state = 'suspended';
+  click($(doc, 'pause'));
+  ok('and Resume', ac.state === 'running');
+  ac.state = 'suspended';
+  click($(doc, 'dictate'));
+  ok('and Dictate', ac.state === 'running');
+
+  ok('the microphone track is watched', ended.length === 1);
+  ended.forEach((fn) => fn());
+  ok('a disconnected microphone is said plainly',
+    /microphone was disconnected/.test($(doc, 'level-note').textContent) && $(doc, 'level-note').classList.contains('alert'),
+    $(doc, 'level-note').textContent);
+  ok('and the recording is not stopped for it', !$(doc, 'recording').classList.contains('hidden') && !$(doc, 'recbar').classList.contains('hidden'));
+}
