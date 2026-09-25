@@ -83,7 +83,9 @@ var sandbox = {};
   var exported = new Function(appScript + "\nreturn {" +
     "AGENTS:AGENTS, CARTRIDGE_ML:CARTRIDGE_ML, floorTo:floorTo," +
     "weightProblem:weightProblem, anaestheticLimit:anaestheticLimit," +
-    "mixLoad:mixLoad, headroom:headroom };");
+    "mixLoad:mixLoad, headroom:headroom," +
+    "parseWeight:typeof parseWeight === 'function' ? parseWeight : null," +
+    "headroomParts:typeof headroomParts === 'function' ? headroomParts : null };");
   sandbox = exported();
 })();
 
@@ -141,6 +143,27 @@ ok("negative weight is rejected", weightProblem("-5") !== null);
 ok("non-numeric weight is rejected", weightProblem("abc") !== null);
 ok("implausible weight is rejected", weightProblem("300") !== null);
 ok("a normal adult weight passes", weightProblem("70") === null);
+
+/* The weight box is text, not type="number": a number field in some locales
+   dropped a decimal comma, so "7,5" was used as 75. A comma or a point is a
+   decimal separator; anything that is not one plain positive number is refused. */
+var parseWeight = sandbox.parseWeight;
+ok("the page reads the weight through parseWeight", typeof parseWeight === "function");
+ok("the weight field is not type=number",
+   !/id="weight"[^>]*type="number"|type="number"[^>]*id="weight"/.test(html));
+if (parseWeight) {
+  ok("a decimal comma is read as a decimal: 7,5 is 7.5", parseWeight("7,5") === 7.5, "got " + parseWeight("7,5"));
+  ok("a decimal point is read: 7.5 is 7.5", parseWeight("7.5") === 7.5);
+  ok("surrounding spaces are ignored", parseWeight(" 7.5 ") === 7.5);
+  ok("an empty box is not a weight", parseWeight("") === null && parseWeight("  ") === null);
+  ["7,5,1", "7.5.1", "7,5.1", "1e2", "70 kg", "7O", "-5", "+70", "abc", "0x20", "Infinity", "1,000", "1.000", "7,500"].forEach(function (t) {
+    ok('"' + t + '" is refused, not read as a number', weightProblem(t) !== null, "parsed as " + parseWeight(t));
+  });
+  ok("7,5 passes the weight check", weightProblem("7,5") === null);
+  ok("two decimal places are still read: 7.25 is 7.25", parseWeight("7,25") === 7.25);
+  near("7,5 kg gives the 7.5 kg lidocaine limit, not 75 kg",
+       anaestheticLimit(agent("lido2adr80"), parseWeight("7,5"), false).maxMg, 52.5, 0.001);
+}
 
 /* ---------- 6. solo limits, 70 kg adult ----------
    Lidocaine follows the BNF (500 mg) corroborated by NHS Highland (7 mg/kg). The
@@ -217,6 +240,28 @@ var cardiacRoom = headroom(agent("lido2adr80"), 70, false, true,
   mixLoad([{ agentId: "lido2adr80", cartridges: 1 }], 70, false, true));
 ok("headroom respects the adrenaline ceiling, not just the anaesthetic",
    cardiacRoom < 1, "got " + cardiacRoom);
+
+/* ---------- 10. what the page says about the figures it rests on ----------
+   These drive the page's rendering, so they are checked in the source: the
+   headroom card must mark rows resting on an unverified figure, the warning must
+   name the (uncited) adrenaline ceiling, children's age notes must reach the
+   headroom rows, and removing a row with cartridges given must ask first. */
+
+var headroomParts = sandbox.headroomParts;
+ok("headroom keeps its limits apart, so the page can say which one a row rests on", typeof headroomParts === "function");
+if (headroomParts) {
+  var fresh = mixLoad([{ agentId: "lido2adr80", cartridges: 0 }], 70, false, false);
+  var lp = headroomParts(agent("lido2adr80"), 70, false, false, fresh);
+  ok("healthy 70 kg adult, lidocaine: the adrenaline ceiling is what limits headroom",
+     lp.byUg !== null && lp.byUg < lp.byLa, JSON.stringify(lp));
+  ok("a plain agent has no adrenaline limit", headroomParts(agent("prilo4plain"), 70, false, false, fresh).byUg === null);
+  near("headroomParts agrees with headroom", lp.left, headroom(agent("lido2adr80"), 70, false, false, fresh), 1e-12);
+}
+ok("the headroom card marks rows resting on an unverified figure", /hr-mark/.test(appScript));
+ok("the unverified warning names the adrenaline ceiling", /"the adrenaline ceiling \("/.test(appScript));
+ok("children's age notes are shown against headroom rows", /isChild && a\.childNote/.test(appScript));
+ok("removing a row with cartridges given asks first",
+   /else if \(drop\)[\s\S]{0,600}window\.confirm\(/.test(appScript));
 
 /* ---------- report ---------- */
 
