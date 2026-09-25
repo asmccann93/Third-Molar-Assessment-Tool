@@ -142,8 +142,10 @@
   }
 
   /* printing: the result is the only thing worth putting on paper */
+  .printonly{display:none;}
   @media print{
     .noprint{display:none !important;}
+    .printonly{display:block !important;}
     body{font-size:11pt;}
     .shell{max-width:none;padding:0;}
     .card{break-inside:avoid;border:1px solid #999;background:#fff !important;}
@@ -293,8 +295,8 @@ var ASA_CLASSES = {
 
 /* ---------- Grade to sedation setting (IACSD 2020; SDCEP 3rd edition) ---------- */
 var SETTING = {
-  1: { tone: "ok", text: "Standard technique conscious sedation by an operator-sedationist in primary care is appropriate for adults over 16, provided the operator and the second appropriate person hold recognised training and adequate experience." },
-  2: { tone: "ok", text: "Standard technique conscious sedation by an operator-sedationist in primary care is appropriate for adults over 16, provided the operator and the second appropriate person hold recognised training and adequate experience." },
+  1: { tone: "ok", text: "Standard technique conscious sedation by an operator-sedationist in primary care is appropriate for adults aged 16 and over, provided the operator and the second appropriate person hold recognised training and adequate experience." },
+  2: { tone: "ok", text: "Standard technique conscious sedation by an operator-sedationist in primary care is appropriate for adults aged 16 and over, provided the operator and the second appropriate person hold recognised training and adequate experience." },
   3: { tone: "warn", text: "Outside the standard operator-sedationist model. A dedicated sedationist is required, and the patient should be assessed for treatment in a specialist or secondary care setting. Consider capnography." },
   4: { tone: "alert", text: "Not appropriate for conscious sedation in primary care. Requires a hospital setting with anaesthetic input." }
 };
@@ -460,7 +462,8 @@ function bmiValue(){
   var m = h > 3 ? h / 100 : h;           // accept cm or m
   var v = w / (m * m);
   if (!isFinite(v) || v < 8 || v > 100) return null;
-  return v;
+  // rounded here, so the band is decided on the same value that is displayed
+  return Math.round(v * 10) / 10;
 }
 
 /* ---------- suggestion ---------- */
@@ -508,7 +511,9 @@ function coverHTML(){
     '<div class="byline">Developed by Aiden McCann \u00b7 v' + VERSION + '</div>' +
     '</header>' +
     '<p class="lede">A guided assessment of <strong>ASA physical status</strong> for adult patients being ' +
-      'considered for dental conscious sedation. It works through nine domains, suggests a grade from what ' +
+      'considered for dental conscious sedation. It works through ' +
+      (['one','two','three','four','five','six','seven','eight','nine','ten'][SECTIONS.length - 1] || SECTIONS.length) +
+      ' domains, suggests a grade from what ' +
       'you record, and shows the findings behind the suggestion \u2014 which you then confirm or override.</p>' +
     '<p class="lede">The confirmed grade is mapped to the sedation setting the patient is suited to, and any ' +
       'factors that affect suitability without changing the grade are listed separately.</p>' +
@@ -537,7 +542,8 @@ function haltHTML(){
       'child would not be safe.</p>' +
       '<p class="setting" style="margin-top:12px;">Conscious sedation for patients under 16 follows separate ' +
       'pathways, and referral for specialist paediatric assessment should be considered.</p></div>' +
-    '<div class="nav"><button type="button" class="btn" data-act="restart">Start again</button></div>';
+    '<div class="nav"><button type="button" class="btn" data-act="unhalt">Back</button>' +
+      '<button type="button" class="btn" data-act="restart">Start again</button></div>';
 }
 
 function headerHTML(){
@@ -599,9 +605,14 @@ function sectionHTML(){
 
 function resultHTML(){
   var s = suggested;
-  var thin = s.grade === 1 && (TOTAL_QUESTIONS - answeredCount()) > 0;
-  // with too little recorded, no grade carries forward unless the clinician sets one
-  var g = confirmedGrade !== null ? confirmedGrade : (thin ? null : s.grade);
+  var incomplete = (TOTAL_QUESTIONS - answeredCount()) > 0;
+  var thin = s.grade === 1 && incomplete;
+  // An unanswered question is not a normal finding, so while any remain a low
+  // grade does not carry forward to a setting unless the clinician sets one.
+  // ASA III and IV do: the suggestion is the highest grade among the answers, so
+  // a blank can only raise it, and withholding the most restrictive advice for a
+  // patient already graded III or IV would be the wrong way round.
+  var g = confirmedGrade !== null ? confirmedGrade : (incomplete && s.grade < 3 ? null : s.grade);
   var overridden = confirmedGrade !== null && confirmedGrade !== s.grade && !thin;
   var set = g === null ? null : SETTING[g];
 
@@ -618,7 +629,7 @@ function resultHTML(){
   if (missingCount > 0) {
     out += '<div class="card warn">';
     out += '<p class="setting"><strong>' + missingCount + ' of ' + TOTAL_QUESTIONS +
-           ' question' + (missingCount === 1 ? ' was' : 's were') + ' not answered.</strong> ' +
+           ' questions ' + (missingCount === 1 ? 'was' : 'were') + ' not answered.</strong> ' +
            'The suggestion below reflects only what was recorded, and may rise once the gaps are filled.</p>';
     out += '<ul class="flaglist">';
     missing.forEach(function(m){
@@ -660,6 +671,10 @@ function resultHTML(){
            '<span class="dot"></span>' + esc(ASA_CLASSES[n].label) + ' — ' + esc(ASA_CLASSES[n].defn) + '</button>';
   });
   out += '</div>';
+  if (confirmedGrade !== null && !overridden) {
+    out += '<p class="defn printonly">Grade ' + (thin ? 'assigned' : 'confirmed') + ' by clinician: ' +
+           esc(ASA_CLASSES[confirmedGrade].label) + '</p>';
+  }
   if (overridden) {
     out += '<p class="warnrow">Recorded as ' + esc(ASA_CLASSES[g].label) +
            ', overriding the suggested ' + esc(ASA_CLASSES[s.grade].label) + '.</p>';
@@ -667,12 +682,27 @@ function resultHTML(){
 
   /* setting */
   out += '<h3 class="block">Sedation setting</h3>';
-  if (g === null) {
+  if (g === null && missingCount > 0) {
+    out += '<div class="card warn"><p class="setting">No sedation setting is given, because ' + missingCount + ' of ' + TOTAL_QUESTIONS +
+           ' questions ' + (missingCount === 1 ? 'was' : 'were') + ' not answered (listed above). Complete the outstanding questions, or confirm a grade above.</p></div>';
+  } else if (g === null) {
     out += '<div class="card warn"><p class="setting">No sedation setting is given, because no grade has been established. Complete the outstanding questions, or confirm a grade above.</p></div>';
+  } else if (answers.age16 !== "yes" && g < 3) {
+    // Only a setting that permits sedation needs the age confirmed first; the
+    // ASA III and IV advice restricts it and stands whatever the age.
+    out += '<div class="card warn"><p class="setting">No sedation setting is given, because the patient\u2019s age has not been recorded. This tool covers adults aged 16 and over.</p></div>';
   } else {
     out += '<div class="card' + (set.tone === "ok" ? "" : " alert") + '">';
     out += '<p class="setting"><strong>' + esc(ASA_CLASSES[g].label) + '</strong> — ' + esc(set.text) + '</p>';
     out += '</div>';
+  }
+
+  /* sedation-specific findings: reported beside the grade, never folded into it */
+  if (s.flags.length) {
+    out += '<h3 class="block">Also consider</h3>';
+    out += '<div class="card warn"><ul class="flaglist" style="margin-top:0;">';
+    s.flags.forEach(function(f){ out += '<li>' + esc(f) + '</li>'; });
+    out += '</ul></div>';
   }
 
   /* unknowns */
@@ -762,6 +792,9 @@ document.addEventListener("click", function(e){
     render();
   } else if (act === "begin") {
     started = true; render();
+  } else if (act === "unhalt") {
+    // a mis-tap on "under 16" shouldn't cost every other answer
+    delete answers.age16; halted = false; render();
   } else if (act === "restart") {
     answers = {}; bmi = { h: "", w: "" }; step = 0;
     started = false; halted = false;
