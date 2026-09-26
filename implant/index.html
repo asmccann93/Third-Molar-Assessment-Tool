@@ -617,10 +617,18 @@ function evaluate(a) {
       out.unknown.push("Not checked: " + c.name + " (needs " + why.join(" and ") + ")");
     });
   }
-  // At a nerve site, the apex-to-nerve check is the one that decides whether
-  // the implant is safe. While it is unmade, the case is not straightforward:
-  // it is incomplete.
-  out.nerveUnchecked = !!(s && s.limit.vital && proposed && !made("ht"));
+  // At a nerve site, the distance to the nerve decides whether an implant is
+  // safe there at all. Until the bone height to it is recorded, and, where an
+  // implant is proposed, its apex checked against that height, the case is not
+  // straightforward: it is incomplete. This used to apply only once an implant
+  // was entered, so skipping the optional implant step rated a lower molar site
+  // Straightforward with the nerve never measured.
+  out.proposed = proposed;
+  if (s && s.limit.vital && m.ht === null && !proposed) {
+    // With an implant proposed, the unmade check above already names the height.
+    out.unknown.push(measureName("ht", s) + (blank("ht") ? "" : " (the value entered is not valid)"));
+  }
+  out.nerveUnchecked = !!(s && s.limit.vital && (m.ht === null || (proposed && !made("ht"))));
 
   var band = DRAFT.bands.filter(function (b) { return out.score <= b.max; })[0];
   // A proposed implant that reaches into the nerve clearance is not a case to
@@ -806,9 +814,13 @@ function resultHTML() {
     r.hard.forEach(function (x) { out += '<li><strong>' + esc(x.t) + '.</strong> ' + esc(x.adv.action) + '</li>'; });
     out += '</ul></div>';
   } else if (r.rating === INCOMPLETE) {
-    out += '<div class="card warn"><p class="grade">' + esc(INCOMPLETE) + '</p><div class="gradesub">An implant was entered, but ' +
-      'its length has not been checked against the distance to ' + esc(r.site.limit.label) + ', so the case is not rated ' +
-      esc(DRAFT.bands[0].label.toLowerCase()) + '. Enter the available bone height and the implant length to make the check. ' +
+    out += '<div class="card warn"><p class="grade">' + esc(INCOMPLETE) + '</p><div class="gradesub">' +
+      (r.proposed
+        ? 'An implant was entered, but its length has not been checked against the distance to ' + esc(r.site.limit.label) +
+          ', so the case is not rated ' + esc(DRAFT.bands[0].label.toLowerCase()) +
+          '. Enter the available bone height and the implant length to make the check. '
+        : 'The available bone height to ' + esc(r.site.limit.label) + ' has not been recorded, so the case is not rated ' +
+          esc(DRAFT.bands[0].label.toLowerCase()) + '. Enter it under Bone and space. ') +
       'Complexity score so far ' + r.score + '.</div></div>';
   } else if (r.vitalBreach) {
     out += '<div class="card alert"><p class="grade">Revise the proposed implant</p><div class="gradesub">As entered, the implant ' +
