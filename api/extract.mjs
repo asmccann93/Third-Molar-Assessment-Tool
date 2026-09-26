@@ -31,6 +31,7 @@ import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS
          buildReferralSystemPrompt, buildReferralUserMessage, parseReferral,
          buildPostopSystemPrompt, parsePostop, asText, pauseMarker } from './_prompt.mjs';
 import { checklistGaps } from './_checklists.mjs';
+import { sessionStillGood } from './_store.mjs';
 
 // 300 s, raised from 120 on 21 September 2026: a long implant or treatment-plan
 // consultation on the Full length can take longer than two minutes to draft,
@@ -91,6 +92,13 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'method_not_allowed' });
+  }
+
+  // Same as transcribe.mjs: the gate may have let this in on an older copy of
+  // the staff list. A disabled colleague's session stops here. (No-op without
+  // an account store.)
+  if (!(await sessionStillGood(req))) {
+    return res.status(401).json({ error: 'unauthenticated' });
   }
 
   const creds = {
