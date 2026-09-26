@@ -165,7 +165,21 @@ jobs:
           # drafts (21 September 2026). The page and the CBCT bundle must both
           # answer 401 to anyone without a session; a 200 means the draft
           # figures are public.
-          for p in "/implant/" "/implant/viewer.js"; do
+          # Other spellings of the same paths must not open anything either:
+          # middleware.js normalises them, but only for requests the matcher
+          # sends it, and whether Vercel's matcher decodes %-escapes or folds
+          # case is not documented. Anything but 200 is fine here (404 is the
+          # likely answer); a 200 means the gate can be walked round.
+          for p in "/%69mplant/" "/IMPLANT/" "/Implant/viewer.js" "/ai-notes/%61dmin/" "/ai-notes//admin/" "/%61i-notes/"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE$p")
+            if [ "$code" = "200" ]; then
+              echo "FAIL  $p  200  - a gated page answers under another spelling. Treat as urgent."
+              fail=1
+            else
+              echo "ok    $p  $code"
+            fi
+          done
+          for p in "/implant/" "/implant/viewer.js" "/ai-notes/admin/" "/api/users"; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE$p")
             if [ "$code" = "401" ]; then
               echo "ok    $p  401"
