@@ -16,8 +16,11 @@ Developed by Aiden McCann.
 /local-anaesthetic/     Local Anaesthetic       index.html + sw.js
 /asa-assessment/        ASA Assessment          index.html + sw.js
 /implant/               Implant Case Assessment — PREVIEW, passcode-gated, author only
-/ai-notes/              AI Notes  — PRIVATE, passcode-gated
-/api/                   Serverless routes, AI Notes only
+/ai-notes/              AI Notes  — PRIVATE, sign-in gated
+/ai-notes/admin/        Staff accounts — admins only (add, new setup link, disable, delete)
+/ai-notes/setup/        One-time account setup from a setup link — open, no session
+/api/                   Serverless routes, AI Notes only (auth, account, users,
+                        transcribe, extract; _-prefixed files are helpers)
 /fonts/                 Self-hosted IBM Plex + Source Serif
 middleware.js           Edge gate for /ai-notes/, /implant/ and /api/
 vercel.json             Headers and function limits, path-scoped
@@ -94,15 +97,56 @@ Not linked from anywhere. Passcode-gated. Governed by `DPIA-AI-Notes.md`.
 
 | Route | Runtime | Purpose |
 |---|---|---|
-| `/api/auth` | Node | Passcode in, signed session cookie out. **Ungated** — otherwise there is no way to log in. |
+| `/api/auth` | Node | Email + password (or, while `APP_USERS` is set, a passcode) in, signed session cookie out. **Ungated** — otherwise there is no way to log in. Same-origin JSON only. |
+| `/api/account` | Node | Account setup from a one-time setup link. **Ungated**; the invite token is the key. |
+| `/api/users` | Node | The admin page's API: list, add, new setup link, disable, enable, role, delete. Admins only. |
 | `/api/transcribe` | Node | Speechmatics batch proxy, diarised. Submits, polls, returns turns, deletes the job. |
 | `/api/extract` | Node | AWS Bedrock invocation, SigV4 signed by hand. Transcript in, structured note out. |
 | `api/_session.mjs` | shared | HMAC session tokens. Underscore prefix keeps it off the route table. |
+| `api/_store.mjs` | shared | Staff accounts, read side (Edge-safe): the store, its cache, and `resolveSession`, the one "is this session still good?" check. |
+| `api/_accounts.mjs` | Node | Passwords (scrypt), epochs, invites, in-memory throttles, store writes. |
 | `api/_prompt.mjs` | shared | The extraction prompt. The file that gets iterated. |
 
 `middleware.js` gates `/ai-notes/` and `/api/` and nothing else. It returns 401
 with an inline passcode form for navigations and 401 JSON for API requests.
 `/api/auth` and `/ai-notes/sw.js` are explicitly open.
+
+### Staff accounts
+
+Sign-in is email + password. Accounts live in a Vercel Global Config store, one
+small item per person, managed at `/ai-notes/admin/`; a colleague sets their
+own password once, from a setup link the admin hands them (`/ai-notes/setup/`).
+The store holds sign-in details only, nothing about any patient. Setup steps
+and every variable are in `.env.example`.
+
+**There is no second factor**, by the owner's decision (26 September 2026). The
+password is the only thing between a guesser and a colleague's account, so each
+password should be long (12 characters minimum is enforced) and unique to this
+site, never one reused from elsewhere. To make up some of the difference, five
+failed sign-ins on one account lock it for fifteen minutes (in memory, per
+instance; nothing is written).
+
+**The Hobby allowances are small, and going over one blocks the store for 30
+days**, which would stop everyone signing in: 100 writes and 100,000 reads a
+month, store size 1 MB (8 KB on older Vercel pages). So sign-in never writes;
+the admin page allows 5 changes an hour and 10 a day per instance and refuses
+to add anyone past 7 KB (about twenty staff); and nothing an outsider sends
+forces a store read (junk setup links, unknown emails and wrong passwords are
+answered from a list cached for 30 s). Check Usage now and then.
+
+**Known races** (the store has no compare-and-swap and takes up to 10 s to show
+a write everywhere):
+
+- A disabled colleague stays signed in for up to about 40 s.
+- A setup link replaced by "New setup link" can still be completed on another
+  server for about 10 s afterwards; the admin page then shows that person
+  Active, not Invited. Issue another link.
+- One link completed twice at once: the last write wins, and only its session
+  survives (each completion moves the epoch by its own random amount).
+- Two admins disabling, deleting or demoting each other at the same moment: each
+  change re-checks after ~11 s and undoes itself if no active admin is left.
+- The throttles and the sign-in lock (sign-in, setup, admin writes) are per
+  warm instance.
 
 ### Environment variables
 
