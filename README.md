@@ -93,6 +93,67 @@ A private tool that records a consent conversation, transcribes it, and drafts a
 structured clinical note for the dentist to correct and paste into the record.
 Not linked from anywhere. Passcode-gated. Governed by `DPIA-AI-Notes.md`.
 
+### Drafting aids (built 27 September 2026)
+
+- **Sources.** Each sentence of a drafted field comes back with 1–3 word-for-word
+  quotes. The page (not the server) checks each quote against the transcript it
+  already holds: a quote counts only if it is at least three words, has no
+  ellipsis and sits inside one stretch of one speaker's turn (turns are cut at
+  pauses and at the Dictate press). Dictated words never count as evidence for a
+  conversation field. Unmatched sentences are listed as "Not found in the
+  recording". A fourth, separate list — it never merges with `gaps` or `notSaid`.
+- **Covered elsewhere.** A `notSaid` item can be marked as covered by a named
+  source (medical history form, sedation assessment, written information, an
+  earlier appointment). It leaves the `notSaid` list and appears in its own
+  "Covered elsewhere" block and section of the copied note; nothing is written
+  into the note fields. Undo is one click.
+- **Checklist while recording.** The recording screen lists the topics the
+  checklist will look for, from `/api/checklist`.
+- **Record more.** Up to three recordings per consultation (`CFG.MAX_PARTS`).
+  `/api/extract` accepts `{ parts: [...] }`; later recordings get speaker labels
+  `R2-S1`, `R3-S1`… and a `[SEPARATE RECORDING n of m]` line so dictation and
+  speaker identity never carry across. A failed extra recording can be retried
+  or dropped without losing the existing note.
+
+### Drafting aids, second batch (built 27 September 2026)
+
+- **Answer a gap.** The model returns one neutral question per fillable gap
+  (`questions: [{gap, field, ask}]`). The server keeps a question only if its gap
+  is exactly in the list, its field is one of the twelve conversation fields and
+  applies to the consult type, and it contains no figure. The page offers
+  Answer on those gaps only — never on "Not said" — and appends what the
+  clinician types to that field word for word. Undo takes out exactly that line.
+- **Checklists for every consult type.** Exam/recall and emergency get
+  record-keeping lists (CGDent headings; "Not recorded:" items, found in the
+  conversation or the dictation, shown under their own heading); perio,
+  restorative, endo and treatment-plan get consent lists. All six are
+  `reviewed: false` drafts and the page says so until the clinical lead has
+  reviewed them.
+- **BPE.** `bpe: {UR, UA, UL, LR, LA, LL, named, quotes}` only as stated;
+  invalid codes dropped; a BPE given in a shape that cannot be read becomes a
+  gap. Editable chart on the page, quote checked against the transcript, one
+  line in the copied note and in the referral (server accepts only the chart's
+  exact format). Scores said without sextants are flagged.
+- **To do.** `actions: [{text, quotes}]` — tasks said in the recording, in their
+  own panel with tick boxes and Copy list. Never part of the copied note.
+
+### Treatment carried out today, and the LA given (built 27 September 2026)
+
+- `treatmentToday` is a dictated field: taken from the dictation only, and only
+  treatment described as done. Enforced on the server (no dictation located →
+  cleared, with a gap if the model had filled it) and on the page. Its source
+  check accepts only dictated words not spoken by the patient. Own "Treatment"
+  section in the Clinical and Consent layouts; first under Plan in SOAP.
+  Offered empty on the eight treatment consult types when Dictate was pressed.
+- `laLog`: local anaesthetic only, one row per dictated statement (agent,
+  strength, amount, technique, site, batch, notes, quotes). Nothing converted
+  or calculated. Editable table; rows and batch numbers checked against the
+  dictation; rows can be added by hand.
+- Neither reaches the patient summary or the post-op sheet (the post-op
+  request now carries no dictated field at all); the referral gets the
+  treatment. A page that does not send `features: ['treatment']` (a tab open
+  over a deploy) receives both folded into `plan`, labelled.
+
 ### Routes
 
 | Route | Runtime | Purpose |
@@ -102,6 +163,7 @@ Not linked from anywhere. Passcode-gated. Governed by `DPIA-AI-Notes.md`.
 | `/api/users` | Node | The admin page's API: list, add, new setup link, disable, enable, role, delete. Admins only. |
 | `/api/transcribe` | Node | Speechmatics batch proxy, diarised. Submits, polls, returns turns, deletes the job. |
 | `/api/extract` | Node | AWS Bedrock invocation, SigV4 signed by hand. Transcript in, structured note out. |
+| `/api/checklist` | Node | GET only. The "not said" checklist topics for a consult type, shown on screen while recording. No patient data in or out. |
 | `api/_session.mjs` | shared | HMAC session tokens. Underscore prefix keeps it off the route table. |
 | `api/_store.mjs` | shared | Staff accounts, read side (Edge-safe): the store, its cache, and `resolveSession`, the one "is this session still good?" check. |
 | `api/_accounts.mjs` | Node | Passwords (scrypt), epochs, invites, in-memory throttles, store writes. |
