@@ -49,8 +49,15 @@ self.addEventListener("fetch", function (e) {
   if (req.mode === "navigate") {
     e.respondWith(
       fetch(req).then(function (res) {
-        var copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put("./index.html", copy); });
+        /* Every navigation in scope is stored as THE page, so only a good HTML
+           response may take that place. A mistyped link (the 404 page), a failed
+           deploy (a 500) or a file opened directly (README.md) used to replace
+           the offline copy, and the next visit without signal opened that. */
+        var type = (res && res.headers.get("content-type")) || "";
+        if (res && res.ok && type.indexOf("text/html") === 0) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put("./index.html", copy); });
+        }
         return res;
       }).catch(function () {
         return caches.match("./index.html").then(function (hit) {

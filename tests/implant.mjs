@@ -110,7 +110,8 @@ section('Clearance checks');
 section('Rating');
 {
   const { L } = boot();
-  ok('no findings is Straightforward', L.evaluate({ tooth: 36 }).rating === 'Straightforward');
+  // Away from a nerve: at 36 nothing recorded is Incomplete, since 26 September.
+  ok('no findings is Straightforward', L.evaluate({ tooth: 26 }).rating === 'Straightforward');
   ok('the aesthetic zone adds to the score', L.evaluate({ tooth: 11 }).score === 2);
   const adv = L.evaluate({ tooth: 11, timing: 'present', smoking: 'light' });   // 2 + 2 + 1
   ok('a score of 5 is Advanced', adv.score === 5 && adv.rating === 'Advanced', `${adv.score} ${adv.rating}`);
@@ -841,6 +842,43 @@ section('Review of 25 September: checks not made, stored bits, orientation, dama
   // A header claiming a volume too big to hold is refused with a reason.
   const huge = load([dicomMulti({ rows: 4, cols: 4, lossless: true, claim: { rows: 65535, cols: 65535 }, frames: three(new Uint16Array(16).fill(1000)), ps: [0.5, 0.5] })]);
   ok('a volume over the size limit is refused with a plain reason, not a crash', huge instanceof V.ScanError && /too large for the viewer/.test(huge.message), huge && (huge.message || 'loaded'));
+}
+
+/* ------------------------------------------------------------------ */
+section('Review of 26 September: a nerve site needs its bone height, implant or not');
+{
+  const { L } = boot();
+  const none = L.evaluate({ tooth: 36 });
+  ok('at 36 with nothing measured and no implant, the case is Incomplete, not Straightforward',
+    /^Incomplete/.test(none.rating), `${none.rating} (score ${none.score})`);
+  ok('and the missing height to the canal is listed as not recorded',
+    none.unknown.includes('Available bone height, crest to the inferior alveolar canal'), none.unknown.slice(-2).join(' | '));
+  ok('but not as a check against an implant, since none was proposed', !none.unknown.some((u) => /Not checked/.test(u)));
+  ok('at 45 the mental foramen counts the same way', /^Incomplete/.test(L.evaluate({ tooth: 45 }).rating));
+  ok('with the height recorded and no implant, 36 is rated normally',
+    L.evaluate({ tooth: 36, ht: '12' }).rating === 'Straightforward' &&
+    !L.evaluate({ tooth: 36, ht: '12' }).unknown.some((u) => /bone height/i.test(u)));
+  ok('an invalid height is not a recorded one', /^Incomplete/.test(L.evaluate({ tooth: 36, ht: '65' }).rating) &&
+    L.evaluate({ tooth: 36, ht: '65' }).unknown.some((u) => /canal \(the value entered is not valid\)$/.test(u)));
+  ok('with an implant proposed, the height is named once, in the check it blocks',
+    L.evaluate({ tooth: 36, dia: '4', len: '10' }).unknown.filter((u) => /bone height/i.test(u)).length === 1);
+  ok('sites with no nerve are unaffected: lower incisor, upper molar, upper incisor',
+    [41, 26, 16].every((t) => L.evaluate({ tooth: t }).rating === 'Straightforward') && L.evaluate({ tooth: 11 }).rating === 'Straightforward');
+  ok('a higher band is not lowered to Incomplete', L.evaluate({ tooth: 36, timing: 'present', smoking: 'heavy' }).rating === 'Advanced');
+  ok('and a hard stop still comes first', L.evaluate({ tooth: 36, rt: 'jaw' }).rating === 'Outside routine placement');
+  const t = L.planText(none);
+  ok('the copied plan carries the rating and the missing height',
+    /Complexity: Incomplete: nerve clearance not checked/.test(t) && /Not recorded: .*Available bone height, crest to the inferior alveolar canal/.test(t));
+}
+{
+  const { doc } = boot();
+  const root = () => doc.getElementById('root').textContent;
+  click($(doc, '[data-act="begin"]'));
+  const sel = $(doc, '#tooth'); sel.value = '36'; sel.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
+  for (let i = 0; i < 4; i++) click($(doc, '[data-act="next"]'));
+  ok('on the plan page, a skipped height at a nerve site says what to enter, not "an implant was entered"',
+    /Incomplete: nerve clearance not checked/.test(root()) && /bone height to the inferior alveolar canal has not been recorded/.test(root()) &&
+    !/An implant was entered/.test(root()) && !/Straightforward/.test(root().split('Complexity score so far')[0]), root().slice(0, 400));
 }
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);

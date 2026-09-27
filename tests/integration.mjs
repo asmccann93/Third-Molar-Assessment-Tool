@@ -1995,7 +1995,7 @@ const READ_TOKEN = 'read-token-xyz';
 const API_TOKEN = 'vercel-api-token-abc';
 
 function fakeStore() {
-  const S = { items: {}, reads: 0, writes: 0, rejected: 0, lastWritePath: null, failWrites: false, failReads: false };
+  const S = { items: {}, reads: 0, writes: 0, rejected: 0, lastWritePath: null, failWrites: false, refuseWrites: false, failReads: false };
   S.handle = async (entry, opts = {}) => {
     const u = new URL(entry.url);
     const auth = (opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || '';
@@ -2011,6 +2011,8 @@ function fakeStore() {
       if (auth !== `Bearer ${API_TOKEN}`) return { status: 403, body: { error: { message: 'forbidden' } } };
       S.lastWritePath = u.pathname + u.search;
       if (S.failWrites) { S.rejected++; return { status: 500, body: { error: { message: 'boom' } } }; }
+      // What the live store answered on 26 September 2026 to a token without access to it.
+      if (S.refuseWrites) { S.rejected++; return { status: 403, body: { error: { message: 'Not authorized' } } }; }
       let body;
       try { body = JSON.parse(opts.body); } catch { S.rejected++; return { status: 400, body: { error: { message: 'bad json' } } }; }
       const next = JSON.parse(JSON.stringify(S.items));
@@ -2570,7 +2572,7 @@ async function testAccountFlows() {
 
     // Write rate limit: twenty an hour, then refused before any write.
     resetAll();
-    for (let i = 0; i < 20; i++) _writeLimit.count('writes');
+    for (let i = 0; i < 20; i++) _writeLimit.count();
     const wRate = store.writes;
     r = await admin(amCookie, { action: 'add', email: 'rate@practice.example', initials: 'RL', role: 'clinician' });
     ok('the 21st write in an hour is refused', r.statusCode === 429 && r.body.error === 'write_limit' && store.writes === wRate);
@@ -2581,7 +2583,26 @@ async function testAccountFlows() {
     store.failWrites = true;
     r = await admin(amCookie, { action: 'disable', initials: 'MM' });
     ok('a failed store write is reported, not claimed as done', r.statusCode === 502 && store.items.user_MM.status === 'active');
+    ok('and a failure whose outcome is unknown (a 5xx) still counts against the allowance',
+      (_writeLimit.hourly.hits.get('writes') || []).length === 1 && (_writeLimit.daily.hits.get('writes') || []).length === 1);
     store.failWrites = false;
+
+    // A write the store refuses (a 4xx) wrote nothing, so it costs no allowance.
+    // It used to: five tries with a token that could not write (26 September
+    // 2026, live) locked the page with "too many changes" for an hour, fixed
+    // token or not.
+    resetAll();
+    store.refuseWrites = true;
+    const refused = [];
+    for (let i = 0; i < 7; i++) refused.push((await admin(amCookie, { action: 'add', email: 'nw@practice.example', initials: 'NW', role: 'clinician' })));
+    ok('seven refused writes in a row each say the save failed, and none says too many changes',
+      refused.every((x) => x.statusCode === 502 && x.body.error === 'save_failed'), refused.map((x) => x.statusCode + ' ' + x.body.error).join(', '));
+    ok('and they leave the hourly and daily allowances untouched',
+      !(_writeLimit.hourly.hits.get('writes') || []).length && !(_writeLimit.daily.hits.get('writes') || []).length);
+    store.refuseWrites = false;
+    r = await admin(amCookie, { action: 'add', email: 'nw@practice.example', initials: 'NW', role: 'clinician' });
+    ok('so once the token is fixed, the next try goes through', r.statusCode === 200 && 'user_NW' in store.items, `${r.statusCode} ${JSON.stringify(r.body)}`);
+    delete store.items.user_NW;
 
     // The fake store, and writeItems, hold to the real one's rules.
     resetAll();

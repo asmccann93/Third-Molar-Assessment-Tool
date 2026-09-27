@@ -277,14 +277,15 @@ async function testWipe() {
   ok('a full consultation reaches the draft view', !$(doc, 'draft').classList.contains('hidden'));
   ok('audio was sent for transcription', calls.some((c) => c.url.includes('/api/transcribe') && c.method === 'POST'));
   ok('transcript was sent for drafting', calls.some((c) => c.url.includes('/api/extract')));
-  // Twelve consent fields plus the section headings they sit under. Dictated
-  // fields are absent because this consultation had no dictation.
-  ok('all twelve consent fields render',
-    [...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length === 12,
+  // Twelve consent fields plus the section headings they sit under. The
+  // dictated findings are absent because this consultation had no dictation;
+  // treatment today and the LA block are always shown (27 September 2026).
+  ok('all twelve consent fields render, with the treatment and LA blocks',
+    [...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length === 14,
     String([...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length));
   ok('under chronological section headings, Findings omitted when nothing was dictated',
     [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent)
-      .join('|') === 'Presentation|Discussion|Outcome',
+      .join('|') === 'Presentation|Discussion|Treatment|Outcome|Local anaesthetic',
     [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent).join('|'));
   ok('gap list is populated', $(doc, 'gaps-list').children.length >= 1);
   ok('patient words survive verbatim', $(doc, 'fields').textContent.includes('Will I be numb forever?'));
@@ -459,8 +460,9 @@ async function testGaps() {
   ok('gaps render above the note',
     $(doc, 'gaps').compareDocumentPosition($(doc, 'fields')) & 4);
   ok('gap box is styled as needing action', !$(doc, 'gaps').classList.contains('clear'));
+  // The two gaps, and treatment today, which is always shown and was not dictated.
   ok('empty fields show as not captured',
-    [...$(doc, 'fields').children].filter((f) => f.classList.contains('is-gap')).length === 2);
+    [...$(doc, 'fields').children].filter((f) => f.classList.contains('is-gap')).length === 3);
   // The button is present on every field now that a gap can be filled by
   // editing, but copies nothing while the field is empty.
   ok('gap fields have a copy button that does nothing while empty',
@@ -609,7 +611,7 @@ async function testDraftRetry() {
     calls.filter((c) => c.url.includes('/api/transcribe') && c.method === 'POST').length === 1);
   ok('the draft now renders', !$(doc, 'draft').classList.contains('hidden'));
   ok('and the error is cleared', $(doc, 'error').classList.contains('hidden'));
-  ok('twelve fields present', [...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length === 12);
+  ok('twelve fields present, with the treatment and LA blocks', [...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length === 14);
 
   // The held transcript must still be destroyed by every normal route.
   const ctx2 = await boot({
@@ -856,12 +858,12 @@ async function testPolish() {
   // 5. templates are layout only
   const heads = () => [...$(doc, 'fields').children].filter((e) => e.classList.contains('section-heading')).map((e) => e.textContent);
   const fields = () => [...$(doc, 'fields').querySelectorAll('.field h3')].map((h) => h.textContent);
-  ok('the default layout is the clinical one', heads().join('|') === 'Presentation|Findings|Discussion|Outcome', heads().join('|'));
+  ok('the default layout is the clinical one', heads().join('|') === 'Presentation|Findings|Discussion|Treatment|Outcome|Local anaesthetic', heads().join('|'));
   const before = fields().slice().sort().join('|');
   const soap = [...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap');
   click(soap);
   await tick(40);
-  ok('switching to SOAP relayouts the note', heads().join('|') === 'Subjective|Objective|Assessment|Plan', heads().join('|'));
+  ok('switching to SOAP relayouts the note', heads().join('|') === 'Subjective|Objective|Assessment|Plan|Local anaesthetic', heads().join('|'));
   ok('with exactly the same fields, none lost or duplicated', fields().slice().sort().join('|') === before);
   ok('and without a model call', !win.__extraCall);
   const consentT = [...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'consent');
@@ -5472,7 +5474,8 @@ async function testTreatmentToday() {
   const po = bodies.find((b) => b.kind === 'postop');
   ok('the LA table is not sent for the post-op sheet', !!po && !('laLog' in (po.note || {})));
 
-  // Empty: offered for a treatment type when Dictate was pressed, not otherwise.
+  // Empty: always offered, to fill in by hand (27 September 2026: always
+  // visible, whatever the type and whether or not Dictate was pressed).
   note = note27({ examination: 'Partially erupted 38.' });
   ({ doc } = await run());
   ok('a treatment type with dictation offers an empty treatment section to fill in',
@@ -5492,7 +5495,10 @@ async function testTreatmentToday() {
   await tick(20);
   ok('a row added by hand is copied', /LA 1: Agent Lidocaine 2% with adrenaline/.test(copied2) && !/not found/.test($(doc, 'la-block').textContent), copied2.slice(-200));
   ({ doc } = await run({ dictate: false }));
-  ok('without dictation it does not appear', !fieldWrap(doc, 'treatmentToday'));
+  ok('without dictation both are still shown, empty, to fill in by hand',
+    !!fieldWrap(doc, 'treatmentToday') && fieldPre(doc, 'Treatment carried out today').textContent === '' && !!$(doc, 'la-block'));
+  ok('and the empty LA block says nothing was dictated, not that the dictation had none',
+    /Nothing was dictated/.test($(doc, 'la-block').textContent) && !/came back from your dictation/.test($(doc, 'la-block').textContent));
   // Without dictation the page drops them even if a draft carries them.
   note = note27({ treatmentToday: 'Removed 38.', laLog: [{ agent: 'Articaine', quotes: [] }] });
   let w3;
@@ -5501,13 +5507,14 @@ async function testTreatmentToday() {
   w3.navigator.clipboard.writeText = async (t) => { copied3 = t; };
   click($(doc, 'copy-all'));
   await tick(20);
-  ok('with no dictation, a treatment or LA that came back is neither shown nor copied',
-    !fieldWrap(doc, 'treatmentToday') && !$(doc, 'la-block') && !/Removed 38|Articaine/.test(copied3), copied3.slice(-200));
+  ok('with no dictation, a treatment or LA that came back is neither shown nor copied (the sections stay, empty)',
+    fieldPre(doc, 'Treatment carried out today').textContent === '' && !$(doc, 'la-block').querySelector('table') &&
+    !/Removed 38|Articaine/.test(doc.getElementById('fields').textContent + copied3), copied3.slice(-200));
   note = note27({ examination: 'Partially erupted 38.' });
   ({ doc } = await run({ type: /Exam/ }));
-  ok('nor on an exam, even with dictation', !fieldWrap(doc, 'treatmentToday'));
+  ok('on an exam too, both are shown', !!fieldWrap(doc, 'treatmentToday') && !!$(doc, 'la-block'));
   note = note27({ treatmentToday: 'Scale and polish.', sources: {} });
   ({ doc } = await run({ type: /Exam/ }));
   ok('unless something was dictated into it', !!fieldWrap(doc, 'treatmentToday'));
-  ok('and no LA table without an LA', !$(doc, 'la-block'));
+  ok('and the LA block is there with no rows', !!$(doc, 'la-block') && !$(doc, 'la-block').querySelector('table'));
 }
