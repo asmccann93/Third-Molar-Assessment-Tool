@@ -523,6 +523,16 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
 .bpe-note { font-size: .8125rem; color: var(--ink-muted); margin: 2px 0 0; }
 .bpe-note.warn { color: var(--warn-ink); }
 
+/* ---- radiograph report and PMPR (27 Sep 2026) ---- */
+.xray { display: grid; gap: 6px; margin: 0 0 8px; }
+.xray-row { display: grid; grid-template-columns: 11em 1fr; gap: 8px; align-items: center; font-size: .8125rem; color: var(--ink-muted); }
+.xray-row input, .xray-row select { min-height: 32px; font: inherit; font-size: .875rem; padding: 0 8px; color: var(--ink);
+  border: 1px solid var(--line-firm); border-radius: 6px; background: var(--paper); min-width: 0; }
+.xray-label { margin: 6px 0 2px; font-size: .75rem; font-weight: 600; color: var(--ink-muted); text-transform: uppercase; letter-spacing: .05em; }
+@media (max-width: 520px) { .xray-row { grid-template-columns: 1fr; gap: 2px; } }
+label.pmpr { display: flex; gap: 8px; align-items: flex-start; font-size: .9375rem; cursor: pointer; }
+label.pmpr input { margin-top: 4px; }
+
 /* ---- to do (27 Sep 2026) ---- */
 #todo h2 { margin: 0; font-size: 1.0625rem; }
 #todo-list { list-style: none; margin: 0; padding: 0; }
@@ -919,7 +929,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-27.4';
+  var BUILD = '2026-09-27.5';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1047,6 +1057,9 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
   // Where treatment is carried out on the day (27 Sep 2026): the treatment
   // section is offered, empty, whenever Dictate was pressed. Elsewhere it only
   // appears if something was dictated into it.
+  // Where the clinician can tick that a full mouth PMPR was carried out.
+  var PMPR_TYPES = ['exam-recall', 'perio'];
+  var PMPR_LINE = 'Full mouth professional mechanical plaque removal (PMPR) carried out.';
   var TREATMENT_TYPES = ['extraction-surgery', 'third-molar', 'implant-surgery', 'emergency',
                          'restorative', 'endo', 'perio', 'sedation'];
   // How the note READS, which is not the order the fields are extracted in.
@@ -1184,6 +1197,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
     moreRecording: false, // the recording running now is an extra one for this consultation
     covered: {},      // checklist items the clinician marked covered elsewhere: gap text -> where
     answered: {},     // gaps the clinician answered: gap text -> { field, text } added to that field
+    pmpr: false,      // the clinician ticked "full mouth PMPR carried out" (exam/recall, perio)
     todoDone: {},     // ticks on the to-do list, by position; UI only
     note: null,
     busy: false,
@@ -1207,6 +1221,11 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
   }
   function anyDictation() {
     return S.parts.some(function (p) { return p.dictationFromS !== null && p.dictationFromS !== undefined; });
+  }
+  // Only the recordings the note on screen was drafted from: an extra
+  // recording whose redraft failed is not in the note, nor is its dictation.
+  function noteDictation() {
+    return S.parts.slice(0, S.noteParts || S.parts.length).some(function (p) { return p.dictationFromS !== null && p.dictationFromS !== undefined; });
   }
   // What every request made from the transcript sends. One recording goes as it
   // always has (turns, pauses, dictationFromS); several go as `parts`, each on
@@ -2487,7 +2506,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment'],
+        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment', 'radiographs'],
                                               speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
@@ -2510,7 +2529,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
       }
       // Belt and braces for the server's own rule: no dictation, no treatment
       // record and no LA, whatever came back.
-      if (!anyDictation()) { data.note.treatmentToday = null; data.note.laLog = []; }
+      if (!anyDictation()) { data.note.treatmentToday = null; data.note.laLog = []; data.note.radiographs = null; }
       // A new note replaces the one every derived document was built from, and
       // the one whose teeth the clinician signed off. Both stop being true here.
       clearDerived();
@@ -2955,18 +2974,27 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
         // Dictated fields appear when there is something in them, and also
         // whenever Dictate was pressed — otherwise a field the model left
         // empty could not be filled in by hand, unlike every other field here.
-        if (k[0] === 'treatmentToday') return hasText(note[k[0]]) || (anyDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1);
-        if (k[1]) return hasText(note[k[0]]) || anyDictation();
+        if (k[0] === 'treatmentToday') return hasText(note[k[0]]) || (noteDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1);
+        // The radiograph report: offered empty on an exam, to fill in by hand.
+        if (k[0] === 'radiographicFindings') return hasText(note[k[0]]) || xrayAny(note.radiographs) || noteDictation() || S.consultType === 'exam-recall';
+        if (k[1]) return hasText(note[k[0]]) || noteDictation();
         return true;                            // consent fields always show, gap or not
       });
-      if (!visible.length) return;
+      var pmprHere = PMPR_TYPES.indexOf(S.consultType) !== -1 && keys.some(function (k) { return k[0] === 'treatmentToday'; });
+      if (!visible.length && !pmprHere) return;
 
       var hd = document.createElement('h3');
       hd.className = 'section-heading';
       hd.textContent = title;
       host.appendChild(hd);
 
-      visible.forEach(function (k) {
+      keys.forEach(function (k) {
+        // In the layout's order; the PMPR tick sits where the treatment does,
+        // whether or not the treatment field is shown.
+        if (visible.indexOf(k) === -1) {
+          if (pmprHere && k[0] === 'treatmentToday') host.appendChild(pmprBlock());
+          return;
+        }
         var key = k[0], isDictated = k[1], spec = fieldSpec(key);
         var heading = spec.label, isCore = spec.core;
         var value = note[key];
@@ -2995,7 +3023,10 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
         // The one thing that must survive the reordering: dictated content is
         // the clinician talking to the record, not to the patient, and must
         // never read as part of the consultation.
-        if (isDictated) {
+        // Only when the note was drafted from a dictation: without one, a
+        // dictated field holds what the clinician typed or, rarely, what the
+        // model put there from the conversation, and neither is dictation.
+        if (isDictated && noteDictation()) {
           var dtag = document.createElement('span');
           dtag.className = 'dictated-tag';
           dtag.textContent = 'Dictated';
@@ -3008,6 +3039,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
         // layout switched) used to drop the mark from fields edited before it.
         if (S.drafted && String(S.drafted[key] == null ? '' : S.drafted[key]).trim() !==
             String(note[key] == null ? '' : note[key]).trim()) wrap.classList.add('edited');
+        if (key === 'radiographicFindings' && xrayEdited()) wrap.classList.add('edited');
         if (answeredInto(key)) {
           wrap.classList.add('edited');
           var atag = document.createElement('span');
@@ -3026,8 +3058,11 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
         copy.className = 'copy';
         copy.textContent = 'Copy';
         copy.addEventListener('click', function () {
-          if (!hasText(S.note[key])) return;
-          writeClipboard(heading + (isDictated ? ' (dictated)' : '') + '\n' + String(S.note[key]).trim(), copy);
+          var body = key === 'radiographicFindings' ? xrayText(S.note) : (hasText(S.note[key]) ? String(S.note[key]).trim() : '');
+          // The PMPR tick goes with the treatment, as in the whole note.
+          if (key === 'treatmentToday' && pmprOn()) body = [body, PMPR_LINE].filter(Boolean).join('\n');
+          if (!body) return;
+          writeClipboard(heading + (isDictated && noteDictation() ? ' (dictated)' : '') + '\n' + body, copy);
         });
         head.appendChild(copy);
 
@@ -3066,8 +3101,16 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
         });
 
         wrap.appendChild(head);
+        if (key === 'radiographicFindings') {
+          wrap.appendChild(xrayForm(note, wrap));
+          var rl = document.createElement('p');
+          rl.className = 'xray-label';
+          rl.textContent = 'Report';
+          wrap.appendChild(rl);
+        }
         wrap.appendChild(pre);
         host.appendChild(wrap);
+        if (pmprHere && key === 'treatmentToday') host.appendChild(pmprBlock());
       });
     });
 
@@ -3610,6 +3653,212 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
     $('fields').appendChild(wrap);
   }
 
+  /* ---- PMPR (27 September 2026, second evening) ----
+     A tick, not a model finding: the clinician says it was done, and the line
+     goes into the note in fixed words. Kept through a redraft or a layout
+     change; gone with the consultation. */
+  function pmprOn() { return !!S.pmpr && PMPR_TYPES.indexOf(S.consultType) !== -1; }
+
+  function pmprBlock() {
+    var wrap = document.createElement('div');
+    wrap.className = 'field';
+    wrap.id = 'pmpr-block';
+    var head = document.createElement('div');
+    head.className = 'field-head';
+    var h3 = document.createElement('h3');
+    h3.textContent = 'Carried out today';
+    head.appendChild(h3);
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', function () { if (pmprOn()) writeClipboard(PMPR_LINE, copy); });
+    head.appendChild(copy);
+    wrap.appendChild(head);
+    var label = document.createElement('label');
+    label.className = 'pmpr';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.id = 'pmpr';
+    cb.checked = !!S.pmpr;
+    cb.addEventListener('change', function () { resetIdle(); S.pmpr = cb.checked; });
+    label.appendChild(cb);
+    var t = document.createElement('span');
+    t.textContent = 'Full mouth professional mechanical plaque removal (PMPR) carried out today';
+    label.appendChild(t);
+    wrap.appendChild(label);
+    var p = document.createElement('p');
+    p.className = 'bpe-note';
+    p.textContent = 'Ticked by you, not taken from the recording. Adds one line to the note.';
+    wrap.appendChild(p);
+    return wrap;
+  }
+
+  /* ---- radiograph report (27 September 2026, second evening) ----
+     Views, justification, image quality on the A/N scale and, for N, the fault:
+     from the dictation only, each editable. The report itself is the
+     radiographic findings field, as before. */
+  var XRAY_FIELDS = [['views', 'Views'], ['justification', 'Justification'], ['fault', 'Fault, cause and repeat']];
+
+  function xrayValues(r) {
+    var o = {};
+    XRAY_FIELDS.forEach(function (f) { o[f[0]] = r && hasText(r[f[0]]) ? String(r[f[0]]).replace(/\s+/g, ' ').trim() : ''; });
+    o.quality = r && (r.quality === 'A' || r.quality === 'N') ? r.quality : '';
+    return o;
+  }
+
+  function xrayAny(r) {
+    var v = xrayValues(r);
+    return !!(v.views || v.justification || v.fault || v.quality);
+  }
+
+  function xrayEdited() {
+    var a = xrayValues(S.drafted && S.drafted.radiographs), b = xrayValues(S.note && S.note.radiographs);
+    return ['views', 'justification', 'fault', 'quality'].some(function (k) { return a[k] !== b[k]; });
+  }
+
+  // The report as it is pasted. With no structured part it is exactly the
+  // findings, as it always was.
+  function xrayText(note) {
+    var v = xrayValues(note && note.radiographs);
+    var findings = note && hasText(note.radiographicFindings) ? String(note.radiographicFindings).trim() : '';
+    var lines = [];
+    if (v.views) lines.push('Views: ' + v.views);
+    if (v.justification) lines.push('Justification: ' + v.justification);
+    if (v.quality) lines.push('Image quality: ' + (v.quality === 'A' ? 'A (diagnostically acceptable)' : 'N (not acceptable)'));
+    if (v.fault) lines.push('Fault, cause and repeat: ' + v.fault);
+    if (!lines.length) return findings;
+    if (findings) lines.push('Report: ' + findings);
+    return lines.join('\n');
+  }
+
+  // Each part of the drafted report is checked on its own against the words
+  // dictated (not the patient's): one matching quote used to clear a
+  // justification and a grade that were never said. Returns the labels of the
+  // parts not found; [] when every part checks out; null with nothing to check.
+  var XRAY_STOP = ['the', 'and', 'for', 'was', 'are', 'not', 'but', 'his', 'her', 'its', 'with', 'from', 'that', 'this', 'were', 'have',
+                   'been', 'they', 'their', 'there', 'which', 'also', 'into', 'then', 'than', 'some', 'very', 'will', 'your'];
+  function xrayDictated() {
+    return transcriptIndex().filter(function (pc) { return pc.dictated && roleOfPiece(pc) !== 'patient'; })
+      .map(function (pc) { return pc.norm; }).join(' ');
+  }
+  function xrayWordsIn(text, hay) {
+    var words = normText(text).split(' ').filter(function (w) { return w && (/\d/.test(w) || (w.length >= 3 && XRAY_STOP.indexOf(w) === -1)); });
+    if (!words.length) return true;
+    return words.every(function (w) { return hay.indexOf(' ' + w + ' ') !== -1; });
+  }
+  function xrayQualityIn(q, hay) {
+    if (q === 'N') return /( not (diagnostically )?acceptable | unacceptable | (grade|graded|rated|quality|rating) n | quality (is|was) n )/.test(hay);
+    // "acceptable" not preceded by "not", or an A grade said as such.
+    return /( (grade|graded|rated|quality|rating) a | quality (is|was) a )/.test(hay) ||
+      / acceptable /.test(hay.replace(/ not (diagnostically )?acceptable /g, ' ').replace(/ unacceptable /g, ' '));
+  }
+  function xrayMissing() {
+    var base = S.drafted && S.drafted.radiographs;
+    if (!xrayAny(base)) return null;
+    var v = xrayValues(base), hay = ' ' + xrayDictated() + ' ', miss = [];
+    if (v.views && !xrayWordsIn(v.views, hay)) miss.push('views');
+    if (v.justification && !xrayWordsIn(v.justification, hay)) miss.push('justification');
+    if (v.quality && !xrayQualityIn(v.quality, hay)) miss.push('image quality');
+    if (v.fault && !xrayWordsIn(v.fault, hay)) miss.push('fault');
+    return miss;
+  }
+
+  // Whether the drafted report's words are in the dictation (null: nothing to check).
+  function xrayHeard() {
+    var base = S.drafted && S.drafted.radiographs;
+    if (!xrayAny(base)) return null;
+    var idx = transcriptIndex();
+    var qs = Array.isArray(base.quotes) ? base.quotes : [];
+    var spoken = false;
+    for (var i = 0; i < qs.length; i++) {
+      var hit = findQuote(idx, qs[i], 'only');
+      if (hit && hit.spokenOnly) { spoken = true; continue; }
+      if (hit && !hit.dictatedOnly) return { quote: String(qs[i]), hit: hit };
+    }
+    return spoken ? { spokenOnly: true } : false;
+  }
+
+  function xrayForm(note, wrap) {
+    var box = document.createElement('div');
+    box.className = 'xray';
+    var status = document.createElement('p');
+    var faultRow;
+    var refresh = function () {
+      var v = xrayValues(S.note && S.note.radiographs);
+      if (faultRow) faultRow.classList.toggle('hidden', v.quality !== 'N' && !v.fault);
+      var msgs = [], warn = false;
+      if (v.quality === 'N' && !v.fault) { msgs.push('Rated N: record the fault, its likely cause and whether it was repeated.'); warn = true; }
+      // IR(ME)R: every exposure justified, every image graded. Said, not enforced.
+      if (v.views && !v.justification) { msgs.push('No justification recorded.'); warn = true; }
+      if (v.views && !v.quality && !v.fault) { msgs.push('No image quality grade recorded.'); warn = true; }
+      if (xrayEdited()) msgs.push('Edited by you.');
+      else {
+        var miss = xrayMissing(), h = xrayHeard();
+        if (miss && miss.length) { msgs.push('Not found in your dictation: ' + miss.join(', ') + '. Check before you paste.'); warn = true; }
+        else if (h && h.spokenOnly && !(h.hit)) { msgs.push('Found only in the conversation, not in your dictation. Check it.'); warn = true; }
+        else if (miss && h && h.hit) msgs.push('Heard in your dictation: \u201c' + h.quote + '\u201d' + (Number.isFinite(h.hit.at) ? ', ' + fmtTime(h.hit.at) : '') + '.');
+        else if (miss) msgs.push('Every part found in your dictation.');
+        else if (!xrayAny(S.note && S.note.radiographs)) msgs.push('A = diagnostically acceptable, N = not acceptable. Leave blank what does not apply.');
+      }
+      status.className = 'bpe-note' + (warn ? ' warn' : '');
+      status.textContent = msgs.join(' ');
+    };
+    var set = function (k, val) {
+      if (!S.note) return;
+      var r = S.note.radiographs && typeof S.note.radiographs === 'object' ? S.note.radiographs : { quotes: [] };
+      r[k] = val ? val : null;
+      S.note.radiographs = r;
+      S.edited = true;
+      wrap.classList.add('edited');
+      refresh();
+      scheduleSources();
+      resetIdle();
+    };
+    var v = xrayValues(note.radiographs);
+    XRAY_FIELDS.forEach(function (f) {
+      var row = document.createElement('label');
+      row.className = 'xray-row';
+      var span = document.createElement('span');
+      span.textContent = f[1];
+      row.appendChild(span);
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.maxLength = 300;
+      inp.value = v[f[0]];
+      inp.dataset.xray = f[0];
+      inp.setAttribute('aria-label', 'Radiograph ' + f[1].toLowerCase());
+      inp.addEventListener('input', function () { set(f[0], inp.value.replace(/\s+/g, ' ').trim()); });
+      row.appendChild(inp);
+      if (f[0] === 'fault') {
+        faultRow = row;
+        // Quality comes before the fault it explains.
+        var qrow = document.createElement('label');
+        qrow.className = 'xray-row';
+        var qs = document.createElement('span');
+        qs.textContent = 'Image quality';
+        qrow.appendChild(qs);
+        var sel = document.createElement('select');
+        sel.dataset.xray = 'quality';
+        sel.setAttribute('aria-label', 'Radiograph image quality');
+        [['', '\u2014'], ['A', 'A \u2014 diagnostically acceptable'], ['N', 'N \u2014 not acceptable']].forEach(function (o) {
+          var op = document.createElement('option');
+          op.value = o[0];
+          op.textContent = o[1];
+          sel.appendChild(op);
+        });
+        sel.value = v.quality;
+        sel.addEventListener('change', function () { set('quality', sel.value); });
+        qrow.appendChild(sel);
+        box.appendChild(qrow);
+      }
+      box.appendChild(row);
+    });
+    box.appendChild(status);
+    refresh();
+    return box;
+  }
+
   /* ---- local anaesthetic given today (27 September 2026) ----
      A table like the implant log, from the dictation only, each cell editable:
      a batch number is exactly the kind of thing a transcript gets wrong. Each
@@ -3663,7 +3912,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
     var rows = laRows(note);
     // Offered empty, to fill in by hand, where treatment is done on the day
     // and something was dictated; otherwise only when there is a row.
-    var offer = anyDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1;
+    var offer = noteDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1;
     if (!rows.length && !offer) return;
     var hd = document.createElement('h3');
     hd.className = 'section-heading';
@@ -3826,10 +4075,18 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
       var lines = [];
       keys.forEach(function (k) {
         var key = k[0], isDictated = k[1], spec = fieldSpec(key);
-        if (!spec || !hasText(note[key])) return;
-        lines.push(spec.label + (isDictated ? ' (dictated)' : ''));
-        lines.push(String(note[key]).trim());
-        lines.push('');
+        if (!spec) return;
+        var body = key === 'radiographicFindings' ? xrayText(note) : (hasText(note[key]) ? String(note[key]).trim() : '');
+        if (body) {
+          lines.push(spec.label + (isDictated && noteDictation() ? ' (dictated)' : ''));
+          lines.push(body);
+          lines.push('');
+        }
+        // The PMPR tick sits with the treatment, in the clinician's words.
+        if (key === 'treatmentToday' && pmprOn()) {
+          lines.push(PMPR_LINE);
+          lines.push('');
+        }
       });
       if (!lines.length) return;
       out.push(title.toUpperCase());
@@ -3893,6 +4150,10 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
     var out = noteFields();
     var b = S.note && bpeAsText(S.note.bpe);
     if (b) out.bpe = b;
+    // The radiograph report as one text, and the PMPR with the treatment.
+    var x = S.note && xrayText(S.note);
+    if (x) out.radiographicFindings = x;
+    if (pmprOn()) out.pmpr = PMPR_LINE;
     return out;
   }
 
@@ -4161,6 +4422,11 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
         var pr = laRowProblem(r, i, laIdx);
         if (pr) { unmatched.push('Local anaesthetic, row ' + (i + 1) + ': ' + pr); total++; }
       });
+    }
+    // The radiograph report, as drafted and unchanged, not found in the dictation.
+    if (!xrayEdited()) {
+      var xm = xrayMissing();
+      if (xm && xm.length) { unmatched.push('Radiograph report: ' + xm.join(', ') + ' not found in your dictation'); total++; }
     }
     // The BPE, as drafted and unchanged, whose words could not be found.
     if (!bpeEdited() && bpeHeard() === false) { unmatched.push('BPE: the scores could not be matched to the recording'); total++; }
@@ -4542,7 +4808,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
         headers: { 'Content-Type': 'application/json' },
         signal: ctrl ? ctrl.signal : undefined,
         body: JSON.stringify(withTranscript({ kind: 'referral', consultType: S.consultType,
-                                              note: referralNote(), context: $('referral-context').value || '',
+                                              note: referralNote(), context: $('referral-context').value || '', dictated: noteDictation(),
                                               speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
@@ -4898,6 +5164,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
     S.noteParts = 0;
     S.moreRecording = false;
     S.covered = {};
+    S.pmpr = false;
     S.note = null;
     S.sizeNote = '';
     S.captureNote = null;
