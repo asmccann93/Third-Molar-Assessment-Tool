@@ -154,6 +154,25 @@ Not linked from anywhere. Passcode-gated. Governed by `DPIA-AI-Notes.md`.
   treatment. A page that does not send `features: ['treatment']` (a tab open
   over a deploy) receives both folded into `plan`, labelled.
 
+### PMPR and the radiograph report (built 27 September 2026, evening)
+
+- **PMPR tick** on exam/recall and perio: "Full mouth professional mechanical
+  plaque removal (PMPR) carried out today". The clinician's own record, not
+  model output: when ticked, that fixed line goes into the note where the
+  treatment sits (and its Copy), and to a referral as "Recorded by the
+  clinician" (the server accepts that exact line and nothing else). Kept
+  through a redraft; cleared with the consultation.
+- **Radiograph report** on every consult type: `radiographs: {views,
+  justification, quality: 'A'|'N'|null, fault, quotes}`, dictation only
+  (cleared on the server and the page when nothing was dictated). A/N is the
+  UK image quality scale; any other grade is left blank with a gap. The
+  findings stay in `radiographicFindings`, shown as "Report". Each part is
+  checked against the dictation on its own; missing justification or grade is
+  pointed out. Offered empty on exam/recall for hand entry. Older pages get it
+  folded into `radiographicFindings`.
+- "(dictated)" and the Dictated tag now appear only when the recordings the
+  note was drafted from include a dictation.
+
 ### Routes
 
 | Route | Runtime | Purpose |
