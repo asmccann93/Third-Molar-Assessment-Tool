@@ -139,11 +139,17 @@ export const FIELDS = [
 export const DICTATED_FIELDS = [
   ['examination', 'Examination findings (dictated)'],
   ['radiographicFindings', 'Radiographic findings (dictated)'],
+  ['treatmentToday', 'Treatment carried out today (dictated)'],
   ['plan', 'Treatment plan (dictated)'],
 ];
 
 /* Structured, for implant surgery only. Traceability: system, size, lot. */
 export const IMPLANT_LOG_FIELDS = ['site', 'system', 'diameter', 'length', 'lot', 'torque', 'isq', 'graft', 'notes'];
+
+/* Local anaesthetic given today (27 September 2026), one row per injection or
+   per agent as dictated. Taken as dictated and never computed: no cartridges
+   turned into millilitres or milligrams, no dose worked out or checked. */
+export const LA_LOG_FIELDS = ['agent', 'strength', 'amount', 'technique', 'site', 'batch', 'notes'];
 
 /* ------------------------------------------------------------------ *
  * System prompt
@@ -229,8 +235,11 @@ the patient's words in the clinician's mouth.
 
 If a CONFIRMED MAPPING appears in the message below, the clinician has read your
 previous attempt and corrected it. It is not a hint and it is not up for
-reconsideration: use it exactly, report it back unchanged in "speakers", and set
-"speakerConfidence" to "high". They were in the room and you were not.
+reconsideration: use it exactly for every label it names, report those labels
+back unchanged in "speakers", and set "speakerConfidence" to "high" if it names
+every label in the transcript. They were in the room and you were not. A label it
+does not name (a later recording's, for example) is still yours to work out, and
+"speakerConfidence" is then your confidence in those.
 
 ## LENGTH
 
@@ -246,18 +255,40 @@ ${checklist}
 ## DICTATION
 
 The clinician may DICTATE after the patient has left. If so, a line reading
-[DICTATION ...] appears in the transcript and everything after it is the clinician
-speaking alone: examination findings, radiographic findings, the plan, and — for
-implant surgery — the implant log.
+[DICTATION ...] appears in the transcript and everything after it — up to the next
+[SEPARATE RECORDING ...] line, if there is one — is the clinician speaking alone:
+examination findings, radiographic findings, the treatment carried out, the local
+anaesthetic given, the plan, and — for implant surgery — the implant log.
 
-- Dictated content fills ONLY examination, radiographicFindings, plan, and
-  implantLog. Record it as dictated; do not rewrite it into a consent discussion.
+- Dictated content fills ONLY examination, radiographicFindings, treatmentToday,
+  plan, implantLog and laLog. Record it as dictated; do not rewrite it into a
+  consent discussion.
 - The consent fields (proposed, alternatives, risks, benefits, costs,
   patientQuestions, patientFactors, informationGiven, decision) come ONLY from the
   conversation with the patient. Something the clinician dictated to the record
   was not said to the patient and must not appear as if it was.
-- If there is no dictation, set examination, radiographicFindings and plan to
-  null and do NOT add gaps for them — they are optional.
+- If there is no dictation, set examination, radiographicFindings,
+  treatmentToday and plan to null, and implantLog and laLog to [], and do NOT
+  add gaps for them — they are optional.
+- treatmentToday: the treatment CARRIED OUT at this appointment, taken ONLY from
+  the dictation, and only where it is described as done — the procedure, the
+  tooth, what was found and used, sutures, haemostasis, any complication, as
+  dictated. NEVER from the conversation, and never from what was proposed,
+  agreed or planned: "we'll take it out today" is a plan, not a treatment, and
+  a note that records treatment that did not happen is a false record. Write
+  only what was dictated: never add "no complications", "haemostasis achieved"
+  or any other negative or routine step that was not said. Take every figure,
+  material and count exactly as dictated. Local anaesthetic goes in laLog, not
+  here; any other drug given (sedation, for example) stays here, as dictated.
+  null if no treatment was dictated.
+- laLog: LOCAL ANAESTHETIC ONLY. An array, one object per local anaesthetic
+  statement as dictated, with the keys agent, strength, amount, technique, site,
+  batch, notes — each a string or null — and "quotes": one or two word-for-word
+  extracts from the dictation where it was said, each at least four words, under
+  the same rules as SOURCES. Take every value exactly as dictated: never convert
+  cartridges to millilitres or milligrams, never work out or comment on a dose,
+  never divide an amount between rows, and never fill in a strength or a batch
+  that was not said. ONLY from the dictation. Empty array if none.
 - implantLog: an array, one object per implant placed, with the keys site, system,
   diameter, length, lot, torque, isq, graft, notes — each a string or null. Take
   values exactly as dictated. Empty array if none.
@@ -282,6 +313,23 @@ appointment may sit between.
   examination; anything discussed during it is not in this note."
 - Everything else is unchanged: record only what was said, and attribute it
   normally. A gap is missing time, not a reason to hedge what IS on the recording.
+
+## SEPARATE RECORDINGS
+
+The clinician can make more than one recording in the same appointment — for
+example one before a radiograph is taken and one after. When that has happened,
+each later recording begins with a line reading [SEPARATE RECORDING ...].
+
+- Time passed between the recordings that was not recorded. Never assert or imply
+  a sequence or a single exchange across a SEPARATE RECORDING line.
+- Speaker labels restart in each recording: the second recording's speakers are
+  labelled R2-S1, R2-S2 and so on, and R2-S1 is not necessarily the same person as
+  S1. Work out who each label is from what they say, and map EVERY label in
+  "speakers".
+- A dictation line applies only within its own recording.
+- If a later recording changes something said in an earlier one (a different
+  decision, a different tooth), record both, say which came later, and add a gaps
+  entry so the clinician checks it. Never silently keep only one.
 
 ## A TRANSCRIPT WITH NO CONSULTATION IN IT
 
@@ -332,6 +380,86 @@ ${type ? type.emphasis : 'No emphasis hint — treat as a general consultation.'
 
 The type is a hint about what to listen for. It is not permission to assume any of it happened.
 
+## SOURCES
+
+The dentist checks your draft against the recording. Show where each sentence
+came from, so that check takes seconds rather than a replay.
+
+"sources" is an object keyed by field name. For every text field you filled
+(reasonForAttendance through plan, treatmentToday included — not implantLog,
+laLog, teeth, checklist, speakers or gaps), give an array with one entry per sentence or line you wrote in that field,
+in the same order:
+
+  { "start": "<the first six words of that sentence, copied exactly from your field>",
+    "quotes": ["<words copied exactly from the transcript that support it>", ...] }
+
+- One to three quotes per sentence, each under 25 words.
+- Copy each quote WORD FOR WORD from the transcript, including any transcription
+  mistakes. Do not tidy, paraphrase, shorten with "...", join separate places
+  together, or add speaker labels. The dentist's page searches the transcript for
+  your quote; a quote that is not there is shown to them as unsupported.
+- Never write a quote that is not in the transcript. If nothing in the transcript
+  supports a sentence, give "quotes": [] — that honestly tells the dentist to
+  check it, which is the point.
+- Leave out fields that are null.
+
+## QUESTIONS FOR THE DENTIST
+
+The dentist fills gaps from memory before pasting. Make that quick. For each
+entry in "gaps" about something missing from one of the twelve fields below,
+which the dentist could answer in a few words, give ONE question in "questions":
+
+  { "gap": "<that gaps entry, copied exactly>", "field": "<the field it would go in>",
+    "ask": "<the question, under 15 words>" }
+
+- field is one of: reasonForAttendance, medicalHistory, proposed, alternatives,
+  risks, benefits, costs, patientQuestions, patientFactors, informationGiven,
+  decision, nextStep.
+- Ask what happened, neutrally: "Were costs discussed? If so, what was said?"
+  Never suggest the answer. Never name a risk, alternative, drug, figure or tooth
+  that is not already in the transcript: the question must not put anything in
+  the dentist's mind that the recording does not.
+- No question for a gap about the recording itself (a pause, a separate
+  recording, nothing usable captured).
+- Empty array if there is no such gap.
+
+## BPE
+
+"bpe": the Basic Periodontal Examination scores, ONLY if the clinician stated
+them. Otherwise null.
+
+  { "UR": code, "UA": code, "UL": code, "LR": code, "LA": code, "LL": code,
+    "named": true | false,
+    "quotes": ["<words copied exactly from the transcript where the scores were said>"] }
+
+- code is "0" to "4", with "*" added where a furcation was called ("3*"), "X"
+  where a sextant was called as excluded or not scored, and null for a sextant
+  whose score was not stated.
+- UR, UA, UL, LR, LA, LL are upper right, upper anterior, upper left, lower
+  right, lower anterior, lower left. Where six scores are said in a row without
+  naming the sextants, take them in exactly that order and set "named" to false;
+  set it to true only when every score was said with its sextant.
+- Never work a score out from pocket depths, bleeding, or a remark such as "gums
+  look healthy", and never fill a sextant that was not stated.
+- quotes: one to three, word for word, under the same rules as SOURCES.
+- Put the scores here and not also in examination: the page shows them as a grid
+  and adds them to the note itself.
+
+## TO DO
+
+"actions": the follow-up tasks for the practice that were SAID in the recording,
+by the clinician or dictated — an appointment to book, a referral or letter to
+send, a radiograph or scan to arrange, lab work, a prescription to issue, a review.
+
+  [ { "text": "<the task, short, starting with a verb, e.g. Book review in two weeks>",
+      "quotes": ["<words copied exactly from the transcript where it was said>"] } ]
+
+- Only tasks actually stated. Never add one because it usually follows this kind
+  of appointment.
+- Take any drug, dose, time or date exactly as said, and never add one.
+- No names or other identifiers.
+- Empty array if none.
+
 ## OUTPUT
 
 Return a single JSON object and nothing else. No markdown fences, no explanation.
@@ -352,13 +480,19 @@ Every key below must appear, even where it does not apply to this appointment: u
   "nextStep": string | null,
   "examination": string | null,
   "radiographicFindings": string | null,
+  "treatmentToday": string | null,
   "plan": string | null,
   "implantLog": object[],
+  "laLog": [ { "agent": string | null, "strength": string | null, "amount": string | null, "technique": string | null, "site": string | null, "batch": string | null, "notes": string | null, "quotes": string[] } ],
   "teeth": string[],
   "checklist": { "<key>": string | null, ... },
   "speakers": { "S1": "clinician" | "patient" | "other", ... },
   "speakerConfidence": "high" | "medium" | "low",
-  "gaps": string[]
+  "sources": { "<field>": [ { "start": string, "quotes": string[] } ], ... },
+  "gaps": string[],
+  "questions": [ { "gap": string, "field": string, "ask": string } ],
+  "bpe": { "UR": string | null, "UA": string | null, "UL": string | null, "LR": string | null, "LA": string | null, "LL": string | null, "named": boolean, "quotes": string[] } | null,
+  "actions": [ { "text": string, "quotes": string[] } ]
 }`;
 }
 
@@ -370,7 +504,7 @@ function checklistSection(consultTypeKey) {
   const lines = items.map((i) => `- "${i.key}": ${i.ask}`).join('\n');
   return `For this consult type, report against each item below. For each key, if the transcript contains it, give a SHORT quote or paraphrase (under 20 words) as evidence. If it does not, give null. This is the only place the model looks for what was NOT said; report honestly — a null here becomes a gap the dentist will see.
 
-Rules: evidence must come from the CLINICIAN's speech unless the item says otherwise. Do not treat the patient raising something as the clinician having named it. Do not infer: "we went through the risks" is null for every specific risk. Every key must appear.
+Rules: evidence must come from the CLINICIAN's speech unless the item says otherwise. An item that says "said or dictated" may be found in the conversation OR in the dictation; every other item only in the conversation. Do not treat the patient raising something as the clinician having named it. Do not infer: "we went through the risks" is null for every specific risk. Every key must appear.
 
 If an item does not apply to this patient or tooth (the item says when), give exactly "Not applicable: " followed by the reason, e.g. "Not applicable: lower tooth". Never "N/A" alone: that reads as not found.
 
@@ -386,6 +520,10 @@ const minutes = (ms) => {
   return m < 1 ? 'under a minute' : `${m} minute${m === 1 ? '' : 's'}`;
 };
 
+/* A diarised speaker label: S1, S2 ... in the first recording, and R2-S1,
+   R3-S2 ... in the recordings after it. Anything else in a mapping is dropped. */
+export const SPEAKER_LABEL = /^(?:R[2-9]-)?S\d{1,2}$/;
+
 /* The line extract.mjs puts into the transcript where a pause falls. The
    transcript carries no times, so "paused at 1:35" told the model nothing it
    could find; a line in the transcript itself is where it reads. */
@@ -394,26 +532,37 @@ export function pauseMarker(forMs) {
   return `[PAUSED — ${m === 'under a minute' ? m : 'about ' + m} not recorded]`;
 }
 
+/* The line extract.mjs puts in front of each recording after the first, when a
+   clinician has recorded more than once in the same appointment. */
+export function partMarker(index, count) {
+  return `[SEPARATE RECORDING ${index} of ${count} — made later in the same appointment. Time passed that was not recorded. Speaker labels restart here (R${index}-S1 is not necessarily S1), and any dictation above has ended.]`;
+}
+
 /* `note: false` for the summary, post-op sheet, referral and Ask, whose system
    prompts have no PAUSED RECORDINGS section and no speakerConfidence to set:
    they get the one rule that matters in a line of its own. `json: false` for
    Ask, which answers in prose. */
-export function buildUserMessage(transcript, pauses, speakerRoles, { note = true, json = true } = {}) {
+export function buildUserMessage(transcript, pauses, speakerRoles, { note = true, json = true, parts = 1 } = {}) {
   // A mapping the clinician corrected by hand. Stated first so it is read
   // before the transcript that produced the wrong answer last time.
   const confirmed = speakerRoles && typeof speakerRoles === 'object' && !Array.isArray(speakerRoles)
     ? Object.entries(speakerRoles)
-        .filter(([k, v]) => /^S\d+$/.test(k) && /^(clinician|patient|other)$/.test(v))
+        .filter(([k, v]) => SPEAKER_LABEL.test(k) && /^(clinician|patient|other)$/.test(v))
         .map(([k, v]) => `${k} is the ${v}`)
     : [];
   const roles = confirmed.length
-    ? `CONFIRMED MAPPING, corrected by the clinician who was present: ${confirmed.join('; ')}.\nUse it exactly.${note ? ' Report it back unchanged and set speakerConfidence to "high".' : ''}\n\n`
+    ? `CONFIRMED MAPPING, corrected by the clinician who was present: ${confirmed.join('; ')}.\nUse it exactly.${note ? ' Report it back unchanged and set speakerConfidence to "high" if it names every label; any label it does not name is yours to work out.' : ''}\n\n`
     : '';
   const tail = json ? '\n\nReturn the JSON object.' : '';
+  // Recorded in more than one go. The note prompt has the rules in full; the
+  // other products get the two that matter in a line.
+  const multi = parts > 1
+    ? `This consultation was recorded in ${parts} SEPARATE RECORDINGS, joined in order; each after the first begins with a [SEPARATE RECORDING ...] line. ${note ? 'Apply the SEPARATE RECORDINGS rules.' : 'Speaker labels restart in each recording, and nothing either side of a SEPARATE RECORDING line was said one straight after the other.'}\n\n`
+    : '';
 
   const list = Array.isArray(pauses) ? pauses.filter((p) => p && p.forMs > 1000) : [];
   if (!list.length) {
-    return `${roles}Transcript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>${tail}`;
+    return `${roles}${multi}Transcript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>${tail}`;
   }
   const at = (ms) => {
     const t = Math.round(ms / 1000);
@@ -428,7 +577,7 @@ export function buildUserMessage(transcript, pauses, speakerRoles, { note = true
   const rule = note
     ? 'Apply the PAUSED RECORDINGS rules.'
     : `Never present things either side of ${marked ? 'a PAUSED line' : 'a gap'} as said one after the other.`;
-  return `${roles}This recording was PAUSED and resumed. The transcript is spliced: the audio either side of each gap ${marked ? '' : 'below '}is contiguous in the transcript but was not spoken contiguously.\n\n${where}\n\n${rule}\n\nTranscript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>${tail}`;
+  return `${roles}${multi}This recording was PAUSED and resumed. The transcript is spliced: the audio either side of each gap ${marked ? '' : 'below '}is contiguous in the transcript but was not spoken contiguously.\n\n${where}\n\n${rule}\n\nTranscript of the consultation:\n\n<transcript>\n${transcript}\n</transcript>${tail}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -510,6 +659,190 @@ export function asText(v) {
   return undefined;
 }
 
+/**
+ * Where each sentence of the draft came from (27 September 2026). Advisory, like
+ * the speaker mapping: a model that leaves it out, or gets its shape wrong, must
+ * never cost the note. null means "not given" (the page says the check could not
+ * be run); an object means it was given, field by field. Nothing here is trusted:
+ * the page searches the transcript for every quote and believes only what it
+ * finds. Lengths are capped so a runaway answer cannot bloat the page.
+ */
+export function cleanSources(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  for (const [key] of [...FIELDS, ...DICTATED_FIELDS]) {
+    const list = raw[key];
+    if (!Array.isArray(list)) continue;
+    out[key] = list.slice(0, 60)
+      .filter((e) => e && typeof e === 'object' && !Array.isArray(e))
+      .map((e) => {
+        const q = Array.isArray(e.quotes) ? e.quotes : (typeof e.quotes === 'string' ? [e.quotes] : []);
+        return {
+          start: typeof e.start === 'string' ? e.start.trim().slice(0, 200) : '',
+          quotes: q.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 400)).slice(0, 5)
+        };
+      });
+  }
+  return out;
+}
+
+/* ---- 27 September 2026 (second batch): questions, BPE, to-do ----
+   All three are advisory, like sources: a model that leaves one out, or gets its
+   shape wrong, costs the note nothing. None of them is trusted: every quote is
+   searched for on the page, a question must answer a gap that is really in the
+   list, and a BPE code must be one that exists. */
+
+function quoteList(q) {
+  const a = Array.isArray(q) ? q : (typeof q === 'string' ? [q] : []);
+  return a.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 400)).slice(0, 5);
+}
+
+// Chart order: the top row read left to right, then the bottom row.
+export const BPE_SEXTANTS = ['UR', 'UA', 'UL', 'LR', 'LA', 'LL'];
+const BPE_CODE = /^(?:[0-4]\*?|X)$/;
+
+function bpeCode(v) {
+  if (typeof v === 'number' && Number.isInteger(v)) v = String(v);
+  v = typeof v === 'string' ? v.replace(/\s+/g, '').toUpperCase() : '';
+  return BPE_CODE.test(v) ? v : null;
+}
+
+/* The shape asked for is an object keyed by sextant. The two other shapes a
+   model gives for six scores — a list of six, or a line such as "2 1 2 / 3* 2 2"
+   — are read in chart order, which is the order the prompt fixes for scores said
+   without their sextants, and are marked as not named so the page says so.
+   Anything else that was not null comes back as { unreadable: true }, so the
+   note can say scores were given and could not be read, rather than showing an
+   empty chart as if none were said. */
+export function cleanBpe(raw) {
+  if (raw === null || raw === undefined) return null;
+  let src = null, named = null, quotes = [];
+  if (Array.isArray(raw)) {
+    src = raw.length === 6 ? raw : null;
+    named = false;
+  } else if (typeof raw === 'string') {
+    const codes = raw.toUpperCase().match(/[0-4]\s*\*?|X|-/g) || [];
+    src = codes.length === 6 && !/[A-WYZ5-9]/.test(raw.toUpperCase().replace(/BPE|UR|UA|UL|LR|LA|LL/g, '')) ? codes : null;
+    named = false;
+  } else if (typeof raw === 'object') {
+    const keyed = {};
+    for (const [k, v] of Object.entries(raw)) keyed[String(k).toUpperCase()] = v;
+    src = BPE_SEXTANTS.map((s) => keyed[s]);
+    named = typeof raw.named === 'boolean' ? raw.named : null;
+    quotes = quoteList(raw.quotes);
+  }
+  const out = {};
+  let any = false;
+  if (src) {
+    BPE_SEXTANTS.forEach((s, i) => {
+      out[s] = bpeCode(src[i]);
+      if (out[s]) any = true;
+    });
+  }
+  if (!any) {
+    // Nothing that is a code. Silence (nulls, blanks, "none") is no BPE; anything
+    // with content in it was something, and could not be read.
+    const empty = (v) => v === null || v === undefined || (typeof v === 'string' && /^\s*(none|null|nil|n\/?a|not (stated|recorded|done|taken|given))?\.?\s*$/i.test(v));
+    if (typeof raw === 'string') return empty(raw) ? null : { unreadable: true };
+    if (Array.isArray(raw)) return raw.every(empty) ? null : { unreadable: true };
+    if (typeof raw === 'object') {
+      const other = Object.keys(raw).filter((k) => k !== 'quotes' && k !== 'named' && !empty(raw[k]));
+      return other.length ? { unreadable: true } : null;
+    }
+    return { unreadable: true };
+  }
+  out.quotes = quotes;
+  out.named = named;
+  return out;
+}
+
+export function cleanActions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 40).map((a) => {
+    if (typeof a === 'string') return { text: a, quotes: [] };
+    if (!a || typeof a !== 'object' || Array.isArray(a) || typeof a.text !== 'string') return null;
+    return { text: a.text, quotes: quoteList(a.quotes) };
+  }).filter((a) => a && a.text.trim())
+    .map((a) => ({ text: a.text.trim().replace(/\s+/g, ' ').slice(0, 300), quotes: a.quotes }))
+    .slice(0, 20);
+}
+
+// The backstop's own wording (parseNote, assertShape). A gap in this form names
+// its field exactly, so its question needs no model.
+const BLANK_GAP = /^(.+): left blank in the draft; check whether it came up$/;
+
+/**
+ * Questions for the gaps. Only for a gap that is really in the list (matched
+ * exactly, so the question cannot drift from what it answers), only into one of
+ * the twelve conversation fields, and not into one that does not apply to this
+ * kind of appointment. One per gap. Run after every gap has been added.
+ */
+export function cleanQuestions(raw, gaps, consultTypeKey) {
+  const list = Array.isArray(gaps) ? gaps.filter((g) => typeof g === 'string') : [];
+  const skip = new Set(notApplicableFields(consultTypeKey));
+  const allowed = new Set(FIELDS.map(([k]) => k).filter((k) => !skip.has(k)));
+  const out = [];
+  const done = new Set();
+  for (const q of (Array.isArray(raw) ? raw.slice(0, 40) : [])) {
+    if (!q || typeof q !== 'object' || Array.isArray(q)) continue;
+    const gap = typeof q.gap === 'string' ? q.gap.trim() : '';
+    const match = list.find((g) => g.trim() === gap);
+    if (!gap || match === undefined || done.has(match)) continue;
+    if (typeof q.field !== 'string' || !allowed.has(q.field)) continue;
+    const ask = typeof q.ask === 'string' ? q.ask.trim().replace(/\s+/g, ' ') : '';
+    // A figure in a question is the question supplying an answer ("the 1 in 10
+    // risk"), which the prompt forbids; refused here rather than trusted.
+    if (!ask || ask.length > 200 || /\d/.test(ask)) continue;
+    done.add(match);
+    out.push({ gap: match, field: q.field, ask });
+  }
+  for (const g of list) {
+    if (done.has(g)) continue;
+    const m = g.trim().match(BLANK_GAP);
+    const f = m && FIELDS.find(([, label]) => label === m[1]);
+    if (!f || !allowed.has(f[0])) continue;
+    done.add(g);
+    out.push({ gap: g, field: f[0], ask: 'Anything to add from memory?' });
+  }
+  return out.slice(0, 20);
+}
+
+/* The LA log. Unlike the implant log, a row of the wrong shape does not cost
+   the whole note: it is dropped and a gap says so, so the clinician enters it
+   from what they dictated rather than finding it silently missing. */
+const LA_NONE = (v) => v === undefined || v === null || v === false || v === 0 ||
+  (typeof v === 'string' && /^\s*(none|null|nil|n\/?a|not (stated|recorded|dictated|given|used))?\.?\s*$/i.test(v));
+
+export function cleanLaLog(raw) {
+  const gaps = [];
+  if (LA_NONE(raw)) return { rows: [], gaps };
+  const list = (Array.isArray(raw) ? raw : [raw]).filter((r) => !LA_NONE(r));
+  const rows = [];
+  let bad = 0;
+  if (list.length > 12) bad++;
+  for (const row of list.slice(0, 12)) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) { bad++; continue; }
+    const out = {};
+    let any = false, wrong = false;
+    for (const k of LA_LOG_FIELDS) {
+      const v = row[k];
+      if (v === undefined || v === null || (typeof v === 'string' && !v.trim())) { out[k] = null; continue; }
+      if (typeof v !== 'string' && typeof v !== 'number') { wrong = true; out[k] = null; continue; }
+      out[k] = String(v).replace(/\s+/g, ' ').trim().slice(0, 200);
+      any = true;
+    }
+    // A row with content under keys it does not know ({drug, volume}) was
+    // something, and could not be read.
+    const unknown = Object.keys(row).some((k) => k !== 'quotes' && !LA_LOG_FIELDS.includes(k) && !LA_NONE(row[k]));
+    if (wrong || (!any && unknown)) bad++;
+    if (!any) continue;
+    out.quotes = quoteList(row.quotes);
+    rows.push(out);
+  }
+  if (bad) gaps.push('Part of the local anaesthetic record came back in a form that could not be read. Check it against what you dictated.');
+  return { rows, gaps };
+}
+
 export function parseNote(raw, consultTypeKey) {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
@@ -566,6 +899,28 @@ export function parseNote(raw, consultTypeKey) {
   parsed.speakerConfidence = /^(high|medium|low)$/i.test(parsed.speakerConfidence || '')
     ? String(parsed.speakerConfidence).toLowerCase() : null;
 
+  parsed.sources = cleanSources(parsed.sources);
+  // The parser's own gaps (a record it could not read). Added AFTER the blank
+  // backstop below, which runs only when the model reported no gaps of its
+  // own: added before, one of these would switch the backstop off and a blank
+  // risks field would go unlisted.
+  const parserGaps = [];
+  {
+    const la = cleanLaLog(parsed.laLog);
+    parsed.laLog = la.rows;
+    parserGaps.push(...la.gaps);
+  }
+  parsed.bpe = cleanBpe(parsed.bpe);
+  if (parsed.bpe && parsed.bpe.unreadable) {
+    parsed.bpe = null;
+    // Said, but not in a form that could be read: never shown as "none heard".
+    parserGaps.push('BPE scores came back in a form that could not be read. Enter them on the chart from what you recorded.');
+  }
+  parsed.actions = cleanActions(parsed.actions);
+  // Checked against the final gap list by cleanQuestions, in extract.mjs, once
+  // every gap is in it. Anything that is not a list is no questions.
+  if (!Array.isArray(parsed.questions)) parsed.questions = [];
+
   if (!('checklist' in parsed) || parsed.checklist === null) parsed.checklist = {};
   if (typeof parsed.checklist !== 'object' || Array.isArray(parsed.checklist)) throw new Error('checklist is not an object');
   // No gaps key at all is "nothing missing", and a single string is one gap.
@@ -608,6 +963,7 @@ export function parseNote(raw, consultTypeKey) {
     // note at all.
     parsed.gaps = blanks.map(([, label]) => `${label}: left blank in the draft; check whether it came up`);
   }
+  parsed.gaps.push(...parserGaps);
 
   return parsed;
 }
@@ -784,7 +1140,7 @@ YOUR SOURCES, IN ORDER OF AUTHORITY:
 
 THE RULE THAT MATTERS MOST: absence of mention is NOT a negative finding. If any source SAYS the patient is medically fit and well, write that — a stated negative is a finding and belongs in the referral. If the medical history simply never came up, the Background is null, and you must NOT write "no relevant medical history", "fit and well", "nil of note", "no medications" or any equivalent. The same goes for allergies, smoking, anticoagulants, oral hygiene and previous treatment. The test is always the same: did someone say it? Say nothing rather than say nothing-was-found.
 
-The note's dictated fields — examination, radiographic findings and plan — are usually where the referral's clinical substance lives, because the conversation with the patient rarely contains it. Use them in full.
+The note's dictated fields — examination, radiographic findings, treatment carried out today and plan — are usually where the referral's clinical substance lives, because the conversation with the patient rarely contains it. Use them in full.
 
 - situation: why this patient is being referred now — the presenting problem and, if stated, its duration and any urgency. Not a diagnosis unless the clinician gave one.
 - background: relevant history ACTUALLY STATED — medical history, medications, previous treatment or attempts, oral hygiene, social factors affecting the referral. Null if none was stated.
@@ -825,6 +1181,11 @@ export function buildReferralUserMessage(note, context, transcriptMessage) {
     if (typeof v !== 'string' || !v.trim()) continue;
     any = true;
     parts.push(`${label}: ${v.trim()}`);
+  }
+  // BPE scores the clinician checked on the grid, as one line (27 Sep 2026).
+  if (note && typeof note.bpe === 'string' && note.bpe.trim()) {
+    any = true;
+    parts.push(`BPE: ${note.bpe.trim()}`);
   }
   if (!any) parts.push('(The note is empty. Work from the context and transcript below.)');
   if (context && context.trim()) {
