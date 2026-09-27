@@ -44,7 +44,8 @@ export const config = { maxDuration: 60 };
 const writeLimit = makeThrottle({ windowMs: 60 * 60_000, max: 5 });
 const dailyLimit = makeThrottle({ windowMs: 24 * 60 * 60_000, max: 10 });
 export const _writeLimit = {
-  count() { writeLimit.count('writes'); dailyLimit.count('writes'); },
+  count(at = Date.now()) { writeLimit.count('writes', at); dailyLimit.count('writes', at); },
+  withdraw(at) { writeLimit.withdraw('writes', at); dailyLimit.withdraw('writes', at); },
   clear() { writeLimit.clear(); dailyLimit.clear(); },
   hourly: writeLimit, daily: dailyLimit
 };
@@ -218,11 +219,17 @@ export default async function handler(req, res) {
   }
 
   if (writeLimit.blocked('writes', now) || dailyLimit.blocked('writes', now)) return res.status(429).json({ error: 'write_limit' });
-  _writeLimit.count();
+  _writeLimit.count(now);
   try {
     await writeItems([op]);
   } catch (err) {
     console.error('users: store write failed:', action, initials, err && err.message);
+    // Refused by the store (a 4xx: a token without access, say): nothing was
+    // written, so, like a refusal above, it costs no allowance. It used to,
+    // and five tries at a misconfigured token locked the page for an hour
+    // with "too many changes", even once the token was fixed. A 5xx or a lost
+    // connection may have written, so those still count.
+    if (err && err.status >= 400 && err.status < 500) _writeLimit.withdraw(now);
     return res.status(502).json({ error: 'save_failed' });
   }
   console.log(`users: ${session.who} did "${action}" for ${op.key.slice(5)}`);

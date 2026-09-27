@@ -240,7 +240,11 @@ export async function writeItems(items) {
   try { reply = await r.json(); } catch { reply = null; }
   if (!r.ok || !reply || reply.status !== 'ok') {
     const why = reply && reply.error && typeof reply.error.message === 'string' ? reply.error.message.slice(0, 200) : '';
-    throw new Error(`store write ${r.status}${why ? ': ' + why : ''}`);
+    const err = new Error(`store write ${r.status}${why ? ': ' + why : ''}`);
+    // Callers can tell a refusal (4xx: nothing was written) from a failure
+    // whose outcome is unknown (5xx, or a 200 without the expected reply).
+    err.status = r.status;
+    throw err;
   }
   for (const it of items) noteLocalWrite(it.key, it.operation === 'delete' ? null : it.value);
   return true;
