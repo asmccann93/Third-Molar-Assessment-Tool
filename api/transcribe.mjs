@@ -103,6 +103,7 @@ const ADDITIONAL_VOCAB = [
 ];
 
 import { readCookie, readToken, mintJobTicket, verifyJobTicket } from './_session.mjs';
+import { sessionStillGood, storeState, loadUsers } from './_store.mjs';
 
 /* Who is asking, and does this job belong to them?
 
@@ -123,14 +124,18 @@ async function holder(req) {
 
 // The ticket is an HMAC over the job id AND its owner, and nothing records
 // who that owner was. So try every owner it could be: the caller, a
-// pre-multi-user session ("-"), and each clinician named in APP_USERS. The
-// initials are read here rather than through auth.mjs's parseUsers, which
-// logs about the passcodes; only the part before each colon matters.
+// pre-multi-user session ("-"), each clinician named in APP_USERS, and every
+// account in the store whatever its status (someone disabled mid-job still
+// owns a job that needs deleting). The APP_USERS initials are read without
+// touching the passcodes; only the part before each colon matters.
 async function ticketSignedForAnyone(secret, jobId, who, ticket) {
   const owners = new Set([who, null]);
   for (const part of String(process.env.APP_USERS || '').split(',')) {
     const i = part.indexOf(':');
     if (i > 0) owners.add(part.slice(0, i).trim());
+  }
+  if (storeState() === 'ok') {
+    try { for (const initials of (await loadUsers()).keys()) owners.add(initials); } catch { /* the others still count */ }
   }
   for (const owner of owners) {
     if (await verifyJobTicket(secret, jobId, owner, ticket)) return true;
@@ -148,6 +153,16 @@ export default async function handler(req, res) {
   const arrivedAt = Date.now();
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+
+  // The gate let this request in, perhaps on a copy of the staff list older
+  // than this one. A colleague disabled from the admin page must stop here,
+  // not at the end of their next consultation. (No-op without an account store.)
+  // DELETE is the exception, deliberately: it needs a signed ticket instead,
+  // and a page whose session has just ended must still be able to remove its
+  // job from Speechmatics (see middleware.js).
+  if (req.method !== 'DELETE' && !(await sessionStillGood(req))) {
+    return res.status(401).json({ error: 'unauthenticated' });
+  }
 
   const key = process.env.SPEECHMATICS_API_KEY;
   if (!key) {

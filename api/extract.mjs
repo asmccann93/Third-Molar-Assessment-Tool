@@ -29,8 +29,10 @@
 import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS, notApplicableFields,
          buildSummarySystemPrompt, parseSummary, buildAskSystemPrompt,
          buildReferralSystemPrompt, buildReferralUserMessage, parseReferral,
-         buildPostopSystemPrompt, parsePostop, asText, pauseMarker } from './_prompt.mjs';
-import { checklistGaps } from './_checklists.mjs';
+         buildPostopSystemPrompt, parsePostop, asText, pauseMarker, partMarker, SPEAKER_LABEL,
+         cleanQuestions, LA_LOG_FIELDS } from './_prompt.mjs';
+import { checklistGaps, checklistIsDraft } from './_checklists.mjs';
+import { sessionStillGood } from './_store.mjs';
 
 // 300 s, raised from 120 on 21 September 2026: a long implant or treatment-plan
 // consultation on the Full length can take longer than two minutes to draft,
@@ -42,7 +44,12 @@ const REGION = process.env.AWS_REGION || 'eu-west-2';
 const MODEL_ID = process.env.BEDROCK_MODEL_ID || 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0';
 const SERVICE = 'bedrock';
 const MAX_TURNS = 4000;
+// Recordings in one consultation (27 September 2026): the first, and up to two
+// more made later in the same appointment.
+const MAX_PARTS = 3;
 const RESIDENCY = (process.env.DATA_RESIDENCY || 'eu').toLowerCase();
+const BPE_C = '(?:[0-4]\\*?|X|-)';
+const BPE_LINE = new RegExp(`^${BPE_C} ${BPE_C} ${BPE_C} / ${BPE_C} ${BPE_C} ${BPE_C} \\(UR UA UL / LR LA LL\\)$`);
 
 // Regions in which a request submitted to Bedrock stays within UK/EEA territory.
 const EEA_UK_REGIONS = new Set([
@@ -93,6 +100,13 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'method_not_allowed' });
   }
 
+  // Same as transcribe.mjs: the gate may have let this in on an older copy of
+  // the staff list. A disabled colleague's session stops here. (No-op without
+  // an account store.)
+  if (!(await sessionStillGood(req))) {
+    return res.status(401).json({ error: 'unauthenticated' });
+  }
+
   const creds = {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -113,93 +127,25 @@ export default async function handler(req, res) {
 
   try {
     const body = await readJson(req);
-    const turns = Array.isArray(body?.turns) ? body.turns.slice(0, MAX_TURNS) : null;
     const consultType = typeof body?.consultType === 'string' ? body.consultType : null;
     // How much to write. Anything unrecognised falls back to standard in the
     // prompt builder, so a bad value cannot fail a draft.
     const length = typeof body?.length === 'string' ? body.length : 'standard';
-    // Where the clinician paused. Shapes the prompt so the note cannot assert a
-    // sequence across unrecorded time. Bounded and sanitised like everything else.
-    const pauses = Array.isArray(body?.pauses)
-      ? body.pauses
-          .filter((p) => p && Number.isFinite(p.forMs) && Number.isFinite(p.atRecordedMs) && p.forMs > 1000)
-          .slice(0, 20)
-          .map((p) => ({ atRecordedMs: Math.max(0, p.atRecordedMs), forMs: Math.max(0, p.forMs) }))
-      : [];
 
-    if (!turns || turns.length === 0) {
+    // One recording, sent as it always was (turns, pauses, dictationFromS), or
+    // since 27 September 2026 several, as `parts`: the clinician recorded again
+    // later in the same appointment. Each part keeps its own timeline, so its
+    // pauses and dictation are placed exactly as a single recording's are.
+    const rawParts = Array.isArray(body?.parts) && body.parts.length
+      ? body.parts.slice(0, MAX_PARTS)
+      : [{ turns: body?.turns, pauses: body?.pauses, dictationFromS: body?.dictationFromS }];
+    if (!rawParts.every((p) => p && Array.isArray(p.turns))) {
       return res.status(400).json({ error: 'empty_transcript' });
     }
-
-    // Where the clinician pressed Dictate, in seconds into the RECORDING. The
-    // file's timeline is recorded time (paused time does not exist in it), and
-    // Speechmatics gives each turn a start time on that same timeline, so the
-    // marker goes in front of the first turn that starts at or after it.
-    const dictationFromS = Number.isFinite(body?.dictationFromS) && body.dictationFromS >= 0
-      ? Number(body.dictationFromS) : null;
-    const MARKER = '[DICTATION \u2014 the clinician alone, after the patient left. Everything below is dictated to the record, not conversation.]';
-
-    // Each pause goes into the transcript the same way, as a line of its own
-    // where it fell: the model reads lines, not times. In recording order; at
-    // the same point, the pause before the dictation (sort is stable).
-    const marks = [
-      ...pauses.map((p) => ({ atS: p.atRecordedMs / 1000, line: pauseMarker(p.forMs), dictation: false })),
-      ...(dictationFromS !== null ? [{ atS: dictationFromS, line: MARKER, dictation: true }] : [])
-    ].sort((a, b) => a.atS - b.atS);
-    const markLines = new Set(marks.map((m) => m.line));
-    let next = 0;               // the first marker not yet placed
-    let dictationInexact = false;
-
-    const hasWords = (s) => /[\p{L}\p{N}]/u.test(s);
-    const lines = [];
-    let sawTimes = false;
-    for (const t of turns) {
-      const text = String(t.text || '').trim();
-      // Skip only turns with nothing in them. A length cut-off (this was once
-      // "<= 5 characters") silently removed "Yes.", "No.", "Okay." and "Sure."
-      // — in a consent discussion, very often the patient's actual answer. A
-      // dropped "No." reads to the model as the clinician carrying straight on.
-      if (!hasWords(text)) continue;
-      const speaker = t.speaker || 'UU';
-      const start = Number.isFinite(t.start) ? t.start : null;
-      const end = Number.isFinite(t.end) ? t.end : null;
-      if (start !== null) sawTimes = true;
-      while (next < marks.length && start !== null && start >= marks[next].atS) lines.push(marks[next++].line);
-
-      // A marker that falls INSIDE this turn: speech runs on across the Dictate
-      // press or the pause. Split the turn at the first word starting at or
-      // after it, where the word timings came with the turn. Without them, the
-      // marker goes in front of the whole turn: for the dictation that is the
-      // side that never presents dictated findings as said to the patient, and
-      // it is said in the gaps, because it can move the end of the
-      // conversation along with it.
-      const words = wordStarts(t.words, text);
-      let from = 0;
-      while (next < marks.length && start !== null && end !== null && marks[next].atS < end) {
-        const m = marks[next];
-        if (words) {
-          const w = words.find((x) => x.at >= from && x.start >= m.atS);
-          if (!w) break;   // every word left began before it: it goes before the next turn
-          const head = text.slice(from, w.at).trim();
-          if (hasWords(head)) lines.push(`[${speaker}] ${head}`);
-          from = w.at;
-        } else if (m.dictation) {
-          dictationInexact = true;
-        }
-        lines.push(m.line);
-        next++;
-      }
-      const rest = text.slice(from).trim();
-      if (hasWords(rest)) lines.push(`[${speaker}] ${rest}`);
-    }
-    // Dictate pressed, or a pause taken, after every turn had started (e.g. no
-    // speech after): still say so, so the model does not look for dictation
-    // that is not there.
-    if (sawTimes) while (next < marks.length) lines.push(marks[next++].line);
-    const dictationLocated = dictationFromS === null || sawTimes;
-    const transcript = lines.join('\n');
-
-    if (!transcript || lines.every((l) => markLines.has(l))) return res.status(400).json({ error: 'empty_transcript' });
+    const built = buildTranscript(rawParts);
+    if (!built) return res.status(400).json({ error: 'empty_transcript' });
+    const { transcript, pauses, dictationRequested, dictationLocated, dictationInexact } = built;
+    const partCount = rawParts.length;
 
     // A speaker mapping the clinician corrected by hand. Untrusted input:
     // labels and roles are both whitelisted, and a mapping that survives that
@@ -210,7 +156,7 @@ export default async function handler(req, res) {
     const speakerRoles = {};
     if (rawRoles && typeof rawRoles === 'object' && !Array.isArray(rawRoles)) {
       for (const [k, v] of Object.entries(rawRoles)) {
-        if (/^S\d{1,2}$/.test(k) && (v === 'clinician' || v === 'patient' || v === 'other')) {
+        if (SPEAKER_LABEL.test(k) && (v === 'clinician' || v === 'patient' || v === 'other')) {
           speakerRoles[k] = v;
         }
       }
@@ -226,7 +172,7 @@ export default async function handler(req, res) {
         max_tokens: 1024,
         temperature: 0,
         system: buildAskSystemPrompt(consultType),
-        messages: [{ role: 'user', content: `${buildUserMessage(transcript, pauses, roles, { note: false, json: false })}\n\nThe dentist asks: ${question}` }]
+        messages: [{ role: 'user', content: `${buildUserMessage(transcript, pauses, roles, { note: false, json: false, parts: partCount })}\n\nThe dentist asks: ${question}` }]
       }, creds, arrivedAt);
       if (raw?.stop_reason === 'max_tokens') {
         return res.status(502).json({ error: 'response_truncated', detail: 'The answer was cut off. Ask something narrower.' });
@@ -244,7 +190,7 @@ export default async function handler(req, res) {
         max_tokens: 2048,
         temperature: 0,
         system: buildSummarySystemPrompt(consultType),
-        messages: [{ role: 'user', content: buildUserMessage(transcript, pauses, roles, { note: false }) }]
+        messages: [{ role: 'user', content: buildUserMessage(transcript, pauses, roles, { note: false, parts: partCount }) }]
       }, creds, arrivedAt);
       if (raw?.stop_reason === 'max_tokens') {
         return res.status(502).json({ error: 'response_truncated', detail: 'The summary was cut off. Try again.' });
@@ -260,6 +206,10 @@ export default async function handler(req, res) {
       const incoming = body?.note && typeof body.note === 'object' && !Array.isArray(body.note) ? body.note : {};
       const note = {};
       for (const [key] of [...FIELDS, ...DICTATED_FIELDS]) {
+        // Dictated fields were said to the record, not to the patient, and the
+        // post-op prompt already forbids dictation; since 27 September 2026
+        // they are not sent at all, the treatment record included.
+        if (DICTATED_FIELDS.some(([d]) => d === key)) continue;
         const v = incoming[key];
         if (typeof v === 'string' && v.trim()) note[key] = v.trim().slice(0, 4000);
       }
@@ -271,7 +221,7 @@ export default async function handler(req, res) {
         max_tokens: 2048,
         temperature: 0,
         system: buildPostopSystemPrompt(consultType),
-        messages: [{ role: 'user', content: buildReferralUserMessage(note, '', buildUserMessage(transcript, pauses, roles, { note: false })) }]
+        messages: [{ role: 'user', content: buildReferralUserMessage(note, '', buildUserMessage(transcript, pauses, roles, { note: false, parts: partCount })) }]
       }, creds, arrivedAt);
       if (raw?.stop_reason === 'max_tokens') {
         return res.status(502).json({ error: 'response_truncated', detail: 'The instructions were cut off. Try again.' });
@@ -294,6 +244,12 @@ export default async function handler(req, res) {
         const v = incoming[key];
         if (typeof v === 'string' && v.trim()) note[key] = v.trim().slice(0, 4000);
       }
+      // The BPE line from the page's grid, as the clinician left it, in exactly
+      // the page's format: three codes / three codes (UR UA UL / LR LA LL).
+      // Anything else is dropped rather than passed on to the model.
+      if (typeof incoming.bpe === 'string' && BPE_LINE.test(incoming.bpe.trim())) {
+        note.bpe = incoming.bpe.trim();
+      }
       const context = typeof body?.context === 'string' ? body.context.trim().slice(0, 2000) : '';
       if (!Object.keys(note).length && !context) {
         return res.status(400).json({ error: 'empty_referral_source', detail: 'Draft the note first — the referral is built from it.' });
@@ -303,7 +259,7 @@ export default async function handler(req, res) {
         max_tokens: 2048,
         temperature: 0,
         system: buildReferralSystemPrompt(consultType),
-        messages: [{ role: 'user', content: buildReferralUserMessage(note, context, buildUserMessage(transcript, pauses, roles, { note: false })) }]
+        messages: [{ role: 'user', content: buildReferralUserMessage(note, context, buildUserMessage(transcript, pauses, roles, { note: false, parts: partCount })) }]
       }, creds, arrivedAt);
       if (raw?.stop_reason === 'max_tokens') {
         return res.status(502).json({ error: 'response_truncated', detail: 'The referral was cut off. Try again.' });
@@ -322,7 +278,7 @@ export default async function handler(req, res) {
       max_tokens: 16000,
       temperature: 0,
       system: buildSystemPrompt(consultType, length),
-      messages: [{ role: 'user', content: buildUserMessage(transcript, pauses, roles) }]
+      messages: [{ role: 'user', content: buildUserMessage(transcript, pauses, roles, { parts: partCount }) }]
     };
 
     const raw = await invokeModel(payload, creds, arrivedAt);
@@ -352,12 +308,14 @@ export default async function handler(req, res) {
     // instruction to the wrong kind of gap — see the two leads on the page.
     note.notSaid = checklistGaps(consultType, note.checklist);
     delete note.checklist;        // internal; the gaps are the product
+    // A first-draft checklist nobody has reviewed yet: the page says so.
+    note.checklistDraft = checklistIsDraft(consultType);
 
     // Dictation was requested but the transcript carried no timings, so the
     // split between conversation and dictation could not be made. Say so
     // loudly: the alternative is a note that presents dictated findings as
     // things said to the patient.
-    if (dictationFromS !== null && !dictationLocated) {
+    if (dictationRequested && !dictationLocated) {
       note.gaps.unshift('You pressed Dictate, but the transcript came back without timings, so the ' +
         'dictated part could not be separated from the conversation. Check that nothing you dictated ' +
         'has been recorded as if it were said to the patient.');
@@ -366,6 +324,37 @@ export default async function handler(req, res) {
         'dictated part could not be placed exactly. Check that nothing said to the patient has been ' +
         'treated as dictated, and nothing dictated as said to the patient.');
     }
+
+    // Dictation only, enforced here and not left to the prompt: with no
+    // dictation the model had nothing it was allowed to take the treatment or
+    // the LA from, so anything in them came from the conversation.
+    if (!dictationRequested || !dictationLocated) {
+      const had = (typeof note.treatmentToday === 'string' && note.treatmentToday.trim()) || (note.laLog && note.laLog.length);
+      note.treatmentToday = null;
+      note.laLog = [];
+      if (note.sources) delete note.sources.treatmentToday;
+      if (had) note.gaps.push('Treatment or local anaesthetic came back although nothing was dictated, so it was left out: ' +
+        'they are taken from your dictation only. Press Record more and dictate them, or add them by hand.');
+    }
+
+    // A page from before 27 September 2026 (a tab left open over a deploy)
+    // knows neither field and would drop them silently. For it, they are
+    // written into the plan instead, labelled, so nothing dictated is lost.
+    const features = Array.isArray(body?.features) ? body.features : [];
+    if (!features.includes('treatment')) {
+      const extra = [];
+      if (typeof note.treatmentToday === 'string' && note.treatmentToday.trim()) extra.push(`Treatment carried out today: ${note.treatmentToday.trim()}`);
+      (note.laLog || []).forEach((r, i) => {
+        const cells = LA_LOG_FIELDS.filter((k) => r[k]).map((k) => `${k} ${r[k]}`);
+        if (cells.length) extra.push(`LA ${i + 1}: ${cells.join(', ')}`);
+      });
+      if (extra.length) note.plan = [typeof note.plan === 'string' ? note.plan.trim() : '', ...extra].filter(Boolean).join('\n');
+      delete note.treatmentToday;
+      delete note.laLog;
+    }
+
+    // Last, once every gap is in the list: a question must answer one of them.
+    note.questions = cleanQuestions(note.questions, note.gaps, consultType);
 
     return res.status(200).json({ status: 'done', note });
   } catch (err) {
@@ -576,6 +565,118 @@ async function signRequest({ method, host, path, body, region, service, creds, e
 
 // Word timings from transcribe.mjs, where the turn carries them. From the
 // browser, so untrusted: only offsets inside this turn's text, with a time.
+/**
+ * The transcript the model reads, built from one recording or several.
+ *
+ * For each recording: its turns in order, each as "[label] text", with a line
+ * placed where each pause fell and where Dictate was pressed. Recordings after
+ * the first are introduced by a SEPARATE RECORDING line and have their speaker
+ * labels prefixed (R2-S1 ...), because each transcription job numbers its own
+ * speakers from S1 and nothing makes the second job's S1 the first job's S1.
+ *
+ * Returns null when there is nothing to draft from.
+ */
+function buildTranscript(rawParts) {
+  const MARKER = '[DICTATION \u2014 the clinician alone, after the patient left. Everything below is dictated to the record, not conversation.]';
+  const hasWords = (s) => /[\p{L}\p{N}]/u.test(s);
+  const lines = [];
+  const markLines = new Set();
+  const allPauses = [];
+  let budget = MAX_TURNS;
+  let dictationRequested = false, dictationLocated = true, dictationInexact = false;
+
+  rawParts.forEach((part, pi) => {
+    const count = rawParts.length;
+    const prefix = pi === 0 ? '' : `R${pi + 1}-`;
+    if (pi > 0) {
+      const m = partMarker(pi + 1, count);
+      markLines.add(m);
+      lines.push(m);
+    }
+    const turns = part.turns.slice(0, Math.max(0, budget));
+    budget -= turns.length;
+
+    // Where the clinician paused. Shapes the prompt so the note cannot assert a
+    // sequence across unrecorded time. Bounded and sanitised like everything else.
+    const pauses = Array.isArray(part.pauses)
+      ? part.pauses
+          .filter((p) => p && Number.isFinite(p.forMs) && Number.isFinite(p.atRecordedMs) && p.forMs > 1000)
+          .slice(0, 20)
+          .map((p) => ({ atRecordedMs: Math.max(0, p.atRecordedMs), forMs: Math.max(0, p.forMs) }))
+      : [];
+    allPauses.push(...pauses);
+
+    // Where the clinician pressed Dictate, in seconds into the RECORDING. The
+    // file's timeline is recorded time (paused time does not exist in it), and
+    // Speechmatics gives each turn a start time on that same timeline, so the
+    // marker goes in front of the first turn that starts at or after it.
+    const dictationFromS = Number.isFinite(part.dictationFromS) && part.dictationFromS >= 0
+      ? Number(part.dictationFromS) : null;
+    if (dictationFromS !== null) dictationRequested = true;
+
+    // Each pause goes into the transcript the same way, as a line of its own
+    // where it fell: the model reads lines, not times. In recording order; at
+    // the same point, the pause before the dictation (sort is stable).
+    const marks = [
+      ...pauses.map((p) => ({ atS: p.atRecordedMs / 1000, line: pauseMarker(p.forMs), dictation: false })),
+      ...(dictationFromS !== null ? [{ atS: dictationFromS, line: MARKER, dictation: true }] : [])
+    ].sort((a, b) => a.atS - b.atS);
+    marks.forEach((m) => markLines.add(m.line));
+    let next = 0;               // the first marker not yet placed
+    let sawTimes = false;
+
+    for (const t of turns) {
+      const text = String(t && t.text || '').trim();
+      // Skip only turns with nothing in them. A length cut-off (this was once
+      // "<= 5 characters") silently removed "Yes.", "No.", "Okay." and "Sure."
+      // — in a consent discussion, very often the patient's actual answer. A
+      // dropped "No." reads to the model as the clinician carrying straight on.
+      if (!hasWords(text)) continue;
+      const own = String(t.speaker || 'UU');
+      const speaker = /^(S\d{1,2}|UU)$/.test(own) ? prefix + own : prefix + 'UU';
+      const start = Number.isFinite(t.start) ? t.start : null;
+      const end = Number.isFinite(t.end) ? t.end : null;
+      if (start !== null) sawTimes = true;
+      while (next < marks.length && start !== null && start >= marks[next].atS) lines.push(marks[next++].line);
+
+      // A marker that falls INSIDE this turn: speech runs on across the Dictate
+      // press or the pause. Split the turn at the first word starting at or
+      // after it, where the word timings came with the turn. Without them, the
+      // marker goes in front of the whole turn: for the dictation that is the
+      // side that never presents dictated findings as said to the patient, and
+      // it is said in the gaps, because it can move the end of the
+      // conversation along with it.
+      const words = wordStarts(t.words, text);
+      let from = 0;
+      while (next < marks.length && start !== null && end !== null && marks[next].atS < end) {
+        const m = marks[next];
+        if (words) {
+          const w = words.find((x) => x.at >= from && x.start >= m.atS);
+          if (!w) break;   // every word left began before it: it goes before the next turn
+          const head = text.slice(from, w.at).trim();
+          if (hasWords(head)) lines.push(`[${speaker}] ${head}`);
+          from = w.at;
+        } else if (m.dictation) {
+          dictationInexact = true;
+        }
+        lines.push(m.line);
+        next++;
+      }
+      const rest = text.slice(from).trim();
+      if (hasWords(rest)) lines.push(`[${speaker}] ${rest}`);
+    }
+    // Dictate pressed, or a pause taken, after every turn had started (e.g. no
+    // speech after): still say so, so the model does not look for dictation
+    // that is not there.
+    if (sawTimes) while (next < marks.length) lines.push(marks[next++].line);
+    if (dictationFromS !== null && !sawTimes) dictationLocated = false;
+  });
+
+  const transcript = lines.join('\n');
+  if (!transcript || lines.every((l) => markLines.has(l))) return null;
+  return { transcript, pauses: allPauses, dictationRequested, dictationLocated, dictationInexact };
+}
+
 function wordStarts(words, text) {
   if (!Array.isArray(words)) return null;
   const out = words.filter((w) => w && Number.isInteger(w.at) && w.at >= 0 && w.at < text.length && Number.isFinite(w.start));

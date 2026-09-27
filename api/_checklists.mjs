@@ -13,6 +13,20 @@
  *   sedation            EXPANDED 5 September 2026 at AM's request (7 -> 19)
  *   implant-surgery     EXPANDED 5 September 2026 at AM's request (5 -> 15)
  *
+ *   exam-recall, emergency, perio, restorative, endo, treatment-plan
+ *                       DRAFTED 27 September 2026 at AM's request — NOT YET
+ *                       REVIEWED. Until 27 September these six types had no
+ *                       checklist at all, so "no gaps flagged" meant nothing
+ *                       had been looked for. exam-recall and emergency are
+ *                       RECORD-KEEPING lists, built on the headings of the
+ *                       CGDent (formerly FGDP(UK)) guidance on clinical
+ *                       examination and record-keeping: what a record of that
+ *                       appointment is expected to contain, said to the
+ *                       patient or dictated. The other four are consent lists
+ *                       like the surgical ones. Every word is the assistant's
+ *                       draft; each carries `reviewed: false`, and the page
+ *                       says so under the list, until AM has been through it.
+ *
  *                       For these two, AM specified WHAT was missing — fitness
  *                       for sedation, the escort staying, surgical risks and
  *                       implant post-op — and approved the result. The wording
@@ -33,6 +47,11 @@
  *
  * Deliberately no figures. A checklist asks whether a risk was named, not what
  * number was put on it; the number is the clinician's to say and to stand by.
+ *
+ * Lead-ins the page understands: "Not mentioned:", "Not asked about:",
+ * "Not offered:", and since 27 September "Not recorded:" for a record-keeping
+ * item, which may be found in the conversation OR in the dictation. A condition
+ * goes after a comma ("Not recorded, for a prescription: ...").
  */
 
 const MH = {
@@ -75,6 +94,21 @@ const MH = {
     key: 'mh-allergies',
     ask: 'Allergies were asked about or confirmed.',
     gap: 'Not asked about: allergies.'
+  },
+};
+
+/* Record-keeping items shared by the exam and emergency lists (27 Sep 2026,
+   drafted, not reviewed). Found if said to the patient OR dictated. */
+const RK = {
+  mh: {
+    key: 'rk-mh',
+    ask: 'The medical history was checked or updated at this visit — asked about with the patient, or said or dictated as checked, updated or unchanged.',
+    gap: 'Not recorded: medical history checked or updated.'
+  },
+  radiographs: {
+    key: 'rk-radiographs',
+    ask: 'Radiographs were mentioned, said or dictated: taken, with why and what they showed; or not taken, with why (not needed, not due).',
+    gap: 'Not recorded: radiographs — why taken and what they showed, or why none were taken.'
   },
 };
 
@@ -201,6 +235,110 @@ export const CHECKLISTS = {
   },
 };
 
+/* ---- 27 September 2026: the six types that had no checklist. DRAFTS. ---- */
+Object.assign(CHECKLISTS, {
+  'exam-recall': {
+    label: 'Exam / recall',
+    reviewed: false,
+    items: [
+      { key: 'rk-concerns',   ask: 'The patient was asked whether they had any problems or concerns, or it was said or dictated that they had none.', gap: 'Not recorded: whether the patient had any concerns.' },
+      RK.mh,
+      { key: 'rk-social',     ask: 'Smoking or other tobacco use, and alcohol, were asked about, said or dictated.', gap: 'Not recorded: smoking and alcohol.' },
+      { key: 'rk-extraoral',  ask: 'An extra-oral examination was said or dictated (face, lymph nodes, jaw joints or muscles), a normal finding included.', gap: 'Not recorded: extra-oral examination.' },
+      { key: 'rk-softtissue', ask: 'An intra-oral soft tissue examination was said or dictated (cheeks, tongue, floor of mouth, palate, throat), a normal finding included.', gap: 'Not recorded: intra-oral soft tissue examination.' },
+      { key: 'rk-perio',      ask: 'BPE scores or another periodontal assessment were said or dictated, or the reason none was done.', gap: 'Not recorded: BPE or periodontal assessment.' },
+      { key: 'rk-teeth',      ask: 'Findings for the teeth were said or dictated — caries, restorations, wear, or that nothing had changed.', gap: 'Not recorded: findings for the teeth.' },
+      RK.radiographs,
+      { key: 'rk-risk',       ask: 'The patient\'s risk of caries, gum disease or oral cancer was assessed or stated, said or dictated (for example "low caries risk").', gap: 'Not recorded: risk assessment (caries, gum disease, oral cancer).' },
+      { key: 'rk-advice',     ask: 'The clinician gave the patient oral hygiene or prevention advice (brushing, cleaning between the teeth, fluoride, diet, smoking or alcohol).', gap: 'Not mentioned: oral hygiene or prevention advice.' },
+      { key: 'rk-plan',       ask: 'The treatment needed was said or dictated, or that none is needed.', gap: 'Not recorded: treatment needed, or that none is needed.' },
+      { key: 'rk-recall',     ask: 'A recall interval was said or dictated (for example "see you in six months").', gap: 'Not recorded: recall interval.' },
+    ]
+  },
+
+  emergency: {
+    label: 'Emergency',
+    reviewed: false,
+    items: [
+      { key: 'em-history',    ask: 'The problem was described, said or dictated: where it is, how long it has been going on, and what it is like.', gap: 'Not recorded: the history of the problem (where, how long, what it is like).' },
+      RK.mh,
+      { key: 'em-exam',       ask: 'Examination findings for the area of concern were said or dictated.', gap: 'Not recorded: examination of the problem area.' },
+      RK.radiographs,
+      { key: 'em-diagnosis',  ask: 'A diagnosis or working diagnosis was said or dictated.', gap: 'Not recorded: a diagnosis or working diagnosis.' },
+      { key: 'em-options',    ask: 'The clinician explained the options for dealing with it, including what would happen if it were left.', gap: 'Not mentioned: the options, including leaving it.' },
+      { key: 'em-done',       ask: 'What was done today, or that nothing was done, was said or dictated.', gap: 'Not recorded: what was done today.' },
+      { key: 'em-rx',         ask: 'Whether a medicine was prescribed or advised was said or dictated — that none was, or if one was, its name, dose and how long to take it. Silence about medicines is not found.', gap: 'Not recorded: whether a medicine was prescribed, and if so the name, dose and how long.' },
+      { key: 'em-worse',      ask: 'The clinician told the patient what to do if it gets worse, or when to get in touch.', gap: 'Not mentioned: what to do if it gets worse.' },
+      { key: 'em-followup',   ask: 'Follow-up or definitive treatment was arranged or advised, said or dictated.', gap: 'Not recorded: follow-up or definitive treatment.' },
+    ]
+  },
+
+  perio: {
+    label: 'Perio',
+    reviewed: false,
+    items: [
+      { key: 'pe-scores',     ask: 'BPE scores or pocket charting were said or dictated.', gap: 'Not recorded: BPE or pocket charting.' },
+      { key: 'pe-diagnosis',  ask: 'A periodontal diagnosis was said or dictated (for example a stage and grade, or gingivitis).', gap: 'Not recorded: periodontal diagnosis.' },
+      MH.smoking, MH.diabetes,
+      { key: 'pe-ohi',        ask: 'The clinician gave oral hygiene advice, including cleaning between the teeth.', gap: 'Not mentioned: oral hygiene advice, including cleaning between the teeth.' },
+      { key: 'pe-role',       ask: 'The clinician explained that the outcome depends on the patient\'s own cleaning (and on not smoking, where that applies).', gap: 'Not mentioned: that the outcome depends on the patient\'s own cleaning.' },
+      { key: 'pe-stabilise',  ask: 'The clinician explained that treatment controls the disease rather than curing it, or that it can come back.', gap: 'Not mentioned: that treatment controls rather than cures, and it can come back.' },
+      { key: 'pe-after',      ask: 'The clinician mentioned what treatment can leave behind: sensitivity, gums shrinking back, or gaps appearing between the teeth.', gap: 'Not mentioned: sensitivity, gums shrinking back or gaps between the teeth after treatment.' },
+      { key: 'pe-untreated',  ask: 'The clinician explained what could happen if it is not treated (for example teeth loosening or being lost).', gap: 'Not mentioned: what could happen if it is not treated.' },
+      { key: 'pe-review',     ask: 'A review or re-assessment after treatment was mentioned.', gap: 'Not mentioned: review after treatment.' },
+    ]
+  },
+
+  restorative: {
+    label: 'Restorative',
+    reviewed: false,
+    items: [
+      { key: 're-options',    ask: 'The clinician explained the options for restoring the tooth (for example different filling materials, an onlay or a crown), or why there is only one.', gap: 'Not mentioned: the options for restoring the tooth.' },
+      { key: 're-none',       ask: 'Leaving the tooth untreated was offered as an option, or the reason it is not was given.', gap: 'Not offered: leaving it untreated (or why not).' },
+      { key: 're-material',   ask: 'The material to be used was discussed, with how it looks or how long it may last.', gap: 'Not mentioned: the material, and how long it may last.' },
+      { key: 're-sensitivity', ask: 'Sensitivity or discomfort afterwards was mentioned.', gap: 'Not mentioned: sensitivity afterwards.' },
+      { key: 're-nerve',      ask: 'The clinician mentioned that the nerve may need root canal treatment later, or that the tooth could be lost.', gap: 'Not mentioned: possible root canal treatment later, or loss of the tooth.' },
+      { key: 're-breakage',   ask: 'The clinician mentioned that the tooth or the restoration could break, or need replacing in future.', gap: 'Not mentioned: the tooth or restoration may break or need replacing.' },
+    ]
+  },
+
+  endo: {
+    label: 'Endo',
+    reviewed: false,
+    items: [
+      { key: 'en-success',    ask: 'The chance of success was discussed, or that it may not work.', gap: 'Not mentioned: the chance of success, or that it may not work.' },
+      { key: 'en-visits',     ask: 'The number of visits was mentioned.', gap: 'Not mentioned: number of visits.' },
+      { key: 'en-flareup',    ask: 'Pain or a flare-up after treatment was mentioned.', gap: 'Not mentioned: pain or a flare-up after treatment.' },
+      { key: 'en-procedural', ask: 'The clinician mentioned that an instrument could separate, the root could be perforated, or the treatment might not be completed.', gap: 'Not mentioned: a separated instrument, a perforation, or treatment not being completed.' },
+      { key: 'en-restoration', ask: 'The clinician explained that the tooth will need a permanent filling or crown afterwards, or that it may fracture without one.', gap: 'Not mentioned: the permanent filling or crown needed afterwards.' },
+      { key: 'en-alt-extract', ask: 'Extraction was offered as an alternative, or the reason it is not suitable was given.', gap: 'Not offered: extraction as the alternative.' },
+      { key: 'en-alt-none',   ask: 'No treatment, and what it would mean, was mentioned.', gap: 'Not offered: no treatment, and what that would mean.' },
+      { key: 'en-referral',   ask: 'Referral to a specialist was mentioned as an option, or why not.', gap: 'Not mentioned: referral to a specialist (or why not).' },
+    ]
+  },
+
+  'treatment-plan': {
+    label: 'Treatment plan consult',
+    reviewed: false,
+    items: [
+      { key: 'tp-options',    ask: 'More than one option was described, or the clinician explained why there is only one.', gap: 'Not mentioned: the options, or why there is only one.' },
+      { key: 'tp-none',       ask: 'Doing nothing, and what it would mean, was mentioned.', gap: 'Not offered: no treatment, and what that would mean.' },
+      { key: 'tp-risks',      ask: 'The main risks or drawbacks of the options were described.', gap: 'Not mentioned: the risks or drawbacks of the options.' },
+      { key: 'tp-costs',      ask: 'The cost of the options was discussed, or whether they are NHS or private.', gap: 'Not mentioned: the cost of each option (NHS or private).' },
+      { key: 'tp-sequence',   ask: 'The order of treatment or the number of visits was described.', gap: 'Not mentioned: order of treatment or number of visits.' },
+      { key: 'tp-longevity',  ask: 'How long the treatment may last, or the maintenance it needs, was discussed.', gap: 'Not mentioned: how long it may last, or the maintenance it needs.' },
+      { key: 'tp-time',       ask: 'The patient was offered time to think it over, or a written plan.', gap: 'Not offered: time to think it over, or a written plan.' },
+    ]
+  },
+});
+
+/** A checklist nobody has reviewed yet. The page says so beneath the list. */
+export function checklistIsDraft(consultTypeKey) {
+  if (typeof consultTypeKey !== 'string') return false;
+  if (!Object.prototype.hasOwnProperty.call(CHECKLISTS, consultTypeKey)) return false;
+  return CHECKLISTS[consultTypeKey].reviewed === false;
+}
+
 /** Keys the model must report against for a given consult type; [] if none.
  *  Own-property lookup only: consultType arrives from the client, and a value
  *  like "constructor" or "__proto__" would otherwise return something off
@@ -211,6 +349,28 @@ export function checklistFor(consultTypeKey) {
   if (!Object.prototype.hasOwnProperty.call(CHECKLISTS, consultTypeKey)) return [];
   const c = CHECKLISTS[consultTypeKey];
   return Array.isArray(c?.items) ? c.items : [];
+}
+
+/**
+ * The checklist as the clinician reads it, for the page to show DURING the
+ * recording (added 27 September 2026 at the clinical lead's request). Built from
+ * the `gap` wording, which is the clinician's own, with its "Not mentioned:" /
+ * "Not asked about:" / "Not offered:" lead-in taken off, so it reads as a topic
+ * ("Bleeding", "Leaving the tooth and monitoring"). No new wording is written
+ * here: a topic is always the tail of a reviewed gap line.
+ */
+export function checklistTopic(gap) {
+  const s = String(gap || '').trim();
+  const m = s.match(/^Not [a-z ]{1,30}?(?:,\s*(for [^:]{1,40}))?:\s*(.+)$/i);
+  let t = (m ? m[2] : s).replace(/[.\s]+$/, '').trim();
+  if (!t) return '';
+  t = t.charAt(0).toUpperCase() + t.slice(1);
+  // "Not mentioned, for an upper tooth: the sinus ..." keeps its condition.
+  return m && m[1] ? `${t} (${m[1].trim()})` : t;
+}
+
+export function checklistTopics(consultTypeKey) {
+  return checklistFor(consultTypeKey).map((i) => ({ key: i.key, topic: checklistTopic(i.gap) })).filter((i) => i.topic);
 }
 
 /**

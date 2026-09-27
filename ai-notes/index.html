@@ -418,6 +418,10 @@ button:disabled { opacity: .45; cursor: default; }
 .dictated-heading { margin-top: 22px; padding-top: 14px; border-top: 1px dashed var(--line); font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
 table.implant-log { width: 100%; border-collapse: collapse; font-size: .85rem; margin: 6px 0 14px; }
 table.implant-log th, table.implant-log td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.la-log td[contenteditable]:not([contenteditable="false"]):empty::before { content: attr(data-placeholder); color: var(--ink-faint); }
+table.la-log td[contenteditable]:not([contenteditable="false"]) { min-width: 3em; }
+table.la-log td[contenteditable]:not([contenteditable="false"]):focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+#la-block .add-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
 table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
 .ask-row { display: flex; gap: 8px; }
 .ask-row input {
@@ -455,6 +459,86 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 .gaps li { margin-bottom: 6px; color: var(--warn-ink); font-size: .9375rem; }
 .gaps.clear { border-color: var(--line); background: var(--surface); }
 .gaps.clear h2, .gaps.clear p.lead { color: var(--ink-muted); }
+
+/* ---- sources (27 Sep 2026) ---- */
+.src { margin-top: 6px; }
+.src-toggle {
+  min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px;
+  background: transparent; color: var(--ink-muted); border: 1px solid var(--line);
+}
+.src-toggle.warn { color: var(--warn-ink); border-color: var(--warn-line); background: var(--warn-bg); }
+.src-note { font-size: .75rem; color: var(--ink-faint); margin: 4px 0 0; }
+.src-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.src-list > li { margin: 0 0 10px; font-size: .8125rem; color: var(--ink); }
+.src-list > li.none { color: var(--warn-ink); }
+.src-list .mark { font-weight: 700; margin-right: 6px; }
+.src-list blockquote {
+  margin: 4px 0 0 16px; padding: 2px 0 2px 10px; border-left: 2px solid var(--line);
+  font-size: .8125rem; color: var(--ink-muted);
+}
+.src-list .who { font-size: .72rem; color: var(--ink-faint); margin-left: 6px; white-space: nowrap; }
+
+/* ---- covered elsewhere (27 Sep 2026) ---- */
+#notsaid li .cover-btn {
+  min-height: 30px; padding: 0 10px; margin-left: 8px; font-size: .75rem; font-weight: 600;
+  border-radius: 6px; vertical-align: middle;
+}
+.cover-form { margin: 8px 0 4px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cover-form .chip { min-height: 30px; padding: 0 10px; font-size: .75rem; border-radius: 15px; }
+.cover-form input { flex: 1 1 220px; min-height: 34px; font: inherit; font-size: .875rem; padding: 0 8px;
+  border: 1px solid var(--line-firm); border-radius: 6px; }
+.cover-form .add { font-weight: 600; }
+#covered-block li { margin-bottom: 6px; font-size: .9375rem; }
+#covered-block li button { min-height: 28px; padding: 0 8px; margin-left: 8px; font-size: .72rem; border-radius: 6px; }
+
+/* ---- answering a gap (27 Sep 2026) ---- */
+#notsaid h3.sub { font-size: .8125rem; color: var(--warn-ink); margin: 12px 0 4px; text-transform: none; letter-spacing: 0; }
+#notrec li .cover-btn {
+  min-height: 30px; padding: 0 10px; margin-left: 8px; font-size: .75rem; font-weight: 600;
+  border-radius: 6px; vertical-align: middle;
+}
+#gaps li .answer-btn {
+  min-height: 30px; padding: 0 10px; margin-left: 8px; font-size: .75rem; font-weight: 600;
+  border-radius: 6px; vertical-align: middle;
+}
+#gaps li.answered > span:first-child { text-decoration: line-through; opacity: .75; }
+#gaps li .answered-note { display: block; margin-top: 4px; font-size: .8125rem; color: var(--ink); }
+#gaps li .answered-note button { min-height: 28px; padding: 0 8px; margin-left: 8px; font-size: .72rem; border-radius: 6px; }
+.answer-form { margin: 8px 0 4px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.answer-form .ask { flex: 1 1 100%; margin: 0; font-weight: 600; color: var(--ink); font-size: .875rem; }
+.answer-form .where { flex: 1 1 100%; margin: 0; font-size: .75rem; color: var(--ink-muted); }
+.answer-form .chip { min-height: 30px; padding: 0 10px; font-size: .75rem; border-radius: 15px; }
+.answer-form input { flex: 1 1 220px; min-height: 34px; font: inherit; font-size: .875rem; padding: 0 8px;
+  border: 1px solid var(--line-firm); border-radius: 6px; }
+.answer-form .add { font-weight: 600; }
+.added-tag { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+
+/* ---- BPE (27 Sep 2026) ---- */
+table.bpe { border-collapse: collapse; margin: 4px 0 8px; }
+table.bpe td { border: 1px solid var(--line-firm); padding: 4px; text-align: center; }
+table.bpe td span { display: block; font-size: .65rem; color: var(--ink-faint); letter-spacing: .05em; }
+table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height: 34px; text-align: center;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); }
+.bpe-note { font-size: .8125rem; color: var(--ink-muted); margin: 2px 0 0; }
+.bpe-note.warn { color: var(--warn-ink); }
+
+/* ---- to do (27 Sep 2026) ---- */
+#todo h2 { margin: 0; font-size: 1.0625rem; }
+#todo-list { list-style: none; margin: 0; padding: 0; }
+#todo-list li { margin: 0 0 8px; font-size: .9375rem; }
+#todo-list label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+#todo-list input { margin-top: 4px; }
+#todo-list li.done .task { text-decoration: line-through; color: var(--ink-muted); }
+#todo-list .heard { display: block; margin: 2px 0 0 24px; font-size: .75rem; color: var(--ink-faint); }
+#todo-list .heard.warn { color: var(--warn-ink); }
+
+/* ---- checklist while recording (27 Sep 2026) ---- */
+.rec-checklist { text-align: left; margin: 14px 0 6px; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; }
+.rec-checklist summary { cursor: pointer; font-weight: 600; font-size: .875rem; color: var(--ink); }
+.rec-checklist ul { margin: 8px 0 4px; padding-left: 20px; columns: 2 260px; column-gap: 24px; }
+.rec-checklist li { font-size: .8125rem; margin: 0 0 4px; break-inside: avoid; color: var(--ink-muted); }
+.rec-checklist p { text-align: left; margin: 6px 0 0; }
 
 /* ---- note fields ---- */
 .field { border-top: 1px solid var(--line); padding: 16px 0; }
@@ -548,7 +632,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       </div>
       <div class="who-lock">
         <span id="who" class="who hidden" title="Whose session this is"></span>
-        <button type="button" id="lock" title="End this session and require the passcode again">Lock</button>
+        <button type="button" id="lock" title="End this session and require signing in again">Lock</button>
       </div>
     </div>
     <p class="storage-note">
@@ -621,6 +705,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       <p class="timer-note" id="timer-note">Stops automatically at 30:00</p>
       <div class="level" aria-hidden="true"><i id="level"></i></div>
       <p class="level-note" id="level-note" role="status"></p>
+      <details id="rec-checklist" class="rec-checklist hidden" open>
+        <summary id="rec-checklist-title">Checklist</summary>
+        <ul id="rec-checklist-list"></ul>
+        <p class="timer-note">Your checklist for this consult type. Anything not covered is listed after you stop.</p>
+      </details>
       <div class="record-row">
         <button class="btn-pause" id="pause">Pause</button>
         <button class="btn-pause" id="dictate" title="Everything after this is dictated to the record, not conversation">Dictate</button>
@@ -645,18 +734,43 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
     <div class="gaps" id="notsaid">
       <h2 id="notsaid-title">Not said during this consultation</h2>
-      <p class="lead">
-        These are things the checklist for this procedure looked for and did not find in the recording.
-        If you discussed one and the recording missed it, add it. <strong>If you did not discuss it, do not
-        add it to the record</strong> — raise it with the patient instead.
+      <p class="lead hidden" id="notsaid-draft">
+        This checklist is a first draft that has not been reviewed yet. If an item does not fit this
+        appointment, leave it: nothing on this list goes into the note unless you put it there.
       </p>
-      <ul id="notsaid-list"></ul>
+      <div id="notsaid-said">
+        <p class="lead">
+          These are things the checklist for this procedure looked for and did not find in the recording.
+          If you discussed one and the recording missed it, add it. <strong>If you did not discuss it, do not
+          add it to the record</strong> — raise it with the patient instead.
+        </p>
+        <ul id="notsaid-list"></ul>
+      </div>
+      <!-- Record-keeping items (27 Sep 2026): looked for in what was said OR
+           dictated. Kept under their own heading: the instruction is the same
+           in spirit (never record what did not happen) but the act is different. -->
+      <div id="notrec" class="hidden">
+        <h3 class="sub">Not recorded</h3>
+        <p class="lead">
+          The checklist also looked for these in what you said or dictated. <strong>Add one only if it was
+          done</strong> — press Record more and dictate it, or type it into the note.
+        </p>
+        <ul id="notrec-list"></ul>
+      </div>
     </div>
 
     <div class="gaps" id="gaps">
       <h2 id="gaps-title">Check before you paste</h2>
       <p class="lead" id="gaps-lead"></p>
       <ul id="gaps-list"></ul>
+    </div>
+
+    <!-- A third list, deliberately apart from the two above: not "missing from
+         the note" but "in the note, and not found in the recording". -->
+    <div class="gaps hidden" id="sourcecheck">
+      <h2 id="sourcecheck-title">Source check</h2>
+      <p class="lead" id="sourcecheck-lead"></p>
+      <ul id="sourcecheck-list"></ul>
     </div>
 
     <div class="card">
@@ -676,6 +790,20 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       <p class="timer-note" id="template-hint" style="margin:2px 0 0"></p>
       <p class="timer-note" id="edit-hint">Every field can be edited here before you copy it.</p>
       <div id="fields"></div>
+    </div>
+
+    <!-- Tasks said in the recording (27 Sep 2026). Not part of the note, and
+         never copied into it: a list to work through, gone with everything else. -->
+    <div class="card hidden" id="todo">
+      <div class="field-head">
+        <h2 id="todo-title">To do after this appointment</h2>
+        <button type="button" class="copy" id="copy-todo">Copy list</button>
+      </div>
+      <p class="timer-note" style="margin:0 0 10px;text-align:left">
+        Tasks the draft found in the recording. Check each against what was said, and tick them off as you
+        go. Nothing here is saved or added to the note.
+      </p>
+      <ul id="todo-list"></ul>
     </div>
 
     <div class="card derived" id="derived">
@@ -753,6 +881,12 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         <button class="primary" id="copy-all">Copy whole note</button>
         <button class="danger" id="clear">Clear everything</button>
       </div>
+      <div class="actions" style="margin-top:12px">
+        <button type="button" id="add-part" class="hidden">Record more for this consultation</button>
+      </div>
+      <p class="timer-note hidden" id="add-part-note" style="margin:6px 0 0">
+        For example after a radiograph. The note is redrafted from all the recordings together.
+      </p>
       <p class="timer-note" style="margin:14px 0 0">
         This is a draft. Read it against what you remember, then paste it into the record.
         Nothing here is saved — closing the tab destroys it.
@@ -785,7 +919,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-25.1';
+  var BUILD = '2026-09-27.4';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -861,6 +995,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
                                      // asking first is the one thing the idle
                                      // timer should not do.
     SIZE_STOP:     0.95,       // stop here, while the result still fits
+    MAX_PARTS:     3,          // recordings in one consultation: the first and two more
 
     // DPIA §2.1 step 6 / R13. The spec says destroy on tab hide. That would
     // break the workflow: copying block by block into a web PMS in another tab
@@ -906,8 +1041,14 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   var DICTATED_FIELDS = [
     ['examination',          'Examination findings'],
     ['radiographicFindings', 'Radiographic findings'],
+    ['treatmentToday',       'Treatment carried out today'],
     ['plan',                 'Treatment plan']
   ];
+  // Where treatment is carried out on the day (27 Sep 2026): the treatment
+  // section is offered, empty, whenever Dictate was pressed. Elsewhere it only
+  // appears if something was dictated into it.
+  var TREATMENT_TYPES = ['extraction-surgery', 'third-molar', 'implant-surgery', 'emergency',
+                         'restorative', 'endo', 'perio', 'sedation'];
   // How the note READS, which is not the order the fields are extracted in.
   // A template is a LAYOUT: which fields appear, in what order, under what
   // headings. It never changes what was extracted, so switching between them
@@ -922,6 +1063,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         ['Findings',     [['examination', true], ['radiographicFindings', true]]],
         ['Discussion',   [['proposed', false], ['alternatives', false], ['patientFactors', false],
                           ['risks', false], ['benefits', false], ['costs', false], ['patientQuestions', false]]],
+        ['Treatment',    [['treatmentToday', true]]],
         ['Outcome',      [['decision', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
       ]
     },
@@ -932,6 +1074,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         ['The discussion', [['proposed', false], ['alternatives', false], ['risks', false],
                             ['benefits', false], ['patientFactors', false], ['costs', false]]],
         ['The patient',    [['patientQuestions', false], ['informationGiven', false], ['decision', false]]],
+        ['Treatment',      [['treatmentToday', true]]],
         ['Context',        [['reasonForAttendance', false], ['medicalHistory', false],
                             ['examination', true], ['radiographicFindings', true]]],
         ['Next',           [['nextStep', false], ['plan', true]]]
@@ -944,7 +1087,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         ['Subjective', [['reasonForAttendance', false], ['medicalHistory', false], ['patientQuestions', false], ['patientFactors', false]]],
         ['Objective',  [['examination', true], ['radiographicFindings', true]]],
         ['Assessment', [['proposed', false], ['alternatives', false], ['risks', false], ['benefits', false]]],
-        ['Plan',       [['decision', false], ['costs', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
+        ['Plan',       [['treatmentToday', true], ['decision', false], ['costs', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
       ]
     }
   };
@@ -1006,7 +1149,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     rafId: null,
     lastSoundAt: 0,
     sizeNote: '',     // size / stall warning; the meter merges it with its own silence note
-    captureNote: null,// set when the encoder captured less than the recorded clock; rendered as a gap
+    captureNote: null,// the stopped recording's capture shortfall, until it joins the transcript with its part
     rateNote: '',     // measured size of the last recording, shown under the draft
     micLost: false,   // the recording's microphone track ended mid-recording
     noteLength: 'standard',  // brief | standard | full
@@ -1032,7 +1175,16 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     recSecs: 0,
     jobId: null,
     jobTicket: null,  // proves this job is ours; the server stores nothing
-    turns: null,      // held ONLY between a failed draft and a retry
+    // The consultation's transcript, one entry per recording:
+    // { turns, pauses, dictationFromS }. Usually one; "Record more" adds up to
+    // two more (27 September 2026). Memory only, destroyed with everything else.
+    parts: [],
+    pendingPart: null,// the stopped recording's pauses and dictation, until its transcript arrives
+    noteParts: 0,     // how many of the parts the note on screen was drafted from
+    moreRecording: false, // the recording running now is an extra one for this consultation
+    covered: {},      // checklist items the clinician marked covered elsewhere: gap text -> where
+    answered: {},     // gaps the clinician answered: gap text -> { field, text } added to that field
+    todoDone: {},     // ticks on the to-do list, by position; UI only
     note: null,
     busy: false,
     heldAudio: null,  // the recording, until its transcript arrives; memory only
@@ -1045,6 +1197,30 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   };
 
   var $ = function (id) { return document.getElementById(id); };
+
+  /* ---- the transcript, however many recordings it came from ---- */
+  function hasTranscript() { return S.parts.length > 0; }
+  function allPauses() {
+    var out = [];
+    S.parts.forEach(function (p) { out = out.concat(p.pauses || []); });
+    return out;
+  }
+  function anyDictation() {
+    return S.parts.some(function (p) { return p.dictationFromS !== null && p.dictationFromS !== undefined; });
+  }
+  // What every request made from the transcript sends. One recording goes as it
+  // always has (turns, pauses, dictationFromS); several go as `parts`, each on
+  // its own timeline, so the server places each one's pauses and dictation
+  // exactly as it would for a single recording.
+  function withTranscript(extra) {
+    var one = function (p) {
+      return { turns: p.turns, pauses: p.pauses || [],
+               dictationFromS: p.dictationFromS === null ? undefined : p.dictationFromS };
+    };
+    var body = S.parts.length === 1 ? one(S.parts[0]) : { parts: S.parts.map(one) };
+    Object.keys(extra).forEach(function (k) { body[k] = extra[k]; });
+    return body;
+  }
 
   // What every editable box is made editable AS. With plain `true`, Enter in
   // Chrome and Safari inserts a <div> or a <br> rather than a line break, so the
@@ -1089,6 +1265,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       $(k).classList.toggle('hidden', k !== name);
     });
     $('recbar').classList.toggle('hidden', name !== 'recording');
+    if (name === 'draft') updateAddPart();
 
     // Move focus to the section that just appeared. Without this, focus stays
     // on the button you pressed in a section that is now hidden: a screen
@@ -1118,8 +1295,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   // so nobody presses "Try drafting again" on a recording that never got as far
   // as a transcript.
   function retryLabels(what) {
-    $('retry').textContent = what === 'audio' ? 'Try transcribing again' : 'Try drafting again';
-    $('discard-transcript').textContent = what === 'audio' ? 'Discard the recording' : 'Discard the transcript';
+    $('retry').textContent = what === 'audio' ? 'Try transcribing again'
+      : what === 'more' ? 'Try again' : 'Try drafting again';
+    $('discard-transcript').textContent = (what === 'audio' && S.note) || what === 'more'
+      ? 'Discard the extra recording'
+      : what === 'audio' ? 'Discard the recording' : 'Discard the transcript';
   }
 
   var toastId = null;
@@ -1337,6 +1517,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      ================================================================== */
   $('script').textContent = CONSENT_SCRIPT;
 
+  // Declared before the buttons below: ?type= clicks one of them straight away,
+  // and that click asks for the checklist.
+  var checklistCache = {};
+
   CONSULT_TYPES.forEach(function (pair) {
     var b = document.createElement('button');
     b.type = 'button';
@@ -1351,6 +1535,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         other.setAttribute('aria-pressed', String(other === b));
       });
       refreshStart();
+      loadChecklist(pair[0]);
     });
     $('types').appendChild(b);
     // ?type=third-molar lands straight on the right clinic. Validated against
@@ -1365,6 +1550,42 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   function refreshStart() {
     $('start').disabled = !(S.consent && S.consultType);
+  }
+
+  /* The checklist for the chosen consult type, shown while recording so the
+     clinician can cover it before pressing Stop rather than find out afterwards
+     (27 September 2026). The server sends the reviewed wording from
+     api/_checklists.mjs; nothing about any patient goes either way. Kept per
+     type for the life of the page. */
+  async function loadChecklist(type) {
+    if (!type || checklistCache[type]) { showRecChecklist(); return; }
+    var items = null;
+    try {
+      var r = await fetch('/api/checklist?type=' + encodeURIComponent(type));
+      var d = await r.json().catch(function () { return {}; });
+      if (r && r.ok && d && Array.isArray(d.items)) {
+        items = d.items.filter(function (i) { return i && typeof i.topic === 'string' && i.topic.trim(); })
+          .map(function (i) { return i.topic.trim().slice(0, 200); }).slice(0, 40);
+      }
+    } catch (e) { /* no checklist shown; recording is unaffected */ }
+    if (items) checklistCache[type] = items;
+    showRecChecklist();
+  }
+
+  function showRecChecklist() {
+    var items = checklistCache[S.consultType] || [];
+    var box = $('rec-checklist'), list = $('rec-checklist-list');
+    list.textContent = '';
+    if (!items.length) { box.classList.add('hidden'); return; }
+    items.forEach(function (t) {
+      var li = document.createElement('li');
+      li.textContent = t;
+      list.appendChild(li);
+    });
+    var label = '';
+    CONSULT_TYPES.forEach(function (c) { if (c[0] === S.consultType) label = c[1]; });
+    $('rec-checklist-title').textContent = 'Checklist: ' + (label || 'this consultation') + ' (' + items.length + ')';
+    box.classList.remove('hidden');
   }
 
   /* ==================================================================
@@ -1428,7 +1649,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   // unload guard, the top-bar links and the expired-session advice, so they
   // cannot drift apart.
   function holding() {
-    return !!(S.note || S.turns || S.heldAudio || S.busy ||
+    return !!(S.note || hasTranscript() || S.heldAudio || S.busy ||
               (S.recorder && S.recorder.state !== 'inactive'));
   }
 
@@ -1579,7 +1800,21 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     try { await startRecording(); } finally { starting = false; }
   });
 
-  async function startRecording() {
+  // Another recording for the SAME consultation — after a radiograph, say
+  // (27 September 2026). Nothing of this patient is cleared: the note stays on
+  // screen until the new recording has been transcribed and the note redrafted
+  // from all of them, and a failure anywhere leaves it exactly as it was.
+  $('add-part').addEventListener('click', async function () {
+    resetIdle();
+    if (starting || S.busy || !S.note || !hasTranscript() || S.parts.length >= CFG.MAX_PARTS) return;
+    if (extraWaiting()) { heldExtraFirst(); return; }
+    if (!redraftConfirmed()) return;
+    starting = true;
+    try { await startRecording({ more: true }); } finally { starting = false; }
+  });
+
+  async function startRecording(opts) {
+    var more = !!(opts && opts.more);
     clearError();
 
     if (!canRecord()) {
@@ -1603,7 +1838,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       // page, and a reload would destroy it.
       return fail('Session expired', holding()
         ? 'Sign in again in a new tab, then come back to this one \u2014 do not reload it, or what is kept here for a retry is lost. Starting now would lose the conversation at the transcription step.'
-        : 'Reload the page and enter the passcode before recording. Starting now would lose the conversation at the transcription step.');
+        : 'Reload the page and sign in again before recording. Starting now would lose the conversation at the transcription step.');
     }
     if (left !== null && left < CFG.SESSION_WARN_S) {
       var mins = Math.max(1, Math.round(left / 60));
@@ -1618,8 +1853,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     // referral, a summary, an Ask — belongs to a patient who has left, and the
     // handlers all check this before writing to S or the screen. Without it, a
     // referral requested for the last patient lands in this one's panel.
-    // Must come BEFORE the recording captures its own gen below.
-    S.gen++;
+    // Must come BEFORE the recording captures its own gen below. Not for an
+    // extra recording: that is the same patient, and a redraft retires what the
+    // old note produced through clearDerived(), as the length picker does.
+    if (!more) S.gen++;
 
     try {
       S.stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints() });
@@ -1699,8 +1936,17 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     S.startedAt = Date.now();
     S.lastSoundAt = Date.now();
     S.sizeNote = '';
-    S.captureNote = null;
-    clearConsultation();
+    if (!more) {
+      S.captureNote = null;
+      clearConsultation();
+    } else {
+      resetRecordingState();
+    }
+    S.moreRecording = more;
+    $('recording-h').textContent = more
+      ? 'Recording ' + (S.parts.length + 1) + ' for this consultation'
+      : 'Recording';
+    showRecChecklist();
     startMeter();
     startTicking();
     show('recording');
@@ -1948,6 +2194,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   $('stop').addEventListener('click', function () { resetIdle(); stopRecording(); });
 
   $('discard').addEventListener('click', function () {
+    if (S.moreRecording) { discardExtraRecording(); return; }
     if (!confirm('Discard this recording? Nothing will be kept.')) return;
     // wipe() first, so the generation is bumped BEFORE the encoder's final
     // flush lands. An earlier version ran wipe() after stopRecording() and
@@ -1961,6 +2208,25 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     show('setup');
     toast('Discarded');
   });
+
+  // An extra recording thrown away: the note it was going to be added to stays
+  // exactly as it was. The recorder is let go FIRST, so when its final flush
+  // lands onRecorderStop sees a superseded recorder and drops the pages.
+  function discardExtraRecording() {
+    if (!confirm('Discard this extra recording? The note stays as it was.')) return;
+    var rec = S.recorder;
+    S.recorder = null;
+    S.moreRecording = false;
+    if (S.tickId) { clearInterval(S.tickId); S.tickId = null; }
+    if (S.rafId) { cancelAnimationFrame(S.rafId); S.rafId = null; }
+    if (rec && rec.state !== 'inactive') { try { rec.stop(); } catch (e) {} }
+    if (rec) rec.pages = [];
+    stopTracks();
+    resetRecordingState();
+    $('recbar').classList.add('hidden');
+    show('draft');
+    toast('Extra recording discarded');
+  }
 
   function stopRecording() {
     if (S.paused) {
@@ -2069,14 +2335,22 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     // Discarded, cleared or timed out while the recorder was shutting down.
     if (gen !== S.gen) { rec.pages = []; return; }
 
-    S.pausesForDraft = S.pauses.filter(function (p) { return p.forMs > 1000; });
+    var more = S.moreRecording;
+    S.moreRecording = false;
+    // This recording's own pauses and dictation, on its own timeline. They join
+    // the transcript when it arrives (process), as one part of the consultation.
+    S.pendingPart = {
+      pauses: S.pauses.filter(function (p) { return p.forMs > 1000; }),
+      dictationFromS: S.dictationFromMs === null ? null : S.dictationFromMs / 1000
+    };
+    var back = S.note ? 'draft' : 'setup';
 
     // What this recording actually cost, for tuning the length ceiling later.
     var recS = recordedMs() / 1000;
     if (recS > 60 && rec.bytes > 0) {
       var perSec = rec.bytes / recS;
-      S.recBytes = rec.bytes;
-      S.recSecs = Math.round(recS);
+      S.recBytes = (more ? S.recBytes : 0) + rec.bytes;
+      S.recSecs = (more ? S.recSecs : 0) + Math.round(recS);
       S.rateNote = fmtTime(recS) + ' recorded, ' + (rec.bytes / 1048576).toFixed(2) + ' MB, ' +
         (perSec / 1024).toFixed(2) + ' KB/s \u2014 at this rate the upload limit falls at about ' +
         Math.floor(CFG.MAX_BYTES * CFG.SIZE_STOP / perSec / 60) + ' minutes.';
@@ -2090,12 +2364,15 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     rec.pages = [];
 
     if (blob.size < 2000) {
-      show('setup');
-      return fail('Nothing recorded', 'The recording was empty. Check the microphone and try again.');
+      S.pendingPart = null;
+      show(back);
+      return fail('Nothing recorded', 'The recording was empty. Check the microphone and try again.' +
+        (more ? ' The note below is unchanged.' : ''));
     }
     if (blob.size > CFG.MAX_BYTES) {
       // The live guard should have stopped it first; this is the backstop.
-      show('setup');
+      S.pendingPart = null;
+      show(back);
       return fail('Recording too long to send',
         'The file is ' + (blob.size / 1048576).toFixed(1) + ' MB after ' + fmtTime(wallS) +
         ', over the ' + (CFG.MAX_BYTES / 1048576).toFixed(1) + ' MB upload limit. That is ' +
@@ -2112,8 +2389,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     // device. A warning that fired on every paused recording would be one you
     // learned to ignore.
     if (wallS > 30 && encodedS > 0 && encodedS < wallS * 0.9) {
-      S.captureNote = 'Only ' + fmtTime(encodedS) + ' of the ' + fmtTime(wallS) +
-        ' recorded was captured. Part of the conversation may be missing from every field below.';
+      S.pendingPart.captureNote = 'Only ' + fmtTime(encodedS) + ' of the ' + fmtTime(wallS) +
+        ' recorded was captured' + (more ? ' in the extra recording' : '') +
+        '. Part of the conversation may be missing from every field below.';
     }
 
     await process(blob);
@@ -2138,22 +2416,29 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     $('working-text').textContent = 'Transcribing\u2026';
     resetIdle();
 
+    // An extra recording for a consultation that already has a note. Every
+    // failure below goes back to that note, unchanged, not to the setup screen.
+    var more = !!S.note;
+    var back = more ? 'draft' : 'setup';
+
     var turns;
     try {
       turns = await transcribe(blob, live);
     } catch (err) {
       if (!live()) return;
       S.busy = false;
-      show('setup');
+      show(back);
       // A 400 or 413 is about the bytes themselves: sending the same bytes
       // again gets the same answer, so there is nothing worth holding.
       if (err && (err.status === 400 || err.status === 413)) {
         S.heldAudio = null;
-        return fail('Transcription failed', String(err.message || err));
+        S.pendingPart = null;
+        return fail('Transcription failed', String(err.message || err) + (more ? '  \u2014  The note below is unchanged.' : ''));
       }
       retryLabels('audio');
       return fail('Transcription failed', String(err.message || err) +
-        '  \u2014  The recording is still held in memory, so this can be tried again without recording again.', true);
+        '  \u2014  The recording is still held in memory, so this can be tried again without recording again.' +
+        (more ? ' The note below is unchanged.' : ''), true);
     }
     blob = null;
     if (!live()) return;   // cleared, locked or timed out while we waited
@@ -2161,8 +2446,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
     if (!turns || turns.length === 0) {
       S.busy = false;
-      show('setup');
-      return fail('Nothing to transcribe', 'No speech was recognised in the recording.');
+      S.pendingPart = null;
+      show(back);
+      return fail('Nothing to transcribe', more
+        ? 'No speech was recognised in the extra recording. The note below is unchanged.'
+        : 'No speech was recognised in the recording.');
     }
 
     // Hold the transcript. If drafting fails, throwing it away would mean the
@@ -2170,12 +2458,25 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     // discussion from memory — for what is usually a transient error. It stays
     // in memory only, and Clear, Lock, tab close and the idle timer all destroy
     // it exactly as they destroy everything else.
-    S.turns = turns;
-    await draft(gen);
+    var pending = S.pendingPart || { pauses: [], dictationFromS: null };
+    S.parts = S.parts.concat([{ turns: turns, pauses: pending.pauses, dictationFromS: pending.dictationFromS,
+                                captureNote: pending.captureNote || null }]);
+    S.pendingPart = null;
+    if (!more) { await draft(gen); return; }
+
+    // The note is redrafted from every recording, like a length change: the
+    // new note carries none of the old one's edits (the clinician was asked
+    // before recording), and a failure leaves the old note and its edits alone.
+    var prevEdited = S.edited;
+    S.edited = false;
+    var ok = await draft(gen, { more: true });
+    if (!ok && live()) S.edited = prevEdited;
   }
 
-  async function draft(gen) {
+  async function draft(gen, opts) {
     var live = function () { return gen === S.gen; };
+    var withMore = !!(opts && opts.more);
+    var parts = S.parts.length;
     S.busy = true;
     clearError();
     show('working');
@@ -2186,10 +2487,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [],
-                               length: S.noteLength,
-                               speakerRoles: S.speakerRoles || undefined,
-                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
+        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment'],
+                                              speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
       if (!live()) return;
@@ -2204,10 +2503,19 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         }
         throw new Error(data.detail || data.error || ('HTTP ' + res.status));
       }
+      // A 200 with no note in it (a proxy's empty answer, say) used to reach
+      // render() as undefined and throw there, leaving the page on "Drafting".
+      if (!data.note || typeof data.note !== 'object' || Array.isArray(data.note)) {
+        throw new Error('No note came back from the drafting service.');
+      }
+      // Belt and braces for the server's own rule: no dictation, no treatment
+      // record and no LA, whatever came back.
+      if (!anyDictation()) { data.note.treatmentToday = null; data.note.laLog = []; }
       // A new note replaces the one every derived document was built from, and
       // the one whose teeth the clinician signed off. Both stop being true here.
       clearDerived();
       S.note = data.note;
+      S.noteParts = parts;
       // A snapshot of what the model produced, before any correction. Kept in
       // memory only, destroyed with the rest; it exists so the session line can
       // say how much of the draft needed changing.
@@ -2222,6 +2530,16 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         // The first-draft wording says "press Try drafting again", and this
         // panel has no such button: the redraft is asked for again from the
         // control that asked for it the first time.
+        if (withMore) {
+          // The extra recording is transcribed and held; only the redraft
+          // failed. Offer it again, and a way to drop the extra recording.
+          retryLabels('more');
+          fail('Could not add the extra recording to the note', (err && err.status === 401
+            ? 'Your sign-in expired. Do not reload this page \u2014 that would destroy it. Open AI Notes in a new tab, sign in there, then come back to this tab and press Try again.'
+            : String(err.message || err)) +
+            '  \u2014  The extra recording has been transcribed and is held in memory. The note below is from before it, unchanged.', true);
+          return false;
+        }
         fail('Could not rewrite the note', err && err.status === 401
           ? 'Your sign-in expired. The note below is unchanged. Do not reload this page \u2014 that would destroy it. Open AI Notes in a new tab, sign in there, then come back to this tab and ask for the redraft again.'
           : String(err.message || err) +
@@ -2235,8 +2553,10 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       // captured nothing. The parser's own message for that case is
       // "Fields are null but no gaps were reported", which is accurate and
       // tells a clinician nothing. Say what actually happened instead.
-      var words = (S.turns || []).reduce(function (n, t) {
-        return n + String((t && t.text) || '').trim().split(/\s+/).filter(Boolean).length;
+      var words = S.parts.reduce(function (n, p) {
+        return n + (p.turns || []).reduce(function (m, t) {
+          return m + String((t && t.text) || '').trim().split(/\s+/).filter(Boolean).length;
+        }, 0);
       }, 0);
       // Only when the MODEL could not make a note of it. A network failure or a
       // Bedrock outage is not a microphone problem, however short the recording,
@@ -2284,15 +2604,41 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     return true;
   }
 
+  // A recording not yet transcribed comes first: while one is held, any
+  // transcript already here belongs to an earlier recording of the same
+  // consultation, and redrafting from that alone would leave the new one out.
   $('retry').addEventListener('click', function () {
     if (S.busy) return;
-    if (S.turns) { draft(S.gen); return; }
     if (S.heldAudio) { process(S.heldAudio); return; }
+    if (hasTranscript()) {
+      if (S.note && S.parts.length > S.noteParts) { retryWithExtra(); return; }
+      draft(S.gen);
+      return;
+    }
     clearError();
   });
 
+  async function retryWithExtra() {
+    var gen = S.gen, prevEdited = S.edited;
+    S.edited = false;
+    var ok = await draft(gen, { more: true });
+    if (!ok && gen === S.gen) S.edited = prevEdited;
+  }
+
   $('discard-transcript').addEventListener('click', function () {
-    if (!confirm(S.turns
+    // An extra recording that could not be added: drop it, and only it. The
+    // note from the earlier recordings stays.
+    if (S.note && (S.heldAudio || S.parts.length > S.noteParts)) {
+      if (!confirm('Discard the extra recording? The note below stays as it is.')) return;
+      S.heldAudio = null;
+      S.pendingPart = null;
+      S.parts = S.parts.slice(0, S.noteParts);
+      clearError();
+      show('draft');
+      toast('Extra recording discarded');
+      return;
+    }
+    if (!confirm(hasTranscript()
         ? 'Discard the transcript? The recording is already gone, so this cannot be undone.'
         : 'Discard the recording? It has not been transcribed, and it cannot be recovered.')) return;
     wipe();
@@ -2377,35 +2723,50 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
      RENDER — all model output goes in via textContent. Nothing the
      model produces is ever parsed as HTML.
      ================================================================== */
-  function render(note) {
-    renderNotSaid(note);
+  // The model's gaps and the page's own (pauses, several recordings, capture
+  // problems). Its own function since 27 September 2026, so an edit can bring
+  // an answered gap back without redrawing the whole note.
+  function renderGaps(note) {
+    pruneAnswers();
     var gaps = Array.isArray(note.gaps) ? note.gaps.slice() : [];
-    var ps = S.pausesForDraft || [];
+    if (S.noteParts > 1) {
+      gaps.unshift('Drafted from ' + S.noteParts + ' separate recordings made at different points in the appointment. ' +
+        'Anything said between them is not in this note.');
+    }
+    var ps = allPauses();
     if (ps.length) {
       var totalMin = Math.round(ps.reduce(function (a, p) { return a + p.forMs; }, 0) / 60000);
       gaps.unshift('Recording paused ' + ps.length + (ps.length === 1 ? ' time' : ' times') +
         ', ' + (totalMin < 1 ? 'under a minute' : totalMin + ' minute' + (totalMin === 1 ? '' : 's')) +
         ' in total. Anything said while paused is not in this note.');
     }
-    if (S.captureNote) gaps.unshift(S.captureNote);
+    // Only for recordings this note was drafted from.
+    S.parts.slice(0, S.noteParts || S.parts.length).forEach(function (p, i) {
+      if (p.captureNote) gaps.unshift(S.noteParts > 1 ? 'Recording ' + (i + 1) + ': ' + p.captureNote : p.captureNote);
+    });
     var box = $('gaps');
     var list = $('gaps-list');
     list.textContent = '';
 
     if (gaps.length) {
       box.classList.remove('clear');
-      $('gaps-title').textContent = 'Check before you paste — ' + gaps.length + (gaps.length === 1 ? ' gap' : ' gaps');
-      $('gaps-lead').textContent = 'These were not captured. Add them from memory, or leave them out honestly.';
-      gaps.forEach(function (g) {
-        var li = document.createElement('li');
-        li.textContent = g;
-        list.appendChild(li);
-      });
+      var nAnswered = gaps.filter(function (g) { return !!answerFor(g); }).length;
+      $('gaps-title').textContent = 'Check before you paste — ' + gaps.length + (gaps.length === 1 ? ' gap' : ' gaps') +
+        (nAnswered ? ', ' + nAnswered + ' answered' : '');
+      $('gaps-lead').textContent = 'These were not captured. Add them from memory, or leave them out honestly.' +
+        (questionsOf(note).length ? ' Answer puts what you remember straight into the right field.' : '');
+      gaps.forEach(function (g) { list.appendChild(gapItem(note, g)); });
     } else {
       box.classList.add('clear');
       $('gaps-title').textContent = 'No gaps flagged';
       $('gaps-lead').textContent = 'Every field was filled from the transcript. Still read it through — a filled field can still be wrong.';
     }
+  }
+
+  function render(note) {
+    renderNotSaid(note);
+    renderGaps(note);
+    var box = $('gaps');
 
     /* The site check.
 
@@ -2467,9 +2828,22 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         banner.className = 'gaps';
         banner.style.marginBottom = '16px';
         var h = document.createElement('h2');
-        h.textContent = S.speakerRoles
-          ? 'Speaker mapping \u2014 confirmed by you'
-          : 'Check the speaker mapping';
+        // Confirmed per recording: correcting recording 1 says nothing about
+        // recording 2, whose labels the model worked out on its own.
+        var prefixOf = function (k) { return (k.match(/^R\d-/) || [''])[0]; };
+        // Every recording the note was drafted from counts, whether or not the
+        // model listed its speakers: one it left out has not been confirmed.
+        var allGroups = [], okGroups = [];
+        for (var gi = 0; gi < Math.max(1, S.noteParts || 1); gi++) allGroups.push(gi === 0 ? '' : 'R' + (gi + 1) + '-');
+        Object.keys(S.speakerRoles || {}).forEach(function (k) {
+          var g = prefixOf(k);
+          if (allGroups.indexOf(g) !== -1 && okGroups.indexOf(g) === -1) okGroups.push(g);
+        });
+        var numOf = function (g) { return g ? Number(g.slice(1, -1)) : 1; };
+        h.textContent = !okGroups.length ? 'Check the speaker mapping'
+          : okGroups.length === allGroups.length ? 'Speaker mapping \u2014 confirmed by you'
+          : 'Check the speaker mapping \u2014 recording ' + okGroups.map(numOf).sort().join(' and ') +
+            ' confirmed by you, the rest not yet';
         var p = document.createElement('p');
         p.className = 'lead';
         p.textContent = entries.join('  \u00b7  ') +
@@ -2481,39 +2855,55 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         // clinician's mouth" — and until now the tool could only tell you that,
         // not let you fix it. Every field is inverted when the mapping is wrong,
         // so the only remedy was to discard and write by hand.
-        var keys = Object.keys(note.speakers).filter(function (k) {
-          return note.speakers[k] === 'clinician' || note.speakers[k] === 'patient';
+        // Speakers are numbered per recording (S1 ..., then R2-S1 ...), and a
+        // swap is judged and made per recording: the second recording's labels
+        // can be the wrong way round while the first's are right.
+        var groups = {};
+        Object.keys(note.speakers).forEach(function (k) {
+          if (note.speakers[k] !== 'clinician' && note.speakers[k] !== 'patient') return;
+          var g = (k.match(/^R\d-/) || [''])[0];
+          (groups[g] = groups[g] || []).push(k);
         });
-        // Exactly one of each, or swapping is meaningless: inverting two
-        // clinicians produces a mapping with no clinician in it at all, and the
-        // model is told to use a confirmed mapping exactly.
-        var oneEach = keys.length === 2 &&
-          keys.filter(function (k) { return note.speakers[k] === 'clinician'; }).length === 1 &&
-          keys.filter(function (k) { return note.speakers[k] === 'patient'; }).length === 1;
-        if (oneEach && !S.busy) {
-          var act = document.createElement('div');
-          act.className = 'actions';
-          act.style.marginTop = '10px';
+        var groupNames = Object.keys(groups).sort();
+        var act = document.createElement('div');
+        act.className = 'actions';
+        act.style.marginTop = '10px';
+        groupNames.forEach(function (g) {
+          var keys = groups[g];
+          // Exactly one of each, or swapping is meaningless: inverting two
+          // clinicians produces a mapping with no clinician in it at all, and the
+          // model is told to use a confirmed mapping exactly.
+          var oneEach = keys.length === 2 &&
+            keys.filter(function (k) { return note.speakers[k] === 'clinician'; }).length === 1 &&
+            keys.filter(function (k) { return note.speakers[k] === 'patient'; }).length === 1;
+          if (!oneEach || S.busy) return;
+          var n = g ? Number(g.slice(1, -1)) : 1;
           var swap = document.createElement('button');
           swap.type = 'button';
-          swap.id = 'swap-speakers';
+          swap.id = groupNames.length > 1 ? 'swap-speakers-' + n : 'swap-speakers';
           // Reversible: a mis-tap here would otherwise invert the whole note with
           // no way back short of discarding the recording.
-          swap.textContent = S.speakerRoles
-            ? 'Swap back'
-            : 'No \u2014 swap them and redraft';
+          var mine = S.speakerRoles && keys.some(function (k) { return k in S.speakerRoles; });
+          swap.textContent = groupNames.length > 1
+            ? (mine ? 'Swap back in recording ' + n : 'Swap them in recording ' + n + ' and redraft')
+            : (mine ? 'Swap back' : 'No \u2014 swap them and redraft');
           swap.addEventListener('click', async function () {
             resetIdle();
-            if (S.busy || !S.turns) return;
+            if (S.busy || !hasTranscript()) return;
+            if (extraWaiting()) { heldExtraFirst(); return; }
             // A redraft like the length picker's, so the same question first. It
             // used to replace the note, edits and all, without asking.
             if (!redraftConfirmed()) return;
+            // What was already confirmed, plus THIS recording's labels. Another
+            // recording's labels are the model's guesses and stay unconfirmed:
+            // passed as confirmed, the model would be told not to reconsider them.
             var fixed = {};
+            if (S.speakerRoles) Object.keys(S.speakerRoles).forEach(function (k) { fixed[k] = S.speakerRoles[k]; });
             keys.forEach(function (k) {
               fixed[k] = note.speakers[k] === 'clinician' ? 'patient' : 'clinician';
             });
             Object.keys(note.speakers).forEach(function (k) {
-              if (!(k in fixed)) fixed[k] = note.speakers[k];   // keep nurse, relative
+              if (prefixOf(k) === g && !(keys.indexOf(k) !== -1)) fixed[k] = note.speakers[k];   // keep nurse, relative
             });
             var prevRoles = S.speakerRoles;
             S.speakerRoles = fixed;
@@ -2537,8 +2927,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
             if (!ok && gen === S.gen) S.edited = prevEdited;   // the edited note is still there
           });
           act.appendChild(swap);
-          banner.appendChild(act);
-        }
+        });
+        if (act.children.length) banner.appendChild(act);
 
         box.parentNode.insertBefore(banner, box);
       }
@@ -2565,7 +2955,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         // Dictated fields appear when there is something in them, and also
         // whenever Dictate was pressed — otherwise a field the model left
         // empty could not be filled in by hand, unlike every other field here.
-        if (k[1]) return hasText(note[k[0]]) || S.dictationFromMs !== null;
+        if (k[0] === 'treatmentToday') return hasText(note[k[0]]) || (anyDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1);
+        if (k[1]) return hasText(note[k[0]]) || anyDictation();
         return true;                            // consent fields always show, gap or not
       });
       if (!visible.length) return;
@@ -2584,6 +2975,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         var wrap = document.createElement('div');
         wrap.className = 'field' + (isGap ? ' is-gap' : '') + (isCore ? ' is-core' : '') +
                          (isDictated ? ' is-dictated' : '');
+        wrap.dataset.key = key;
 
         var head = document.createElement('div');
         head.className = 'field-head';
@@ -2609,6 +3001,20 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
           dtag.textContent = 'Dictated';
           dtag.title = 'Said by you after the patient left, not to the patient';
           head.appendChild(dtag);
+        }
+        // Something added here by answering a gap. On screen only: the whole
+        // note is the clinician's record, and nothing is added to the pasted text.
+        // Edited is worked out, not remembered: a redraw (an answer added, a
+        // layout switched) used to drop the mark from fields edited before it.
+        if (S.drafted && String(S.drafted[key] == null ? '' : S.drafted[key]).trim() !==
+            String(note[key] == null ? '' : note[key]).trim()) wrap.classList.add('edited');
+        if (answeredInto(key)) {
+          wrap.classList.add('edited');
+          var atag = document.createElement('span');
+          atag.className = 'added-tag';
+          atag.textContent = 'Added by you';
+          atag.title = 'You added to this field by answering a gap';
+          head.appendChild(atag);
         }
 
         // Always present, and always reading the CURRENT value. It used to be
@@ -2655,6 +3061,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
           // showed the pre-edit risks while Copy took the edited ones: what was
           // read and what was pasted into the consent form were not the same.
           if (!$('consent-box').classList.contains('hidden')) $('consent-text').textContent = consentFormText(S.note);
+          scheduleSources();
           resetIdle();
         });
 
@@ -2664,8 +3071,374 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       });
     });
 
+    renderBpe(note, host);
+    renderLaLog(note, host);
     renderImplantLog(note, host);
+    renderCovered();
+    renderSources();
+    renderTodo(note);
+    updateAddPart();
+    // The consent text is built from these fields: kept in step, as an edit does.
+    if (!$('consent-box').classList.contains('hidden')) $('consent-text').textContent = consentFormText(S.note);
   }
+
+  /* ---- answering a gap (27 September 2026) ----
+     The model asks one short, neutral question per gap it could not fill, and
+     names the field the answer belongs in. The server keeps a question only if
+     it answers a gap that is really in the list, and only for one of the twelve
+     conversation fields. What the clinician types goes into that field word for
+     word, after anything already there; the model never sees it and never
+     rewrites it. Only ever offered on THIS list: a "not said" item is not a
+     gap to fill from memory, and never gets an Answer button. */
+  function questionsOf(note) {
+    return (note && Array.isArray(note.questions) ? note.questions : []).filter(function (q) {
+      return q && typeof q.gap === 'string' && typeof q.ask === 'string' && fieldSpec(q.field) && !fieldSpec(q.field).dictated;
+    });
+  }
+
+  function questionFor(note, gap) {
+    // Only the model's own gaps can carry one: the page's (a pause, a separate
+    // recording, a capture problem) are about the recording, not a field.
+    if (!note || !Array.isArray(note.gaps) || note.gaps.indexOf(gap) === -1) return null;
+    var qs = questionsOf(note);
+    for (var i = 0; i < qs.length; i++) if (qs[i].gap === gap) return qs[i];
+    return null;
+  }
+
+  function answerFor(gap) {
+    return Object.prototype.hasOwnProperty.call(S.answered, gap) ? S.answered[gap] : null;
+  }
+
+  // An answer whose words are no longer in its field (the clinician deleted
+  // them) is forgotten, so its gap shows as open again rather than resolved.
+  function pruneAnswers() {
+    Object.keys(S.answered).forEach(function (g) {
+      var a = S.answered[g];
+      var cur = S.note && S.note[a.field] != null ? String(S.note[a.field]) : '';
+      if (cur.indexOf(a.text) === -1) delete S.answered[g];
+    });
+  }
+
+  function answeredInto(key) {
+    return Object.keys(S.answered).some(function (g) { return S.answered[g].field === key; });
+  }
+
+  function gapItem(note, g) {
+    var li = document.createElement('li');
+    var span = document.createElement('span');
+    span.textContent = g;
+    li.appendChild(span);
+    var q = questionFor(note, g);
+    if (!q) return li;
+    var a = answerFor(g);
+    if (a) {
+      li.className = 'answered';
+      var done = document.createElement('span');
+      done.className = 'answered-note';
+      done.textContent = 'Added to ' + fieldSpec(a.field).label + ': \u201c' + a.text + '\u201d';
+      var undo = document.createElement('button');
+      undo.type = 'button';
+      undo.textContent = 'Undo';
+      undo.addEventListener('click', function () { resetIdle(); undoAnswer(g); });
+      done.appendChild(undo);
+      li.appendChild(done);
+      return li;
+    }
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'answer-btn';
+    b.textContent = 'Answer';
+    b.addEventListener('click', function () { resetIdle(); openAnswerForm(li, g, q); });
+    li.appendChild(b);
+    return li;
+  }
+
+  function openAnswerForm(li, gap, q) {
+    if (li.querySelector('.answer-form')) return;
+    var form = document.createElement('div');
+    form.className = 'answer-form';
+    var ask = document.createElement('p');
+    ask.className = 'ask';
+    ask.textContent = q.ask;
+    form.appendChild(ask);
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 500;
+    input.placeholder = 'Write it as it should read in the note';
+    input.setAttribute('aria-label', q.ask);
+    // "Not discussed" only for an empty field. Under text already there, a bare
+    // "Not discussed." reads as if the whole field was never discussed.
+    var empty = !hasText(S.note && S.note[q.field]);
+    if (empty) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip';
+      chip.textContent = 'Not discussed';
+      chip.addEventListener('click', function () { input.value = 'Not discussed.'; input.focus(); });
+      form.appendChild(chip);
+    }
+    form.appendChild(input);
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'add';
+    add.textContent = 'Add to note';
+    add.addEventListener('click', function () {
+      resetIdle();
+      var text = input.value.replace(/\s+/g, ' ').trim().slice(0, 500);
+      if (!text) { input.focus(); return; }
+      addAnswer(gap, q.field, text);
+    });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add.click(); } });
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', function () { form.remove(); });
+    form.appendChild(add);
+    form.appendChild(cancel);
+    var where = document.createElement('p');
+    where.className = 'where';
+    where.textContent = 'Goes into: ' + fieldSpec(q.field).label +
+      (empty ? '' : ', on a new line after what is already there') + '. Added exactly as you type it, without the question.';
+    form.appendChild(where);
+    li.appendChild(form);
+    input.focus();
+  }
+
+  function addAnswer(gap, field, text) {
+    if (!S.note || answerFor(gap)) return;
+    var before = S.note[field] == null ? '' : String(S.note[field]).trim();
+    S.note[field] = before ? before + '\n' + text : text;
+    S.answered[gap] = { field: field, text: text };
+    S.edited = true;
+    render(S.note);
+  }
+
+  function undoAnswer(gap) {
+    var a = answerFor(gap);
+    if (!S.note || !a) return;
+    var cur = S.note[a.field] == null ? '' : String(S.note[a.field]).trim();
+    var lines = cur.split('\n');
+    var at = lines.lastIndexOf(a.text);
+    if (at !== -1) {
+      // Its own line, untouched: that line comes out, and only that line.
+      lines.splice(at, 1);
+      var rest = lines.join('\n').trim();
+      S.note[a.field] = rest ? rest : null;
+    } else if (cur.indexOf(a.text) !== -1) {
+      // Edited on its line since: taking the words out now could take the
+      // clinician's edit with them. They change the field themselves.
+      toast('That line has been changed since \u2014 edit it in the field');
+      return;
+    }
+    // Words already gone: there is nothing to take out, only the mark.
+    delete S.answered[gap];
+    render(S.note);
+  }
+
+  /* ---- BPE (27 September 2026) ----
+     Scores only as the clinician said them: the server keeps a code only if it
+     is a real one, and the page never fills a sextant. Shown as the chart, one
+     box per sextant, each one editable. The words the scores were heard in are
+     searched for in the transcript like every other source. */
+  var BPE_ROWS = [['UR', 'UA', 'UL'], ['LR', 'LA', 'LL']];
+  var BPE_CODES = ['', '0', '1', '2', '3', '4', '0*', '1*', '2*', '3*', '4*', 'X'];
+  var BPE_NAMES = { UR: 'upper right', UA: 'upper anterior', UL: 'upper left', LR: 'lower right', LA: 'lower anterior', LL: 'lower left' };
+  var BPE_TYPES = ['exam-recall', 'perio'];
+
+  function bpeValues(b) {
+    var out = {};
+    BPE_ROWS[0].concat(BPE_ROWS[1]).forEach(function (s) {
+      var v = b && typeof b[s] === 'string' ? b[s] : null;
+      out[s] = v && BPE_CODES.indexOf(v) > 0 ? v : null;
+    });
+    return out;
+  }
+
+  function bpeAny(b) {
+    var v = bpeValues(b);
+    return Object.keys(v).some(function (s) { return !!v[s]; });
+  }
+
+  function bpeAsText(b) {
+    if (!bpeAny(b)) return '';
+    var v = bpeValues(b);
+    return BPE_ROWS.map(function (row) { return row.map(function (s) { return v[s] || '-'; }).join(' '); }).join(' / ') +
+      ' (UR UA UL / LR LA LL)';
+  }
+
+  function bpeEdited() {
+    var a = bpeValues(S.drafted && S.drafted.bpe), b = bpeValues(S.note && S.note.bpe);
+    return Object.keys(a).some(function (s) { return a[s] !== b[s]; });
+  }
+
+  // Whether the words the scores were heard in are in the recording.
+  function bpeHeard() {
+    var base = S.drafted && S.drafted.bpe;
+    if (!bpeAny(base)) return null;
+    var idx = transcriptIndex();
+    var qs = Array.isArray(base.quotes) ? base.quotes : [];
+    for (var i = 0; i < qs.length; i++) {
+      var hit = findQuote(idx, qs[i], true);
+      if (hit && !hit.dictatedOnly) return { quote: String(qs[i]), hit: hit };
+    }
+    return false;
+  }
+
+  function renderBpe(note, host) {
+    var old = $('bpe-block');
+    if (old) old.remove();
+    if (!bpeAny(note.bpe) && BPE_TYPES.indexOf(S.consultType) === -1) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'field';
+    wrap.id = 'bpe-block';
+    var head = document.createElement('div');
+    head.className = 'field-head';
+    var h3 = document.createElement('h3');
+    h3.textContent = 'BPE';
+    head.appendChild(h3);
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', function () {
+      var t = bpeAsText(S.note && S.note.bpe);
+      if (t) writeClipboard('BPE: ' + t, copy);
+    });
+    head.appendChild(copy);
+    wrap.appendChild(head);
+
+    var table = document.createElement('table');
+    table.className = 'bpe';
+    var vals = bpeValues(note.bpe);
+    BPE_ROWS.forEach(function (row) {
+      var tr = document.createElement('tr');
+      row.forEach(function (s) {
+        var td = document.createElement('td');
+        var lab = document.createElement('span');
+        lab.textContent = s;
+        td.appendChild(lab);
+        var sel = document.createElement('select');
+        sel.setAttribute('aria-label', 'BPE ' + BPE_NAMES[s]);
+        sel.dataset.sextant = s;
+        BPE_CODES.forEach(function (c) {
+          var o = document.createElement('option');
+          o.value = c;
+          o.textContent = c || '\u2014';
+          sel.appendChild(o);
+        });
+        sel.value = vals[s] || '';
+        sel.addEventListener('change', function () {
+          resetIdle();
+          if (!S.note) return;
+          var b = S.note.bpe && typeof S.note.bpe === 'object' ? S.note.bpe : { quotes: [] };
+          b[s] = sel.value || null;
+          S.note.bpe = b;
+          S.edited = true;
+          renderBpeNote(wrap);
+          scheduleSources();
+        });
+        td.appendChild(sel);
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    wrap.appendChild(table);
+    host.appendChild(wrap);
+    renderBpeNote(wrap);
+  }
+
+  function renderBpeNote(wrap) {
+    [].forEach.call(wrap.querySelectorAll('.bpe-note'), function (el) { el.remove(); });
+    var add = function (text, warn) {
+      var p = document.createElement('p');
+      p.className = 'bpe-note' + (warn ? ' warn' : '');
+      p.textContent = text;
+      wrap.appendChild(p);
+    };
+    var now = bpeValues(S.note && S.note.bpe);
+    var missing = Object.keys(now).filter(function (s) { return !now[s]; });
+    if (!bpeAny(S.drafted && S.drafted.bpe) && !bpeAny(S.note && S.note.bpe)) {
+      add('No BPE scores came back with this draft. If you took one, fill it in here.', false);
+      return;
+    }
+    if (missing.length && missing.length < 6) add('Not stated: ' + missing.join(', ') + '. Fill in or leave blank.', true);
+    if (S.drafted && S.drafted.bpe && S.drafted.bpe.named === false && !bpeEdited()) {
+      add('The sextants were not named when the scores were said, so they are set out in chart order: UR UA UL, then LR LA LL. ' +
+        'If you called them in another order, the lower row will be the wrong way round.', true);
+    }
+    if (hasText(S.note && S.note.examination) && /\bBPE\b/i.test(String(S.note.examination))) {
+      add('The examination field mentions a BPE too. Make sure the two agree before you paste.', true);
+    }
+    if (bpeEdited()) { add('Edited by you.', false); return; }
+    var heard = bpeHeard();
+    if (heard) {
+      var turn = heard.hit.t || {};
+      add('Heard: \u201c' + heard.quote + '\u201d \u2014 ' + speakerName(heard.hit.part, String(turn.speaker || 'UU')) +
+        (heard.hit.dictated ? ' (dictated)' : '') + (Number.isFinite(heard.hit.at) ? ', ' + fmtTime(heard.hit.at) : '') +
+        '. Sextants read UR UA UL, then LR LA LL: check each score.', false);
+    } else if (heard === false) {
+      add('The words these scores came from could not be found in the recording. Check each score.', true);
+    }
+  }
+
+  /* ---- to do (27 September 2026) ----
+     Tasks said in the recording, for working through after the patient has
+     gone. Kept out of the note. Each is checked against the transcript like a
+     source: one whose words cannot be found says so. */
+  function renderTodo(note) {
+    var box = $('todo'), list = $('todo-list');
+    list.textContent = '';
+    var items = note && Array.isArray(note.actions) ? note.actions.filter(function (a) { return a && hasText(a.text); }) : [];
+    if (!items.length) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    $('todo-title').textContent = 'To do after this appointment \u2014 ' + items.length + (items.length === 1 ? ' task' : ' tasks');
+    var idx = transcriptIndex();
+    items.forEach(function (a, i) {
+      var li = document.createElement('li');
+      if (S.todoDone[i]) li.className = 'done';
+      var label = document.createElement('label');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!S.todoDone[i];
+      cb.addEventListener('change', function () {
+        resetIdle();
+        S.todoDone[i] = cb.checked;
+        li.classList.toggle('done', cb.checked);
+      });
+      label.appendChild(cb);
+      var t = document.createElement('span');
+      t.className = 'task';
+      t.textContent = String(a.text).trim();
+      label.appendChild(t);
+      li.appendChild(label);
+      var hit = null;
+      (Array.isArray(a.quotes) ? a.quotes : []).some(function (q) {
+        var h = findQuote(idx, q, true);
+        if (h && !h.dictatedOnly) { hit = { quote: String(q), h: h }; return true; }
+        return false;
+      });
+      var heard = document.createElement('span');
+      heard.className = 'heard' + (hit ? '' : ' warn');
+      heard.textContent = hit
+        ? '\u201c' + hit.quote + '\u201d' + (Number.isFinite(hit.h.at) ? ' \u2014 ' + fmtTime(hit.h.at) : '')
+        : 'Not found in the recording \u2014 check it was said.';
+      li.appendChild(heard);
+      list.appendChild(li);
+    });
+  }
+
+  function todoAsText() {
+    var items = S.note && Array.isArray(S.note.actions) ? S.note.actions.filter(function (a) { return a && hasText(a.text); }) : [];
+    if (!items.length) return '';
+    return 'To do\n' + items.map(function (a, i) {
+      return '- ' + String(a.text).trim() + (S.todoDone[i] ? ' (done)' : '');
+    }).join('\n');
+  }
+
+  $('copy-todo').addEventListener('click', function () {
+    var t = todoAsText();
+    if (t) writeClipboard(t, $('copy-todo'));
+  });
 
   function hasText(v) { return !(v === null || v === undefined || String(v).trim() === ''); }
 
@@ -2683,19 +3456,316 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   // the opposite one: a model gap invites you to add what you remember; this
   // list must never invite you to record a discussion that did not happen.
   function renderNotSaid(note) {
-    var items = Array.isArray(note.notSaid) ? note.notSaid : [];
+    // Items the clinician has marked as covered elsewhere leave this list and
+    // appear in the note instead, in their own words (see renderCovered).
+    var items = (Array.isArray(note.notSaid) ? note.notSaid : []).filter(function (t) {
+      return !Object.prototype.hasOwnProperty.call(S.covered, t);
+    });
     var box = $('notsaid');
     var list = $('notsaid-list');
     list.textContent = '';
+    $('notrec-list').textContent = '';
+    // Shown with the list, under it, whenever the checklist is an unreviewed draft.
+    $('notsaid-draft').classList.toggle('hidden', !(note && note.checklistDraft));
     if (!items.length) { box.classList.add('hidden'); return; }
     box.classList.remove('hidden');
-    $('notsaid-title').textContent = 'Not said during this consultation \u2014 ' + items.length +
-      (items.length === 1 ? ' item' : ' items');
+    var isRec = function (t) { return /^Not recorded\b/.test(t); };
+    var said = items.filter(function (t) { return !isRec(t); });
+    var rec = items.filter(isRec);
+    $('notsaid-said').classList.toggle('hidden', !said.length);
+    $('notrec').classList.toggle('hidden', !rec.length);
+    // The sub-heading only when both kinds are listed; alone, the title says it.
+    $('notrec').querySelector('h3').classList.toggle('hidden', !said.length);
+    $('notsaid-title').textContent = (said.length ? 'Not said during this consultation' : 'Not recorded in this consultation') +
+      ' \u2014 ' + items.length + (items.length === 1 ? ' item' : ' items');
     items.forEach(function (t) {
+      var list = isRec(t) ? $('notrec-list') : $('notsaid-list');
       var li = document.createElement('li');
-      li.textContent = t;
+      var span = document.createElement('span');
+      span.textContent = t;
+      li.appendChild(span);
+      // Only a real checklist line can be covered elsewhere. The "checklist
+      // could not be applied" warning is not an item.
+      if (coverTopic(t)) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'cover-btn';
+        b.textContent = 'Covered elsewhere';
+        b.addEventListener('click', function () { resetIdle(); openCoverForm(li, t); });
+        li.appendChild(b);
+      }
       list.appendChild(li);
     });
+  }
+
+  /* ---- covered elsewhere (27 September 2026) ----
+     Some checklist items are covered outside the recorded conversation: the
+     medical history on the sedation assessment form, written information given
+     at an earlier visit. Without a way to say so, they were flagged "not said"
+     on every such consultation. Marking one takes it off the list and puts a
+     line in the note saying where it was covered. The topic is the checklist's
+     own reviewed wording; where it was covered is the clinician's. Nothing is
+     inferred, and nothing is added to the conversation fields. */
+  var COVER_CHOICES = ['Medical history form', 'Sedation assessment form', 'Written information given', 'An earlier appointment'];
+
+  function coverTopic(gap) {
+    var m = String(gap || '').trim().match(/^Not [a-z ]{1,30}?(?:,\s*(for [^:]{1,40}))?:\s*(.+)$/i);
+    if (!m) return '';
+    var t = m[2].replace(/[.\s]+$/, '').trim();
+    if (!t) return '';
+    t = t.charAt(0).toUpperCase() + t.slice(1);
+    return m[1] ? t + ' (' + m[1].trim() + ')' : t;
+  }
+
+  function openCoverForm(li, gap) {
+    if (li.querySelector('.cover-form')) return;
+    var form = document.createElement('div');
+    form.className = 'cover-form';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 120;
+    input.placeholder = 'Where? For example, sedation assessment form';
+    input.setAttribute('aria-label', 'Where this was covered');
+    COVER_CHOICES.forEach(function (c) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip';
+      chip.textContent = c;
+      chip.addEventListener('click', function () { input.value = c; input.focus(); });
+      form.appendChild(chip);
+    });
+    form.appendChild(input);
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'add';
+    add.textContent = 'Add to note';
+    add.addEventListener('click', function () {
+      resetIdle();
+      var where = input.value.trim().slice(0, 120);
+      if (!where) { input.focus(); return; }
+      if (!S.note) return;
+      S.covered[gap] = where;
+      renderNotSaid(S.note);
+      renderCovered();
+    });
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', function () { form.remove(); });
+    form.appendChild(add);
+    form.appendChild(cancel);
+    li.appendChild(form);
+    input.focus();
+  }
+
+  function coveredItems() {
+    return Object.keys(S.covered).map(function (g) {
+      return { gap: g, topic: coverTopic(g), where: S.covered[g] };
+    }).filter(function (i) { return i.topic && i.where; });
+  }
+
+  function coveredAsText() {
+    return coveredItems().map(function (i) { return i.topic + ': ' + i.where; }).join('\n');
+  }
+
+  function renderCovered() {
+    var old = $('covered-block');
+    if (old) old.remove();
+    var items = coveredItems();
+    if (!items.length || !S.note) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'field';
+    wrap.id = 'covered-block';
+    var head = document.createElement('div');
+    head.className = 'field-head';
+    var h3 = document.createElement('h3');
+    h3.textContent = 'Covered elsewhere';
+    head.appendChild(h3);
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', function () { writeClipboard('Covered elsewhere\n' + coveredAsText(), copy); });
+    head.appendChild(copy);
+    wrap.appendChild(head);
+    var ul = document.createElement('ul');
+    items.forEach(function (i) {
+      var li = document.createElement('li');
+      var span = document.createElement('span');
+      span.textContent = i.topic + ': ' + i.where;
+      li.appendChild(span);
+      var undo = document.createElement('button');
+      undo.type = 'button';
+      undo.textContent = 'Undo';
+      undo.addEventListener('click', function () {
+        resetIdle();
+        delete S.covered[i.gap];
+        if (S.note) renderNotSaid(S.note);
+        renderCovered();
+      });
+      li.appendChild(undo);
+      ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    $('fields').appendChild(wrap);
+  }
+
+  /* ---- local anaesthetic given today (27 September 2026) ----
+     A table like the implant log, from the dictation only, each cell editable:
+     a batch number is exactly the kind of thing a transcript gets wrong. Each
+     row's words are looked for in the dictation. Nothing is calculated. */
+  var LA_COLS = [['agent', 'Agent'], ['strength', 'Strength'], ['amount', 'Amount'], ['technique', 'Technique'],
+                 ['site', 'Site'], ['batch', 'Batch'], ['notes', 'Notes']];
+
+  function laRows(note) {
+    return note && Array.isArray(note.laLog) ? note.laLog.filter(function (r) { return r && typeof r === 'object'; }) : [];
+  }
+
+  function laCells(row) {
+    return LA_COLS.map(function (c) { return row && hasText(row[c[0]]) ? String(row[c[0]]).replace(/\s+/g, ' ').trim() : ''; }).join('\u0001');
+  }
+
+  // A row counts as edited when its cells differ from the draft's row in the
+  // same place, or it was added by hand. Worked out, never remembered, so a
+  // redraw cannot lose it.
+  function laRowEdited(row, i) {
+    var d = S.drafted && Array.isArray(S.drafted.laLog) ? S.drafted.laLog[i] : null;
+    return !d || row.added || laCells(row) !== laCells(d);
+  }
+
+  function laEdited() {
+    var now = laRows(S.note), was = S.drafted && Array.isArray(S.drafted.laLog) ? S.drafted.laLog : [];
+    return now.length !== was.length || now.some(function (r, i) { return laRowEdited(r, i); });
+  }
+
+  // What is wrong with a row as drafted: its words not in the dictation, or a
+  // batch number that appears nowhere in it. Null if it checks out or the
+  // clinician has changed it (then it is theirs).
+  function laRowProblem(row, i, idx) {
+    if (laRowEdited(row, i)) return null;
+    var hit = null, spoken = false;
+    (Array.isArray(row.quotes) ? row.quotes : []).some(function (q) {
+      var h = findQuote(idx, q, 'only');
+      if (h && h.spokenOnly) { spoken = true; return false; }
+      if (h && !h.dictatedOnly) { hit = h; return true; }
+      return false;
+    });
+    if (!hit) return spoken ? 'found only in the conversation, not in your dictation' : 'not found in your dictation';
+    if (hasText(row.batch)) {
+      var b = ' ' + normText(row.batch) + ' ';
+      var inDictation = idx.some(function (pc) { return pc.dictated && roleOfPiece(pc) !== 'patient' && pc.norm.indexOf(b) !== -1; });
+      if (!inDictation) return 'batch ' + String(row.batch).trim() + ' not found in your dictation';
+    }
+    return null;
+  }
+
+  function renderLaLog(note, host) {
+    var rows = laRows(note);
+    // Offered empty, to fill in by hand, where treatment is done on the day
+    // and something was dictated; otherwise only when there is a row.
+    var offer = anyDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1;
+    if (!rows.length && !offer) return;
+    var hd = document.createElement('h3');
+    hd.className = 'section-heading';
+    hd.textContent = 'Local anaesthetic';
+    host.appendChild(hd);
+
+    var wrap = document.createElement('div');
+    wrap.className = 'field is-dictated' + (laEdited() ? ' edited' : '');
+    wrap.id = 'la-block';
+    var head = document.createElement('div');
+    head.className = 'field-head';
+    var h3 = document.createElement('h3');
+    h3.textContent = 'Local anaesthetic given';
+    head.appendChild(h3);
+    var dtag = document.createElement('span');
+    dtag.className = 'dictated-tag';
+    dtag.textContent = 'Dictated';
+    head.appendChild(dtag);
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', function () { var t = laLogAsText(S.note); if (t) writeClipboard('Local anaesthetic (dictated)\n' + t, copy); });
+    head.appendChild(copy);
+    wrap.appendChild(head);
+
+    var idx = transcriptIndex();
+    var status = document.createElement('p');
+    var refresh = function () {
+      var notes = [];
+      laRows(S.note).forEach(function (r, i) {
+        var pr = laRowProblem(r, i, idx);
+        if (pr) notes.push('Row ' + (i + 1) + ': ' + pr + '.');
+      });
+      status.className = 'bpe-note' + (notes.length ? ' warn' : '');
+      status.textContent = !laRows(S.note).length
+        ? 'No local anaesthetic came back from your dictation. If you gave one, add it here.'
+        : notes.length ? notes.join(' ') + ' Check before you paste.'
+        : 'Taken as dictated: nothing is converted or calculated.' + (laEdited() ? ' Edited by you.' : ' Every row was found in your dictation.');
+      wrap.classList.toggle('edited', laEdited());
+    };
+
+    if (rows.length) {
+      var table = document.createElement('table');
+      table.className = 'implant-log la-log';
+      var thead = document.createElement('tr');
+      LA_COLS.forEach(function (c) { var th = document.createElement('th'); th.textContent = c[1]; thead.appendChild(th); });
+      table.appendChild(thead);
+      rows.forEach(function (row, i) {
+        var tr = document.createElement('tr');
+        LA_COLS.forEach(function (c) {
+          var td = document.createElement('td');
+          td.textContent = hasText(row[c[0]]) ? String(row[c[0]]) : '';
+          td.dataset.placeholder = '—';
+          td.setAttribute('contenteditable', EDITABLE);
+          td.setAttribute('role', 'textbox');
+          td.setAttribute('aria-label', 'Local anaesthetic ' + (i + 1) + ', ' + c[1].toLowerCase());
+          td.addEventListener('paste', function (e) {
+            e.preventDefault();
+            document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+          });
+          td.addEventListener('input', function () {
+            var v = editableText(td).replace(/\s+/g, ' ').trim();
+            row[c[0]] = v ? v.slice(0, 300) : null;
+            S.edited = true;
+            refresh();
+            resetIdle();
+          });
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      wrap.appendChild(table);
+    }
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'add-row';
+    add.textContent = rows.length ? 'Add a row' : 'Add local anaesthetic';
+    add.addEventListener('click', function () {
+      resetIdle();
+      if (!S.note) return;
+      if (!Array.isArray(S.note.laLog)) S.note.laLog = [];
+      var r = { quotes: [], added: true };
+      LA_COLS.forEach(function (c) { r[c[0]] = null; });
+      S.note.laLog.push(r);
+      S.edited = true;
+      render(S.note);
+    });
+    wrap.appendChild(status);
+    wrap.appendChild(add);
+    host.appendChild(wrap);
+    refresh();
+  }
+
+  // Rows with nothing in them are not copied, and the rows that are copied are
+  // numbered as copied.
+  function laLogAsText(note) {
+    var n = 0;
+    return laRows(note).map(function (row) {
+      var cells = LA_COLS.map(function (c) { return hasText(row[c[0]]) ? c[1] + ' ' + String(row[c[0]]).replace(/\s+/g, ' ').trim() : null; }).filter(Boolean);
+      return cells.length ? 'LA ' + (++n) + ': ' + cells.join(', ') : null;
+    }).filter(Boolean).join('\n');
   }
 
   // The implant log stays a block of its own: it is a table, not prose, and it
@@ -2766,13 +3836,398 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       out.push('');
       out = out.concat(lines);
     });
+    var la = laLogAsText(note);
+    if (la) {
+      out.push('LOCAL ANAESTHETIC (DICTATED)');
+      out.push('');
+      out.push(la);
+      out.push('');
+    }
+    var bpe = bpeAsText(note.bpe);
+    if (bpe) {
+      out.push('BPE');
+      out.push('');
+      out.push(bpe);
+      out.push('');
+    }
     if (Array.isArray(note.implantLog) && note.implantLog.length) {
       out.push('IMPLANT LOG');
       out.push('');
       out.push(implantLogAsText(note.implantLog));
       out.push('');
     }
+    var covered = coveredAsText();
+    if (covered) {
+      out.push('COVERED ELSEWHERE');
+      out.push('');
+      out.push(covered);
+      out.push('');
+    }
     return out.join('\n').trim();
+  }
+
+  /* ---- where each sentence came from (27 September 2026) ----
+     The model returns, for each sentence it wrote, the first few words of the
+     sentence and one to three quotes from the transcript that support it. The
+     model is not trusted on either: every quote is searched for in the
+     transcript held on this page, and only one actually found counts. A
+     sentence with no quote found is listed for the clinician to check. The
+     check covers the draft as the model wrote it; a field the clinician has
+     edited says so, and its sentences leave the list, because what they typed
+     is theirs. */
+  var srcOpen = {};        // which fields' source lists are open: UI only
+  var srcTimer = null;
+
+  // The note's own fields and nothing else, for requests built from it.
+  function noteFields() {
+    var out = {};
+    if (!S.note) return out;
+    [].concat(FIELDS, DICTATED_FIELDS).forEach(function (f) {
+      if (S.note[f[0]] !== undefined) out[f[0]] = S.note[f[0]];
+    });
+    return out;
+  }
+
+  // The referral also takes the BPE, as one line, when there is one.
+  function referralNote() {
+    var out = noteFields();
+    var b = S.note && bpeAsText(S.note.bpe);
+    if (b) out.bpe = b;
+    return out;
+  }
+
+  function normText(v) {
+    var t = String(v == null ? '' : v);
+    try { t = t.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {}
+    return t.toLowerCase().replace(/[\u2018\u2019\u02bc`\u00b4']/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  // Every stretch of speech a quote may come from, normalised: one turn, cut
+  // where a pause or the Dictate press fell inside it. A turn can run across
+  // either (the same voice carrying on, and paused time does not exist in the
+  // file), so matching whole turns would let a quote bridge unrecorded time or
+  // pass dictation off as conversation. Cut by the word timings, exactly as the
+  // server places its markers. Each piece knows whether it is dictation.
+  function transcriptIndex() {
+    var out = [];
+    S.parts.forEach(function (p, pi) {
+      var from = (p.dictationFromS === null || p.dictationFromS === undefined) ? null : p.dictationFromS;
+      var cuts = (p.pauses || []).map(function (x) { return x.atRecordedMs / 1000; });
+      if (from !== null) cuts.push(from);
+      cuts.sort(function (a, b) { return a - b; });
+      (p.turns || []).forEach(function (t, ti) {
+        var text = String((t && t.text) || '');
+        var start = Number.isFinite(t && t.start) ? t.start : null;
+        var end = Number.isFinite(t && t.end) ? t.end : null;
+        var words = Array.isArray(t && t.words) ? t.words.filter(function (w) {
+          return w && Number.isInteger(w.at) && w.at >= 0 && w.at < text.length && Number.isFinite(w.start);
+        }) : [];
+        // A turn with no time at all cannot be placed against a pause or the
+        // Dictate press, so where there is one it is left out, like below.
+        if (start === null && cuts.length) return;
+        var inside = cuts.filter(function (c) { return start !== null && c > start && (end === null || c < end); });
+        var pieces = [{ from: 0, at: start }];
+        var unsure = false;
+        inside.forEach(function (c) {
+          var w = words.filter(function (x) { return x.start >= c; })[0];
+          if (w && w.at > pieces[pieces.length - 1].from) pieces.push({ from: w.at, at: w.start });
+          else if (!w || !words.length) unsure = true;
+        });
+        // A turn that crosses a pause or the Dictate press with no word timings
+        // to cut it by cannot be trusted either way: it is left out, so a quote
+        // from it shows as not found and the clinician checks it.
+        if (unsure) return;
+        pieces.forEach(function (pc, k) {
+          var piece = text.slice(pc.from, k + 1 < pieces.length ? pieces[k + 1].from : text.length);
+          var n = normText(piece);
+          if (!n) return;
+          out.push({ norm: ' ' + n + ' ', part: pi, turn: ti, t: t, at: pc.at,
+                     dictated: from !== null && pc.at !== null && pc.at >= from });
+        });
+      });
+    });
+    return out;
+  }
+
+  var MIN_QUOTE_WORDS = 3;
+
+  // A quote counts only if its words appear, whole and in order, inside ONE
+  // turn: never across a change of speaker, a pause or a separate recording.
+  // A quote stitched together with "..." is refused (the prompt forbids it, and
+  // pieces found far apart prove nothing), and so is one under three words: a
+  // bare "yes" matches almost any consultation. For a conversation field, words
+  // found only in dictation do not count: they were said to the record, not to
+  // the patient. Returns the turn, or { dictatedOnly: true }, or null.
+  // allowDictated === 'only' (27 Sep 2026): the treatment record and the LA
+  // log, which may come from the dictation and nothing else. Words found only
+  // in the conversation — "we'll take it out today" — prove nothing was done.
+  function findQuote(idx, quote, allowDictated) {
+    var q = String(quote || '');
+    if (/\.{3,}|\u2026/.test(q)) return null;
+    var n = normText(q);
+    if (!n || n.split(' ').length < MIN_QUOTE_WORDS) return null;
+    var needle = ' ' + n + ' ', dictatedHit = null, spokenHit = null;
+    for (var i = 0; i < idx.length; i++) {
+      if (idx[i].norm.indexOf(needle) === -1) continue;
+      if (idx[i].dictated && !allowDictated) { dictatedHit = dictatedHit || idx[i]; continue; }
+      if (allowDictated === 'only' && (!idx[i].dictated || roleOfPiece(idx[i]) === 'patient')) { spokenHit = spokenHit || idx[i]; continue; }
+      return idx[i];
+    }
+    if (spokenHit) return { spokenOnly: true };
+    return dictatedHit ? { dictatedOnly: true } : null;
+  }
+
+  function sentencesOf(text) {
+    var out = [];
+    String(text || '').split(/\n+/).forEach(function (line) {
+      line.replace(/([.!?])\s+(?=["'(A-Z0-9])/g, '$1\u0001').split('\u0001').forEach(function (x) {
+        x = x.trim();
+        if (/[A-Za-z0-9]/.test(x)) out.push(x);
+      });
+    });
+    return out;
+  }
+
+  function analyseField(text, entries, idx, allowDictated) {
+    var sents = sentencesOf(text);
+    var list = Array.isArray(entries) ? entries : [];
+    var used = list.map(function () { return false; });
+    var pick = sents.map(function () { return -1; });
+    sents.map(normText).forEach(function (ns, i) {
+      for (var j = 0; j < list.length; j++) {
+        if (used[j]) continue;
+        var st = normText(list[j] && list[j].start);
+        if (!st) continue;
+        var pos = (' ' + ns + ' ').indexOf(' ' + st + ' ');
+        if ((pos !== -1 && pos <= 60) || (ns.length >= 12 && st.indexOf(ns) === 0)) {
+          used[j] = true;
+          pick[i] = j;
+          break;
+        }
+      }
+    });
+    // One entry per sentence, in order, is what was asked for: where the first
+    // words did not line up, position does.
+    if (list.length === sents.length) {
+      pick.forEach(function (j, i) { if (j === -1 && !used[i]) { used[i] = true; pick[i] = i; } });
+    }
+    return sents.map(function (x, i) {
+      var e = pick[i] === -1 ? null : list[pick[i]];
+      var found = [], dictatedOnly = false, spokenOnly = false;
+      ((e && Array.isArray(e.quotes)) ? e.quotes : []).forEach(function (q) {
+        var hit = findQuote(idx, q, allowDictated);
+        if (hit && hit.dictatedOnly) dictatedOnly = true;
+        else if (hit && hit.spokenOnly) spokenOnly = true;
+        else if (hit) found.push({ quote: String(q), hit: hit });
+      });
+      return { text: x, found: found, dictatedOnly: !found.length && dictatedOnly, spokenOnly: !found.length && spokenOnly };
+    });
+  }
+
+  function roleOfPiece(piece) {
+    var key = (piece.part > 0 ? 'R' + (piece.part + 1) + '-' : '') + String((piece.t && piece.t.speaker) || 'UU');
+    var map = S.speakerRoles || (S.note && S.note.speakers) || {};
+    return map[key] || null;
+  }
+
+  function speakerName(partIndex, label) {
+    var key = (partIndex > 0 ? 'R' + (partIndex + 1) + '-' : '') + label;
+    var map = S.speakerRoles || (S.note && S.note.speakers) || {};
+    var role = map[key];
+    return role === 'clinician' ? 'Clinician' : role === 'patient' ? 'Patient'
+      : role === 'other' ? 'Other speaker' : 'Speaker ' + label;
+  }
+
+  function sourcesBlock(key, rows, bad, edited, idx, stillBad) {
+    var div = document.createElement('div');
+    div.className = 'src';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'src-toggle' + (stillBad ? ' warn' : '');
+    btn.textContent = 'Sources \u00b7 ' + (rows.length - bad) + ' of ' + rows.length +
+      (bad ? ' \u2014 ' + bad + ' not found' : '');
+    btn.setAttribute('aria-expanded', srcOpen[key] ? 'true' : 'false');
+    div.appendChild(btn);
+    if (edited) {
+      var note = document.createElement('p');
+      note.className = 'src-note';
+      note.textContent = 'You have edited this field. The sources are for the draft as it was written.';
+      div.appendChild(note);
+    }
+    var ul = document.createElement('ul');
+    ul.className = 'src-list' + (srcOpen[key] ? '' : ' hidden');
+    rows.forEach(function (r) {
+      var li = document.createElement('li');
+      if (!r.found.length) li.className = 'none';
+      var mark = document.createElement('span');
+      mark.className = 'mark';
+      mark.textContent = r.found.length ? '\u2713' : '?';
+      li.appendChild(mark);
+      var t = document.createElement('span');
+      t.textContent = r.text;
+      li.appendChild(t);
+      if (!r.found.length) {
+        var why = document.createElement('blockquote');
+        why.textContent = r.dictatedOnly
+          ? 'Found only in your dictation, after the patient had left \u2014 not said to the patient. Check this is right.'
+          : r.spokenOnly
+            ? 'Found only in the conversation, not in your dictation. Check this treatment was actually carried out.'
+            : 'No supporting words found in the recording. Check this is right.';
+        li.appendChild(why);
+      }
+      // The quote is shown as the model gave it, which the search has just
+      // found word for word (case and punctuation aside) in this one turn.
+      r.found.forEach(function (f) {
+        var q = document.createElement('blockquote');
+        q.textContent = '\u201c' + f.quote + '\u201d';
+        var turn = f.hit.t || {};
+        var who = document.createElement('span');
+        who.className = 'who';
+        who.textContent = '\u2014 ' + speakerName(f.hit.part, String(turn.speaker || 'UU')) +
+          (f.hit.dictated ? ' (dictated)' : '') +
+          (S.parts.length > 1 ? ', recording ' + (f.hit.part + 1) : '') +
+          (Number.isFinite(f.hit.at) ? ', ' + fmtTime(f.hit.at) : '');
+        q.appendChild(who);
+        li.appendChild(q);
+      });
+      ul.appendChild(li);
+    });
+    btn.addEventListener('click', function () {
+      resetIdle();
+      srcOpen[key] = !srcOpen[key];
+      ul.classList.toggle('hidden', !srcOpen[key]);
+      btn.setAttribute('aria-expanded', srcOpen[key] ? 'true' : 'false');
+    });
+    div.appendChild(ul);
+    return div;
+  }
+
+  function renderSources() {
+    var box = $('sourcecheck'), list = $('sourcecheck-list');
+    list.textContent = '';
+    [].forEach.call(document.querySelectorAll('#fields .src'), function (el) { el.remove(); });
+    if (!S.note) { box.classList.add('hidden'); return; }
+    var base = S.drafted || S.note;
+    var sources = base.sources;
+    if (!sources || typeof sources !== 'object') {
+      box.classList.remove('hidden');
+      box.classList.add('clear');
+      $('sourcecheck-title').textContent = 'Source check not available for this draft';
+      $('sourcecheck-lead').textContent = 'The draft came back without its sources, so its sentences could not be matched to the recording. Read it against what you remember.';
+      return;
+    }
+    var idx = transcriptIndex();
+    var unmatched = [], unchecked = [], total = 0;
+    [].forEach.call(document.querySelectorAll('#fields .field[data-key]'), function (wrap) {
+      var key = wrap.dataset.key;
+      var original = base[key];
+      if (!hasText(original)) return;
+      // No sources came back for this field at all: that is not evidence
+      // either way, so it is said as such rather than every sentence in it
+      // being listed as "not found".
+      if (!Object.prototype.hasOwnProperty.call(sources, key)) {
+        unchecked.push((fieldSpec(key) || {}).label || key);
+        var none = document.createElement('div');
+        none.className = 'src';
+        var p = document.createElement('p');
+        p.className = 'src-note';
+        p.textContent = 'No sources came back for this field. Read it against what you remember.';
+        none.appendChild(p);
+        wrap.appendChild(none);
+        return;
+      }
+      var now = S.note[key] == null ? '' : String(S.note[key]).trim();
+      var edited = now !== String(original).trim();
+      var spec = fieldSpec(key) || {};
+      var rows = analyseField(String(original), sources[key], idx, key === 'treatmentToday' ? 'only' : !!spec.dictated);
+      if (!rows.length) return;
+      total += rows.length;
+      var bad = rows.filter(function (r) { return !r.found.length; });
+      // An edit is the clinician's, so what they changed leaves the list. A
+      // sentence still there word for word is still the model's, and stays.
+      var nowNorm = ' ' + normText(now) + ' ';
+      var still = bad.filter(function (r) {
+        return !edited || nowNorm.indexOf(' ' + normText(r.text) + ' ') !== -1;
+      });
+      still.forEach(function (r) {
+        unmatched.push((spec.label || key) + ': ' + r.text + (r.dictatedOnly ? ' (only in your dictation)' : r.spokenOnly ? ' (only in the conversation, not dictated)' : ''));
+      });
+      wrap.appendChild(sourcesBlock(key, rows, bad.length, edited, idx, still.length));
+    });
+    // LA rows, as drafted and unchanged, that do not check out against the dictation.
+    if (S.note) {
+      var laIdx = transcriptIndex();
+      laRows(S.note).forEach(function (r, i) {
+        var pr = laRowProblem(r, i, laIdx);
+        if (pr) { unmatched.push('Local anaesthetic, row ' + (i + 1) + ': ' + pr); total++; }
+      });
+    }
+    // The BPE, as drafted and unchanged, whose words could not be found.
+    if (!bpeEdited() && bpeHeard() === false) { unmatched.push('BPE: the scores could not be matched to the recording'); total++; }
+    if (!total && !unchecked.length) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    var notChecked = unchecked.length
+      ? ' No sources came back for ' + unchecked.join(', ') + ', so ' + (unchecked.length === 1 ? 'that field was' : 'those fields were') + ' not checked.'
+      : '';
+    if (unmatched.length) {
+      box.classList.remove('clear');
+      $('sourcecheck-title').textContent = 'Not found in the recording \u2014 ' + unmatched.length +
+        (unmatched.length === 1 ? ' sentence' : ' sentences');
+      $('sourcecheck-lead').textContent = 'These sentences in the draft could not be matched to words in the transcript. ' +
+        'They may be worded differently from what was said, or they may not have been said. Check each one before you paste.' + notChecked;
+      unmatched.forEach(function (u) {
+        var li = document.createElement('li');
+        li.textContent = u.length > 240 ? u.slice(0, 237) + '\u2026' : u;
+        list.appendChild(li);
+      });
+    } else if (unchecked.length) {
+      box.classList.add('clear');
+      $('sourcecheck-title').textContent = 'Source check incomplete';
+      $('sourcecheck-lead').textContent = (total ? 'Every sentence that could be checked matched the recording.' : 'Nothing could be checked.') + notChecked +
+        ' Read ' + (unchecked.length === 1 ? 'it' : 'them') + ' against what you remember.';
+    } else {
+      box.classList.add('clear');
+      $('sourcecheck-title').textContent = 'Every sentence matched to the recording';
+      $('sourcecheck-lead').textContent = 'Open Sources under a field to see the words behind each sentence. ' +
+        'Matched is not the same as right: still read it through.';
+    }
+  }
+
+  function scheduleSources() {
+    clearTimeout(srcTimer);
+    srcTimer = setTimeout(function () {
+      if (!S.note) return;
+      renderSources();
+      // An answer the clinician has since typed away is no longer an answer.
+      var had = Object.keys(S.answered).length;
+      pruneAnswers();
+      if (Object.keys(S.answered).length !== had) {
+        renderGaps(S.note);
+        [].forEach.call(document.querySelectorAll('#fields .field[data-key]'), function (w) {
+          if (!answeredInto(w.dataset.key)) { var t = w.querySelector('.added-tag'); if (t) t.remove(); }
+        });
+      }
+    }, 400);
+  }
+
+  // An extra recording is stopped but not yet transcribed: its audio is held
+  // for a retry. Nothing may start another recording or redraft over it.
+  function extraWaiting() { return !!(S.note && (S.heldAudio || S.pendingPart)); }
+
+  function heldExtraFirst() {
+    retryLabels('audio');
+    fail('An extra recording is waiting', 'It has not been transcribed yet. Press Try transcribing again, or discard it, before redrafting or recording more. The note below is unchanged.', true);
+  }
+
+  // Another recording can be added while there is a note, every recording is
+  // in it, none is waiting to be transcribed, and there is room for one more.
+  function updateAddPart() {
+    var can = !!S.note && hasTranscript() && !extraWaiting() && S.parts.length === S.noteParts && S.parts.length < CFG.MAX_PARTS;
+    $('add-part').classList.toggle('hidden', !can);
+    $('add-part-note').classList.toggle('hidden', !can);
+    $('add-part').textContent = S.parts.length > 1
+      ? 'Record more (recording ' + (S.parts.length + 1) + ' of ' + CFG.MAX_PARTS + ')'
+      : 'Record more for this consultation';
   }
 
   /* ---- derived documents: patient summary, consent form text ---- */
@@ -2838,7 +4293,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       resetIdle();
       var want = btn.dataset.length;
       if (want === S.noteLength || S.busy) return;
-      if (!S.turns) {
+      if (extraWaiting()) { heldExtraFirst(); return; }
+      if (!hasTranscript()) {
         return fail('Cannot redraft', 'The transcript is no longer held, so the note cannot be rewritten. The draft on screen is unchanged.');
       }
       if (!redraftConfirmed()) return;
@@ -2897,7 +4353,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   $('make-summary').addEventListener('click', async function () {
     resetIdle();
-    if (!S.turns || S.busy) return;
+    if (!hasTranscript() || S.busy) return;
     // Already drafted. Show what is there — including any corrections made to
     // it — rather than silently redrafting over them.
     if (S.summary) { $('summary-box').classList.remove('hidden'); return; }
@@ -2917,9 +4373,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         // this transcript, not just the note's. Without it the summary, post-op
         // sheet, referral and Ask each guessed the speakers again, and could
         // guess them the wrong way round after the note had been put right.
-        body: JSON.stringify({ kind: 'summary', turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [],
-                               speakerRoles: S.speakerRoles || undefined,
-                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
+        body: JSON.stringify(withTranscript({ kind: 'summary', consultType: S.consultType,
+                                              speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
       if (stale()) return;
@@ -2949,7 +4404,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     var q = $('ask-input').value.trim();
     if (!q || S.busy) return;
     S.asked = true;
-    if (!S.turns) {
+    if (!hasTranscript()) {
       $('ask-answer').textContent = 'The transcript is no longer held, so there is nothing to check against.';
       $('ask-answer').classList.remove('hidden');
       return;
@@ -2967,10 +4422,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: ctrl ? ctrl.signal : undefined,
-        body: JSON.stringify({ kind: 'ask', question: q, turns: S.turns, consultType: S.consultType,
-                               pauses: S.pausesForDraft || [],
-                               speakerRoles: S.speakerRoles || undefined,
-                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
+        body: JSON.stringify(withTranscript({ kind: 'ask', question: q, consultType: S.consultType,
+                                              speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
       if (stale()) return;
@@ -3019,7 +4472,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   $('make-postop').addEventListener('click', async function () {
     resetIdle();
-    if (!S.turns || S.busy) return;
+    if (!hasTranscript() || S.busy) return;
     if (S.postop) { $('postop-box').classList.remove('hidden'); return; }
     var btn = $('make-postop');
     btn.disabled = true;
@@ -3033,10 +4486,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: ctrl ? ctrl.signal : undefined,
-        body: JSON.stringify({ kind: 'postop', turns: S.turns, consultType: S.consultType,
-                               pauses: S.pausesForDraft || [], note: S.note || {},
-                               speakerRoles: S.speakerRoles || undefined,
-                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
+        body: JSON.stringify(withTranscript({ kind: 'postop', consultType: S.consultType, note: noteFields(),
+                                              speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
       if (stale()) return;
@@ -3074,7 +4525,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   $('make-referral').addEventListener('click', async function () {
     resetIdle();
-    if (!S.turns || S.busy) return;
+    if (!hasTranscript() || S.busy) return;
     // Already drafted. Show what is there — corrections included — rather than
     // silently redrafting over them. Redraft is a separate, deliberate button.
     if (S.referral) { $('referral-box').classList.remove('hidden'); return; }
@@ -3090,10 +4541,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: ctrl ? ctrl.signal : undefined,
-        body: JSON.stringify({ kind: 'referral', turns: S.turns, consultType: S.consultType, pauses: S.pausesForDraft || [],
-                               note: S.note || {}, context: $('referral-context').value || '',
-                               speakerRoles: S.speakerRoles || undefined,
-                               dictationFromS: S.dictationFromMs === null ? undefined : S.dictationFromMs / 1000 })
+        body: JSON.stringify(withTranscript({ kind: 'referral', consultType: S.consultType,
+                                              note: referralNote(), context: $('referral-context').value || '',
+                                              speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
       if (stale()) return;
@@ -3190,6 +4640,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       var after = S.note[k] == null ? '' : String(S.note[k]).trim();
       if (before !== after) out.push(k);
     });
+    if (laEdited()) out.push('laLog');
     return out;
   }
 
@@ -3206,8 +4657,8 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       S.recSecs || 0,
       kb ? kb.toFixed(0) : '',
       (kb && S.recSecs) ? (kb / S.recSecs).toFixed(2) : '',
-      (S.pausesForDraft || []).length,
-      S.dictationFromMs === null ? 0 : 1,
+      allPauses().length,
+      anyDictation() ? 1 : 0,
       Array.isArray(n.gaps) ? n.gaps.length : 0,
       Array.isArray(n.notSaid) ? n.notSaid.length : 0,
       n.speakerConfidence || '',
@@ -3402,6 +4853,11 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   function clearDerived() {
     derivedSeq++;
+    // Tied to the note on screen rather than built from it, but they go the
+    // same way: a redraft replaces the fields the answers were added to and the
+    // list the ticks were against.
+    S.answered = {};
+    S.todoDone = {};
     S.summary = null;
     S.summaryText = null;
     S.referral = null;
@@ -3437,16 +4893,14 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
   function clearConsultation() {
     clearDerived();
     S.heldAudio = null;
-    S.turns = null;
+    S.parts = [];
+    S.pendingPart = null;
+    S.noteParts = 0;
+    S.moreRecording = false;
+    S.covered = {};
     S.note = null;
     S.sizeNote = '';
     S.captureNote = null;
-    S.paused = false;
-    S.pausedAt = 0;
-    S.pausedMs = 0;
-    S.pauses = [];
-    S.pausesForDraft = null;
-    S.dictationFromMs = null;
     S.speakerRoles = null;
     S.drafted = null;
     S.asked = false;
@@ -3476,17 +4930,37 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
     $('gaps-list').textContent = '';
     $('notsaid-list').textContent = '';
     $('notsaid').classList.add('hidden');
+    $('notsaid-draft').classList.add('hidden');
+    $('notrec-list').textContent = '';
+    $('todo-list').textContent = '';
+    $('todo').classList.add('hidden');
     var map = document.getElementById('speaker-map');
     if (map) map.remove();
     var strip = document.getElementById('teeth-strip');
     if (strip) strip.remove();
 
     $('ask-input').value = '';
+    $('sourcecheck').classList.add('hidden');
+    $('sourcecheck-list').textContent = '';
+    srcOpen = {};
+    $('add-part').classList.add('hidden');
+    $('add-part-note').classList.add('hidden');
 
     // A draft still in flight for the last patient has been voided by the gen
     // bump, so its `finally` declines to touch these. The reset owns them, or
     // the next patient finds the buttons stuck on "Drafting...".
+    resetRecordingState();
+  }
 
+  // One recording's state and its bar, timer and buttons. Part of clearing a
+  // consultation, and all that an extra recording for the same consultation
+  // starts from: the note and the earlier recordings are left alone.
+  function resetRecordingState() {
+    S.paused = false;
+    S.pausedAt = 0;
+    S.pausedMs = 0;
+    S.pauses = [];
+    S.dictationFromMs = null;
     $('pause').textContent = 'Pause';
     $('pause').classList.remove('resuming');
     $('dictate').textContent = 'Dictate';
@@ -3602,7 +5076,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   function showIdleWarning() {
     // Only worth interrupting for if there is something to lose.
-    if (!S.note && !S.turns && !S.heldAudio) return;
+    if (!S.note && !hasTranscript() && !S.heldAudio) return;
     var mins = Math.round(CFG.IDLE_WARN_MS / 60000);
     $('idle-warn-body').textContent =
       'This clears in about ' + mins + ' minute' + (mins === 1 ? '' : 's') +
@@ -3627,7 +5101,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
       // still held. Wiping it here would destroy a consent discussion during
       // the treatment it belongs to.
       if (S.recorder && (S.recorder.state === 'recording' || S.recorder.state === 'paused')) { resetIdle(); return; }
-      var hadSomething = !!(S.note || S.turns || S.heldAudio);
+      var hadSomething = !!(S.note || hasTranscript() || S.heldAudio);
       wipe();
       show('setup');
       if (hadSomething) fail('Cleared after ' + Math.round(CFG.IDLE_WIPE_MS / 60000) + ' minutes idle', 'Everything held for that consultation was destroyed. Nothing was saved.');
@@ -3642,7 +5116,7 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 
   /* ---- tab hide ---- */
   function mask() {
-    if (!S.note && !S.turns) return;
+    if (!S.note && !hasTranscript()) return;
     $('mask').classList.remove('hidden');
   }
   function unmask() { $('mask').classList.add('hidden'); }

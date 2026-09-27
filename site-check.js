@@ -310,7 +310,8 @@ async function checkHubWorker() {
     const bare = gated.href.replace(/\/$/, "");
     hands_off.push(bare, gated.href, gated.href + "index.html", gated.href + "icon.png", bare + "?x=1");
   }
-  hands_off.push("/api", "/api/", "/api/auth", "/api/transcribe?jobId=J1", "/api/x.png");
+  hands_off.push("/ai-notes/setup/", "/ai-notes/admin/");
+  hands_off.push("/api", "/api/", "/api/auth", "/api/account", "/api/users", "/api/transcribe?jobId=J1", "/api/x.png");
   const handled = [];
   for (const p of hands_off) {
     const modes = [];
@@ -475,6 +476,73 @@ for (const tool of PREVIEW) {
     problems.push(`${tool.name}: its hub card does not say a sign-in is required, so the passcode prompt will look like a fault.`);
   }
   notes.push(`${tool.name}: in preview, gated (noindex, not in the sitemap, no offline copy, linked from every bar, tagged on the hub)`);
+}
+
+/* --- 6. utility pages under the gated tool ------------------------------------
+   Staff accounts (25 September 2026) added two pages that are not tools: the
+   admin page, where the owner adds and removes staff, and the setup page a
+   colleague opens once from their setup link. They must never look like
+   tools: not in any switcher, not on the hub, not in the sitemap, noindex.
+   Setup is reachable WITHOUT a session (its visitor has none yet), so it
+   carries the stricter rules: nothing loaded from anywhere but this origin,
+   nothing stored. Absent is fine (older trees); present means fully checked. */
+const UTILITY = [
+  { name: "Staff accounts", dir: "ai-notes/admin", href: "/ai-notes/admin/", gate: "admin" },
+  { name: "Account setup", dir: "ai-notes/setup", href: "/ai-notes/setup/", gate: "open" },
+];
+{
+  const mw = read(path.join(root, "middleware.js")) || "";
+  const headers = read(path.join(root, "vercel.json")) || "";
+  let headerRules = [];
+  try { headerRules = JSON.parse(headers).headers || []; } catch { /* reported by Vercel, not here */ }
+  const allBars = TOOLS.concat([GATED], PREVIEW).map((t) => ({ name: t.name, bar: navBar(read(path.join(root, t.dir, "index.html"))) }))
+    .concat([{ name: "404.html", bar: notFoundBar }]);
+  for (const page of UTILITY) {
+    const index = read(path.join(root, page.dir, "index.html"));
+    if (!index) { notes.push(`${page.name}: not present in this tree, skipped`); continue; }
+    const live = index.replace(/<!--[\s\S]*?-->/g, "");
+    if (!/<meta name="robots" content="noindex/.test(live)) problems.push(`${page.name}: has no noindex meta tag.`);
+    if (sitemap && sitemap.includes(page.href)) problems.push(`${page.name}: is listed in sitemap.xml.`);
+    if (navBar(index)) problems.push(`${page.name}: carries the tool switcher bar. It is a utility page, not a tool.`);
+    for (const { name, bar } of allBars) {
+      if (bar && bar.includes(`href="${page.href}`)) problems.push(`${name}: the switcher links to ${page.name} (${page.href}). Utility pages stay out of the bar.`);
+    }
+    if (hubLive && hubLive.includes(`href="${page.href}`)) problems.push(`Hub: links to ${page.name} (${page.href}). Utility pages stay off the hub.`);
+    const code = stripComments(index);
+    for (const api of ["localStorage", "sessionStorage", "indexedDB"]) {
+      if (new RegExp(`\\b${api}\\b`).test(code)) problems.push(`${page.name}: index.html references ${api}. It must store nothing in the browser.`);
+    }
+    if (/serviceWorker\s*\.\s*register/.test(code)) problems.push(`${page.name}: registers a service worker. It must not.`);
+    // Everything from this origin: a script, stylesheet or image from anywhere
+    // else would see (or could alter) a page holding a password and a secret.
+    const external = live.match(/\b(?:src|href|action)\s*=\s*["'](?:https?:)?\/\/[^"']*/gi);
+    if (external) problems.push(`${page.name}: loads or links to another origin (${external.join(", ")}). It may use this origin only.`);
+    const rule = headerRules.find((h) => h.source === `${page.href}:path*`);
+    const value = (k) => ((rule && rule.headers.find((h) => h.key.toLowerCase() === k)) || {}).value || "";
+    if (!rule) {
+      problems.push(`${page.name}: vercel.json has no header block for ${page.href}:path*.`);
+    } else {
+      if (!/noindex/.test(value("x-robots-tag"))) problems.push(`${page.name}: its vercel.json block does not send X-Robots-Tag: noindex.`);
+      if (!/no-store/.test(value("cache-control"))) problems.push(`${page.name}: its vercel.json block does not send Cache-Control: no-store.`);
+      const csp = value("content-security-policy");
+      if (!/frame-ancestors 'none'/.test(csp) || !/default-src 'none'/.test(csp) || /https?:/.test(csp)) {
+        problems.push(`${page.name}: its CSP must be default-src 'none', allow no other origin, and set frame-ancestors 'none'.`);
+      }
+      // Vercel applies every matching block, the LAST one winning on a shared
+      // header name. This block must come after the /ai-notes/ one or that
+      // block's CSP (microphone allowed, wasm allowed) is what the page gets.
+      const at = headerRules.indexOf(rule);
+      const parent = headerRules.findIndex((h) => h.source === `${GATED.href}:path*`);
+      if (parent > at) problems.push(`${page.name}: its vercel.json block must come AFTER the ${GATED.href}:path* block, which would otherwise override it.`);
+    }
+    if (page.gate === "admin" && !mw.includes(`'${page.href}'`)) {
+      problems.push(`${page.name}: middleware.js does not restrict ${page.href}. Any signed-in colleague could manage staff.`);
+    }
+    if (page.gate === "open" && !mw.includes(`'${page.href}'`)) {
+      problems.push(`${page.name}: middleware.js does not leave ${page.href} open. A colleague setting up has no session and would be sent to sign in.`);
+    }
+  }
+  notes.push("Utility pages (staff accounts, setup): noindex, off every bar and the hub, same-origin only, storing nothing");
 }
 
 /* --- report --- */

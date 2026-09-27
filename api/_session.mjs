@@ -46,17 +46,41 @@ export function safeEqual(a, b) {
 }
 
 // Token formats:
-//   v1.<exp>.<hexHmac>            one shared passcode, nobody identified
-//   v2.<exp>.<who>.<hexHmac>      per-user passcode; <who> identifies the holder
+//   v1.<exp>.<hexHmac>                  one shared passcode, nobody identified
+//   v2.<exp>.<who>.<hexHmac>            per-user passcode; <who> identifies the holder
+//   v3.<exp>.<who>.<epoch>.<hexHmac>    staff account (email and password)
 //
 // v1 is still accepted, deliberately. A token format change that rejected live
 // cookies would end every session the moment it deployed, and somebody would be
 // halfway through a consent discussion when it did. v1 sessions simply have no
 // identity and expire on their own within the day.
+//
+// This file only says whether a token is GENUINE. Whether it is still GOOD —
+// whether v1/v2 are still honoured, whether a v3 holder's account is active and
+// its epoch current — is decided in _store.mjs, which knows about the accounts.
+// Call resolveSession there, not readToken here, to let someone in.
+//
+// v3 carries the account's epoch. The admin page bumps the epoch when it
+// disables someone or issues them a new setup link, and every session minted
+// under the old number stops working, without anything having to remember
+// which sessions exist.
 const WHO_RE = /^[A-Za-z0-9_-]{1,16}$/;
+// Up to 15 digits: epochs are random and large (so a deleted account's old
+// cookie cannot line up with a new account given the same initials), and
+// still exact as a JavaScript number.
+const EPOCH_RE = /^(0|[1-9][0-9]{0,14})$/;
 
-export async function mintToken(secret, ttlSeconds = DEFAULT_TTL_SECONDS, who = null) {
+export async function mintToken(secret, ttlSeconds = DEFAULT_TTL_SECONDS, who = null, epoch = null) {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  // An account session that cannot carry its epoch must not quietly become a
+  // passcode-era (v2) one: v2 is honoured by different rules. Refuse instead.
+  if (epoch !== null && epoch !== undefined) {
+    if (!who || !WHO_RE.test(who) || !Number.isSafeInteger(epoch) || !EPOCH_RE.test(String(epoch))) {
+      throw new Error('mintToken: epoch or initials out of range for an account session');
+    }
+    const payload = `v3.${exp}.${who}.${epoch}`;
+    return `${payload}.${await sign(secret, payload)}`;
+  }
   if (who && WHO_RE.test(who)) {
     const payload = `v2.${exp}.${who}`;
     return `${payload}.${await sign(secret, payload)}`;
@@ -69,10 +93,21 @@ export async function verifyToken(secret, token) {
   return !!(await readToken(secret, token));
 }
 
-// Returns { exp, who } for a good token, or null. `who` is null for v1.
+// Returns { v, exp, who, epoch } for a genuine token, or null. `who` is null
+// for v1; `epoch` is null for v1 and v2.
 export async function readToken(secret, token) {
   if (!secret || !token) return null;
   const parts = String(token).split('.');
+
+  if (parts[0] === 'v3' && parts.length === 5) {
+    const [, expRaw, who, epochRaw, sig] = parts;
+    const exp = Number(expRaw);
+    if (!Number.isFinite(exp)) return null;
+    if (!WHO_RE.test(who) || !EPOCH_RE.test(epochRaw)) return null;
+    if (Math.floor(Date.now() / 1000) >= exp) return null;
+    if (!safeEqual(sig, await sign(secret, `v3.${expRaw}.${who}.${epochRaw}`))) return null;
+    return { v: 3, exp, who, epoch: Number(epochRaw) };
+  }
 
   if (parts[0] === 'v1' && parts.length === 3) {
     const [, expRaw, sig] = parts;
@@ -80,7 +115,7 @@ export async function readToken(secret, token) {
     if (!Number.isFinite(exp)) return null;
     if (Math.floor(Date.now() / 1000) >= exp) return null;
     if (!safeEqual(sig, await sign(secret, `v1.${expRaw}`))) return null;
-    return { exp, who: null };
+    return { v: 1, exp, who: null, epoch: null };
   }
 
   if (parts[0] === 'v2' && parts.length === 4) {
@@ -90,7 +125,7 @@ export async function readToken(secret, token) {
     if (!WHO_RE.test(who)) return null;
     if (Math.floor(Date.now() / 1000) >= exp) return null;
     if (!safeEqual(sig, await sign(secret, `v2.${expRaw}.${who}`))) return null;
-    return { exp, who };
+    return { v: 2, exp, who, epoch: null };
   }
 
   return null;
@@ -117,7 +152,8 @@ export async function verifyJobTicket(secret, jobId, who, ticket) {
 export function secondsRemaining(token) {
   if (!token) return 0;
   const parts = String(token).split('.');
-  if (!(parts.length === 3 && parts[0] === 'v1') && !(parts.length === 4 && parts[0] === 'v2')) return 0;
+  if (!(parts.length === 3 && parts[0] === 'v1') && !(parts.length === 4 && parts[0] === 'v2') &&
+      !(parts.length === 5 && parts[0] === 'v3')) return 0;
   const exp = Number(parts[1]);
   if (!Number.isFinite(exp)) return 0;
   return Math.max(0, exp - Math.floor(Date.now() / 1000));
