@@ -730,14 +730,16 @@ async function testDerivedAndDictation() {
   // discussion, not after the outcome — but must still be unmistakably marked.
   const headings = [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent);
   ok('findings appear under their own heading, before the discussion',
-    headings.join('|') === 'Presentation|Findings|Discussion|Outcome|Implant log', headings.join('|'));
+    // A third molar consult with dictation offers the treatment section too (27 Sep 2026).
+    // ...and, with nothing given, an empty LA block to fill in.
+    headings.join('|') === 'Presentation|Findings|Discussion|Treatment|Outcome|Local anaesthetic|Implant log', headings.join('|'));
   const order = [...$(doc, 'fields').querySelectorAll('.field h3')].map((h) => h.textContent);
   ok('examination is read before the treatment proposed, not after next step',
     order.indexOf('Examination findings') < order.indexOf('Treatment proposed'), JSON.stringify(order));
   ok('and every dictated field carries the Dictated tag, wherever it sits',
     [...$(doc, 'fields').querySelectorAll('.field')].every((f) => {
       const label = f.querySelector('h3').textContent;
-      const isDict = ['Examination findings', 'Radiographic findings', 'Treatment plan', 'Implants placed'].includes(label);
+      const isDict = ['Examination findings', 'Radiographic findings', 'Treatment carried out today', 'Treatment plan', 'Implants placed', 'Local anaesthetic given'].includes(label);
       return isDict === !!f.querySelector('.dictated-tag');
     }));
   ok('a consent field is never tagged as dictated',
@@ -1073,7 +1075,7 @@ async function testNotSaidPanel() {
   // no note, and that was silently closable.
   const src2 = readFileSync(join(here, '../ai-notes/index.html'), 'utf8');
   ok('closing the tab warns while a transcript is held, note or no note',
-    /function holding\(\) \{\s*return !!\(S\.note \|\| S\.turns \|\| S\.heldAudio \|\| S\.busy/.test(src2) &&
+    /function holding\(\) \{\s*return !!\(S\.note \|\| hasTranscript\(\) \|\| S\.heldAudio \|\| S\.busy/.test(src2) &&
     /'beforeunload'[\s\S]{0,900}?if \(holding\(\)\)/.test(src2));
   ok('and the patient-summary request cannot hang the button for ever',
     /SUMMARY_TIMEOUT_MS/.test(src2) && /ctrl\.abort\(\)/.test(src2));
@@ -1445,7 +1447,7 @@ async function testIdleWarning() {
   ok('the warning fires earlier than the wipe, not alongside it',
     /CFG\.IDLE_WIPE_MS - CFG\.IDLE_WARN_MS/.test(src));
   ok('it only interrupts when there is something to lose',
-    /function showIdleWarning\(\)[\s\S]{0,200}if \(!S\.note && !S\.turns && !S\.heldAudio\) return;/.test(src));
+    /function showIdleWarning\(\)[\s\S]{0,200}if \(!S\.note && !hasTranscript\(\) && !S\.heldAudio\) return;/.test(src));
   ok('and it offers a way to keep the draft', /id="idle-keep"/.test(src) &&
     /\$\('idle-keep'\)\.addEventListener\('click', function \(\) \{ resetIdle\(\); \}\)/.test(src));
   ok('any interaction clears the warning, because resetIdle hides it',
@@ -1766,15 +1768,20 @@ async function testOneResetPathNotTwo() {
   // split exists because a REDRAFT must clear the first but not the second.
   const derived = bodyAt(src, src.indexOf('function clearDerived()'));
   const consult = bodyAt(src, src.indexOf('function clearConsultation()'));
-  const shared = derived + consult;
+  // One recording's own state is a third function (27 September 2026), so an
+  // extra recording for the same patient can start from it without clearing
+  // the consultation. The consultation reset must still go through it.
+  const recording = bodyAt(src, src.indexOf('function resetRecordingState()'));
+  ok('the consultation reset goes through the recording reset', /resetRecordingState\(\)/.test(consult));
+  const shared = derived + consult + recording;
   ok('there is a single shared reset', shared.length > 200);
   ok('and the consultation reset goes through the derived one, not around it',
     /clearDerived\(\)/.test(consult));
 
   // Anything a new consultation must not inherit. Each of these caused, or
   // would have caused, a wrong-patient bug.
-  const mustClear = ['note', 'turns', 'summary', 'summaryText', 'heldAudio',
-                     'referral', 'referralText', 'dictationFromMs', 'pausesForDraft'];
+  const mustClear = ['note', 'parts', 'pendingPart', 'noteParts', 'moreRecording', 'covered', 'answered', 'todoDone', 'summary', 'summaryText', 'heldAudio',
+                     'referral', 'referralText', 'dictationFromMs', 'pauses'];
   const missing = mustClear.filter((f) => !new RegExp('\\bS\\.' + f + '\\s*=').test(shared));
   ok('it clears every piece of the last patient\'s consultation',
     missing.length === 0, missing.join(', '));
@@ -3048,7 +3055,7 @@ async function testTranscriptionCanBeRetriedFromTheHeldRecording() {
   // only until it is transcribed. Nothing on screen shows this, so read it.
   const proc = bodyAt(html, html.indexOf('async function process('));
   ok('the recording is let go the moment its transcript arrives, before drafting starts',
-    /\n    blob = null;[\s\S]{0,200}?S\.heldAudio = null;[\s\S]{0,800}?S\.turns = turns;/.test(proc));
+    /\n    blob = null;[\s\S]{0,200}?S\.heldAudio = null;[\s\S]{0,1600}?S\.parts = S\.parts\.concat\(/.test(proc));
   ok('when the retried transcription then fails at drafting, the button says drafting',
     $(ctx.doc, 'retry').textContent === 'Try drafting again' &&
     $(ctx.doc, 'discard-transcript').textContent === 'Discard the transcript',
@@ -3085,6 +3092,25 @@ await testTransientFailuresAreNotCalledDeterministic();
 await testExpiredDuringRedraftSaysHowToRedraft();
 await testDictationPointFollowsTheAudio();
 await testAudioIsWokenAndAMicDropIsSaid();
+await testChecklistWhileRecording();
+await testCoveredElsewhere();
+await testSources();
+await testRecordMore();
+await testRecordMoreGuards();
+await testExtraRecordingRetry();
+await testFailedExtraRedraftCanBeDropped();
+await testQuotesMustBeRealAndInOneTurn();
+await testDictationIsNotProofOfConversation();
+await testNothingOverAHeldExtraRecording();
+await testSpeakerConfirmationIsPerRecording();
+await testAnEditKeepsUntouchedWarnings();
+await testATurnAcrossDictationOrAPauseIsCut();
+await testAnswerAGap();
+await testBpe();
+await testTodo();
+await testDraftChecklistNotice();
+await testAReplyWithNoNote();
+await testTreatmentToday();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
@@ -3847,6 +3873,9 @@ async function toDraft(ctx) {
   await tick(60);
   click($(ctx.doc, 'stop'));
   await tick(300);
+  // Under load the stubbed pipeline can take a little longer; wait for it to
+  // settle rather than assert against a half-finished draft.
+  for (let i = 0; i < 30 && !$(ctx.doc, 'working').classList.contains('hidden'); i++) await tick(100);
 }
 
 /**
@@ -4384,4 +4413,1101 @@ async function testAudioIsWokenAndAMicDropIsSaid() {
     /microphone was disconnected/.test($(doc, 'level-note').textContent) && $(doc, 'level-note').classList.contains('alert'),
     $(doc, 'level-note').textContent);
   ok('and the recording is not stopped for it', !$(doc, 'recording').classList.contains('hidden') && !$(doc, 'recbar').classList.contains('hidden'));
+}
+
+/* ================================================================
+   27 September 2026 — sources, covered elsewhere, the checklist
+   while recording, and more than one recording per consultation
+   ================================================================ */
+
+function note27(extra = {}) {
+  return Object.assign({
+    reasonForAttendance: 'Lower left wisdom tooth.', medicalHistory: null, proposed: 'Surgical removal.',
+    alternatives: null, risks: 'Swelling and bruising.', benefits: null, costs: null,
+    patientQuestions: null, patientFactors: null, informationGiven: null, decision: 'Proceed.', nextStep: 'Book.',
+    gaps: ['Costs were not discussed'], notSaid: [], teeth: ['38']
+  }, extra);
+}
+
+async function testChecklistWhileRecording() {
+  section('The checklist is on screen while recording');
+  const asked = [];
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/checklist')) {
+        asked.push(e.url);
+        if (e.url.includes('type=third-molar')) return json200({ items: [
+          { key: 'bleeding', topic: 'Bleeding' },
+          { key: 'lingual', topic: 'Altered sensation or taste on the tongue (lingual nerve)' },
+          { key: 'bad', topic: 42 }] });
+        return json200({ items: [] });
+      }
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) return json200({ status: 'done', note: note27() });
+    }
+  });
+  const { doc, win } = ctx;
+  armStart(doc, win);
+  await tick(40);
+  ok('choosing the consult type asks for its checklist, and nothing else',
+    asked.length === 1 && /\/api\/checklist\?type=third-molar$/.test(asked[0]), JSON.stringify(asked));
+  click($(doc, 'start'));
+  await tick(60);
+  const box = $(doc, 'rec-checklist');
+  const items = [...$(doc, 'rec-checklist-list').children].map((li) => li.textContent);
+  ok('it shows during the recording', !box.classList.contains('hidden') && !$(doc, 'recording').classList.contains('hidden'));
+  ok('in the reviewed wording, and anything malformed is left out',
+    items.length === 2 && items[0] === 'Bleeding' && /lingual nerve/.test(items[1]), JSON.stringify(items));
+  ok('titled with the consult type and the count', /Third molar surgery \(2\)/.test($(doc, 'rec-checklist-title').textContent), $(doc, 'rec-checklist-title').textContent);
+  ok('and it is shown as text, never as markup', !$(doc, 'rec-checklist-list').querySelector('b, script, img'));
+  click($(doc, 'stop'));
+  await tick(300);
+
+  click($(doc, 'clear'));
+  await tick(20);
+  armStart(doc, win, /Exam \/ recall/);
+  await tick(40);
+  click($(doc, 'start'));
+  await tick(60);
+  ok('a consult type with no checklist shows none', $(doc, 'rec-checklist').classList.contains('hidden'));
+  click($(doc, 'discard'));
+  await tick(40);
+  armStart(doc, win);
+  await tick(40);
+  ok('a checklist already fetched is not asked for again', asked.filter((u) => /third-molar/.test(u)).length === 1, JSON.stringify(asked));
+}
+
+async function testCoveredElsewhere() {
+  section('A checklist item can be marked as covered elsewhere');
+  let extracts = 0;
+  const notSaid = ['Not asked about: anticoagulants or antiplatelets.', 'Not mentioned: bleeding.'];
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: longTurns() });
+      if (e.url.includes('/api/extract')) { extracts++; return json200({ status: 'done', note: note27({ notSaid }) }); }
+    }
+  });
+  const { doc, win } = ctx;
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  await toDraft(ctx);
+
+  const lis = () => [...$(doc, 'notsaid-list').children];
+  ok('each checklist item offers "Covered elsewhere"', lis().length === 2 && lis().every((li) => li.querySelector('.cover-btn')));
+  click(lis()[0].querySelector('.cover-btn'));
+  const form = lis()[0].querySelector('.cover-form');
+  ok('which asks where', !!form && !!form.querySelector('input'));
+  click(form.querySelector('.add'));
+  ok('and adds nothing until it is told', lis().length === 2 && !$(doc, 'covered-block'));
+  click([...form.querySelectorAll('.chip')].find((b) => /Sedation assessment form/.test(b.textContent)));
+  click(form.querySelector('.add'));
+  await tick(10);
+  ok('the item leaves the not-said list', lis().length === 1 && /bleeding/.test(lis()[0].textContent));
+  ok('and the count follows it', /1 item$/.test($(doc, 'notsaid-title').textContent), $(doc, 'notsaid-title').textContent);
+  const block = $(doc, 'covered-block');
+  ok('it appears in the note, in the checklist\'s words and the clinician\'s',
+    !!block && /Anticoagulants or antiplatelets: Sedation assessment form/.test(block.textContent), block && block.textContent);
+  click($(doc, 'copy-all'));
+  await tick(10);
+  ok('and is copied with the note', /COVERED ELSEWHERE\n\nAnticoagulants or antiplatelets: Sedation assessment form/.test(copied), copied.slice(-160));
+
+  // Typed text is text: a location cannot become markup.
+  click(lis()[0].querySelector('.cover-btn'));
+  const f2 = lis()[0].querySelector('.cover-form');
+  f2.querySelector('input').value = '<img src=x onerror=alert(1)>form';
+  click(f2.querySelector('.add'));
+  await tick(10);
+  ok('a typed location is shown as text', !$(doc, 'covered-block').querySelector('img') && /<img src=x/.test($(doc, 'covered-block').textContent));
+  ok('and every item covered hides the panel', $(doc, 'notsaid').classList.contains('hidden'));
+
+  // It survives a redraft of the same consultation.
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
+  await tick(200);
+  ok('a redraft keeps what was marked', extracts === 2 && $(doc, 'notsaid').classList.contains('hidden') && !!$(doc, 'covered-block'));
+
+  // Undo puts it back.
+  click([...$(doc, 'covered-block').querySelectorAll('button')].find((b) => b.textContent === 'Undo'));
+  await tick(10);
+  ok('Undo puts an item back on the list', lis().length === 1);
+
+  // A new patient starts with nothing covered.
+  click($(doc, 'clear'));
+  await tick(20);
+  await toDraft(ctx);
+  for (let i = 0; i < 30 && lis().length !== 2; i++) await tick(100);
+  ok('the next consultation starts with nothing marked', lis().length === 2 && !$(doc, 'covered-block'));
+
+  // The "could not be applied" warning is not an item.
+  const ctx2 = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: longTurns() });
+      if (e.url.includes('/api/extract')) return json200({ status: 'done', note: note27({ notSaid: [
+        'The procedure checklist could not be applied to this transcript, so nothing below has been checked against it. Read the note against what you remember discussing.'] }) });
+    }
+  });
+  await toDraft(ctx2);
+  ok('the checklist warning cannot be marked as covered', ![...$(ctx2.doc, 'notsaid-list').children].some((li) => li.querySelector('.cover-btn')));
+}
+
+async function testSources() {
+  section('Every sentence is matched to the recording');
+  const turns = [
+    { speaker: 'S1', start: 3, text: 'You will be sore and swollen for a few days after it.' },
+    { speaker: 'S2', start: 10, text: 'Will I be numb forever?' },
+    { speaker: 'S1', start: 14, text: "It’s usually temporary, the feeling comes back." }
+  ];
+  const sourced = note27({
+    risks: 'Pain and swelling for a few days. Nerve damage in one in ten.',
+    patientQuestions: 'Will I be numb forever?',
+    informationGiven: 'Numbness is usually temporary.',
+    speakers: { S1: 'clinician', S2: 'patient' },
+    sources: {
+      risks: [{ start: 'Pain and swelling for a', quotes: ['sore and swollen for a few days'] },
+              { start: 'Nerve damage in one in', quotes: ['you might lose the feeling in your lip for good'] }],
+      patientQuestions: [{ start: 'Will I be numb forever', quotes: ['Will I be numb forever?'] }],
+      // start words that do not line up: position decides; curly apostrophe in the transcript
+      informationGiven: [{ start: 'Something else entirely', quotes: ["It's usually temporary"] }]
+    }
+  });
+  let give = sourced;
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns });
+      if (e.url.includes('/api/extract')) return json200({ status: 'done', note: give });
+    }
+  });
+  const { doc, win } = ctx;
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  await toDraft(ctx);
+
+  const box = $(doc, 'sourcecheck');
+  const listed = [...$(doc, 'sourcecheck-list').children].map((li) => li.textContent);
+  ok('the source check is shown, apart from the gap lists', !box.classList.contains('hidden') && box.id !== 'gaps' && box.id !== 'notsaid');
+  ok('a sentence whose quote is not in the transcript is listed',
+    listed.length === 1 && /^Material risks named, per option: Nerve damage in one in ten\.$/.test(listed[0]), JSON.stringify(listed));
+  ok('with a plain title', /Not found in the recording — 1 sentence$/.test($(doc, 'sourcecheck-title').textContent), $(doc, 'sourcecheck-title').textContent);
+  ok('a field with no sources at all is said to be unchecked, not listed as not found',
+    /No sources came back for Reason for attendance, Treatment proposed, Decision, Next step/.test($(doc, 'sourcecheck-lead').textContent) &&
+    /No sources came back for this field/.test([...doc.querySelectorAll('#fields .field')].find((w) => w.dataset.key === 'decision').textContent),
+    $(doc, 'sourcecheck-lead').textContent);
+  ok('and the invented quote itself is never shown', !doc.body.textContent.includes('lose the feeling in your lip'));
+  const riskWrap = [...doc.querySelectorAll('#fields .field')].find((w) => w.dataset.key === 'risks');
+  const tog = riskWrap.querySelector('.src-toggle');
+  ok('each field says how many of its sentences were found', /1 of 2 — 1 not found/.test(tog.textContent) && tog.classList.contains('warn'), tog.textContent);
+  ok('closed until asked', riskWrap.querySelector('.src-list').classList.contains('hidden'));
+  click(tog);
+  const open = riskWrap.querySelector('.src-list');
+  ok('opening it shows the words behind the sentence, who said them and when',
+    !open.classList.contains('hidden') && /sore and swollen for a few days/.test(open.textContent) && /Clinician, 0:03/.test(open.textContent), open.textContent);
+  ok('and says plainly which sentence has nothing behind it', /No supporting words found in the recording/.test(open.textContent));
+  const info = [...doc.querySelectorAll('#fields .field')].find((w) => w.dataset.key === 'informationGiven');
+  ok('position lines a sentence up when its first words do not, and punctuation does not matter',
+    /1 of 1/.test(info.querySelector('.src-toggle').textContent), info.querySelector('.src-toggle').textContent);
+  click($(doc, 'copy-all'));
+  await tick(10);
+  ok('none of it goes into the copied note', copied && !/Sources|sore and swollen|No supporting/.test(copied), copied.slice(0, 200));
+
+  // An edit is the clinician's: their words leave the list.
+  const pre = riskWrap.querySelector('pre');
+  pre.textContent = 'Pain and swelling for a few days. Numbness of the lip, usually temporary.';
+  pre.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(500);
+  ok('editing a field takes its sentences off the list', $(doc, 'sourcecheck-list').children.length === 0 && box.classList.contains('clear') &&
+    /incomplete/.test($(doc, 'sourcecheck-title').textContent),
+    [...$(doc, 'sourcecheck-list').children].map((l) => l.textContent).join(' | '));
+  const riskNow = [...doc.querySelectorAll('#fields .field')].find((w) => w.dataset.key === 'risks');
+  ok('and the field says its sources are for the draft as written', /You have edited this field/.test(riskNow.textContent));
+  ok('the open list stays open across the refresh', !riskNow.querySelector('.src-list').classList.contains('hidden'));
+
+  // No sources at all: say the check could not run, flag nothing.
+  give = note27();
+  click($(doc, 'clear'));
+  await tick(20);
+  await toDraft(ctx);
+  ok('a draft without sources says the check could not be run',
+    /not available/.test($(doc, 'sourcecheck-title').textContent) && $(doc, 'sourcecheck-list').children.length === 0 && !doc.querySelector('#fields .src'));
+
+  // Clear leaves nothing behind.
+  give = sourced;
+  click($(doc, 'clear'));
+  await tick(20);
+  await toDraft(ctx);
+  click($(doc, 'clear'));
+  await tick(20);
+  ok('Clear removes the source check and its quotes', $(doc, 'sourcecheck').classList.contains('hidden') && !doc.body.textContent.includes('sore and swollen'));
+}
+
+async function testRecordMore() {
+  section('More than one recording in one consultation');
+  const A = [{ speaker: 'S1', start: 1, text: 'We could take the wisdom tooth out.' }, { speaker: 'S2', start: 5, text: 'What are my options?' }];
+  const B = [{ speaker: 'S1', start: 2, text: 'The radiograph shows the roots are close to the nerve.' }, { speaker: 'S2', start: 8, text: 'Then a coronectomy please.' }];
+  let transcripts = 0, extractBodies = [], failNextTranscribe = false, failNextExtract = false;
+  const ctx = await boot({
+    onFetch: async (e, opts) => {
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') {
+        transcripts++;
+        if (failNextTranscribe) { failNextTranscribe = false; return { ok: false, status: 502, json: async () => ({ error: 'speechmatics_error', detail: 'upstream 500' }) }; }
+        return json200({ status: 'done', turns: transcripts === 1 ? A : B });
+      }
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body);
+        extractBodies.push(b);
+        if (failNextExtract) { failNextExtract = false; return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed', detail: 'bedrock 503' }) }; }
+        const n = b.parts ? b.parts.length : 1;
+        return json200({ status: 'done', note: note27({ decision: n > 1 ? 'Coronectomy.' : 'Proceed.' }) });
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  await toDraft(ctx);
+  const decision = () => { const p = fieldPre(doc, 'Decision'); return p ? p.textContent : ''; };
+  ok('after the first draft, another recording can be added', !$(doc, 'add-part').classList.contains('hidden') && decision() === 'Proceed.');
+  ok('the first draft is sent as it always was', Array.isArray(extractBodies[0].turns) && !extractBodies[0].parts);
+
+  click($(doc, 'add-part'));
+  await tick(80);
+  ok('it records without clearing anything', !$(doc, 'recording').classList.contains('hidden') &&
+    /Recording 2 for this consultation/.test($(doc, 'recording-h').textContent) && decision() === 'Proceed.');
+  click($(doc, 'stop'));
+  await tick(300);
+  const b2 = extractBodies[1];
+  ok('the note is redrafted from both recordings, each whole and in order',
+    b2 && Array.isArray(b2.parts) && b2.parts.length === 2 && b2.parts[0].turns[0].text === A[0].text && b2.parts[1].turns[0].text === B[0].text,
+    JSON.stringify(b2 && Object.keys(b2)));
+  ok('and the new note replaces the old one', !$(doc, 'draft').classList.contains('hidden') && decision() === 'Coronectomy.');
+  ok('the note says it came from two recordings',
+    [...$(doc, 'gaps-list').children].some((li) => /Drafted from 2 separate recordings/.test(li.textContent)));
+  ok('the button now says which recording would be next', /recording 3 of 3/.test($(doc, 'add-part').textContent), $(doc, 'add-part').textContent);
+
+  // Everything made from the transcript uses every recording.
+  click($(doc, 'make-summary'));
+  await tick(100);
+  const sb = extractBodies[extractBodies.length - 1];
+  ok('the summary is asked for from every recording', sb.kind === 'summary' && sb.parts && sb.parts.length === 2);
+
+  // Discarding an extra recording keeps the note.
+  click($(doc, 'add-part'));
+  await tick(80);
+  const before = transcripts;
+  click($(doc, 'discard'));
+  await tick(60);
+  ok('discarding an extra recording goes back to the note, unchanged', !$(doc, 'draft').classList.contains('hidden') && decision() === 'Coronectomy.');
+  ok('and sends nothing', transcripts === before);
+  await tick(200);   // the old recorder's last pages land and must be dropped
+  ok('even when its last pages arrive afterwards', transcripts === before && $(doc, 'recording').classList.contains('hidden'));
+
+  // A third recording whose transcription fails.
+  failNextTranscribe = true;
+  click($(doc, 'add-part'));
+  await tick(80);
+  click($(doc, 'stop'));
+  await tick(300);
+  ok('a failed transcription goes back to the note, which is unchanged',
+    !$(doc, 'draft').classList.contains('hidden') && decision() === 'Coronectomy.' && !$(doc, 'error').classList.contains('hidden'));
+  ok('and offers to try again or drop only the extra recording',
+    $(doc, 'retry').textContent === 'Try transcribing again' && $(doc, 'discard-transcript').textContent === 'Discard the extra recording',
+    `${$(doc, 'retry').textContent} / ${$(doc, 'discard-transcript').textContent}`);
+  click($(doc, 'discard-transcript'));
+  await tick(40);
+  ok('dropping it keeps the note and the consultation', decision() === 'Coronectomy.' && $(doc, 'error').classList.contains('hidden') && $(doc, 'consent').checked);
+  click($(doc, 'copy-all'));   // nothing should throw
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'full'));
+  await tick(200);
+  const lb = extractBodies[extractBodies.length - 1];
+  ok('and the dropped recording is not sent with the next redraft', lb.parts && lb.parts.length === 2, JSON.stringify(lb.parts && lb.parts.length));
+
+  // A third recording whose redraft fails, then succeeds on retry.
+  failNextExtract = true;
+  click($(doc, 'add-part'));
+  await tick(80);
+  click($(doc, 'stop'));
+  await tick(300);
+  ok('a failed redraft keeps the note on screen and says the recording is held',
+    decision() === 'Coronectomy.' && /Could not add the extra recording/.test($(doc, 'error-title').textContent) &&
+    /held in memory/.test($(doc, 'error-body').textContent), $(doc, 'error-body').textContent);
+  ok('and no fourth recording is offered while it is not in the note', $(doc, 'add-part').classList.contains('hidden'));
+  click($(doc, 'retry'));
+  await tick(300);
+  const rb = extractBodies[extractBodies.length - 1];
+  ok('Try again redrafts from all three', rb.parts && rb.parts.length === 3 && $(doc, 'error').classList.contains('hidden'));
+  ok('and three is the limit', $(doc, 'add-part').classList.contains('hidden'));
+
+  // A new patient starts from one recording again.
+  click($(doc, 'clear'));
+  await tick(20);
+  transcripts = 0;
+  await toDraft(ctx);
+  const nb = extractBodies[extractBodies.length - 1];
+  ok('the next patient starts from a single recording', Array.isArray(nb.turns) && !nb.parts && !$(doc, 'add-part').classList.contains('hidden'));
+}
+
+async function testRecordMoreGuards() {
+  section('Guard: an extra recording keeps the consultation');
+  const src = pageScript();
+  const start = bodyAt(src, src.indexOf('async function startRecording('));
+  ok('an extra recording does not start a new consultation',
+    /if \(!more\) S\.gen\+\+;/.test(start) && /if \(!more\) \{\s*S\.captureNote = null;\s*clearConsultation\(\);\s*\} else \{\s*resetRecordingState\(\);/.test(start));
+  const addBody = src.slice(src.indexOf("$('add-part').addEventListener"), src.indexOf('async function startRecording('));
+  ok('and asks before it can replace edits', /redraftConfirmed\(\)/.test(addBody));
+  const discard = bodyAt(src, src.indexOf('function discardExtraRecording()'));
+  // ?type= clicks a consult type while the script is still running; that click
+  // asks for the checklist, so the cache must exist before the buttons do.
+  ok('the checklist cache exists before ?type= can click a consult type',
+    src.indexOf('var checklistCache = {};') > -1 && src.indexOf('var checklistCache = {};') < src.indexOf('CONSULT_TYPES.forEach('));
+  ok('discarding one lets the recorder go before stopping it', /S\.recorder = null;[\s\S]*rec\.stop\(\)/.test(discard) && !/wipe\(\)/.test(discard));
+}
+
+async function testExtraRecordingRetry() {
+  section('An extra recording whose transcription failed is retried, not left out');
+  let posts = 0, bodies = [], failOnce = false;
+  const ctx = await boot({
+    onFetch: async (e, opts) => {
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') {
+        posts++;
+        if (failOnce) { failOnce = false; return { ok: false, status: 502, json: async () => ({ error: 'speechmatics_error', detail: 'upstream 500' }) }; }
+        return json200({ status: 'done', turns: longTurns() });
+      }
+      if (e.url.includes('/api/extract')) { bodies.push(JSON.parse(opts.body)); return json200({ status: 'done', note: note27() }); }
+    }
+  });
+  const { doc } = ctx;
+  await toDraft(ctx);
+  failOnce = true;
+  click($(doc, 'add-part'));
+  await tick(80);
+  click($(doc, 'stop'));
+  await tick(300);
+  click($(doc, 'retry'));
+  await tick(300);
+  const last = bodies[bodies.length - 1];
+  ok('Try transcribing again sends the held recording again', posts === 3, String(posts));
+  ok('and the note is then redrafted from both recordings', last && last.parts && last.parts.length === 2 && $(doc, 'error').classList.contains('hidden'));
+}
+
+async function testFailedExtraRedraftCanBeDropped() {
+  section('An extra recording whose redraft failed can be dropped on its own');
+  let bodies = [], failNext = false;
+  const ctx = await boot({
+    onFetch: async (e, opts) => {
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns: longTurns() });
+      if (e.url.includes('/api/extract')) {
+        bodies.push(JSON.parse(opts.body));
+        if (failNext) { failNext = false; return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed', detail: 'bedrock 503' }) }; }
+        return json200({ status: 'done', note: note27() });
+      }
+    }
+  });
+  const { doc } = ctx;
+  await toDraft(ctx);
+  failNext = true;
+  click($(doc, 'add-part'));
+  await tick(80);
+  click($(doc, 'stop'));
+  await tick(300);
+  ok('the failed redraft offers to drop the extra recording', $(doc, 'discard-transcript').textContent === 'Discard the extra recording');
+  click($(doc, 'discard-transcript'));
+  await tick(40);
+  ok('dropping it keeps the note', !!fieldPre(doc, 'Decision') && $(doc, 'error').classList.contains('hidden'));
+  ok('and another recording can be added again', !$(doc, 'add-part').classList.contains('hidden'));
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
+  await tick(200);
+  const last = bodies[bodies.length - 1];
+  ok('the next redraft is from the first recording only', Array.isArray(last.turns) && !last.parts, JSON.stringify(Object.keys(last)));
+}
+
+/* Review findings, 27 September 2026 — each reproduced first, then fixed. */
+async function testQuotesMustBeRealAndInOneTurn() {
+  section('A source quote counts only if it is real, whole, and inside one turn');
+  const turns = [
+    { speaker: 'S1', start: 3, text: 'Are you happy to go ahead with taking the tooth out today?' },
+    { speaker: 'S2', start: 8, text: 'I do not want the tooth out, I want to think about it.' },
+    { speaker: 'S1', start: 20, text: 'That is fine. Yes, we can book a review.' }
+  ];
+  const note = note27({
+    decision: 'Patient agreed to proceed today. Patient agreed to extraction. Patient consented. Review booked.',
+    speakers: { S1: 'clinician', S2: 'patient' },
+    sources: { decision: [
+      { start: 'Patient agreed to proceed today', quotes: ['Are you happy to go ahead ... yes'] },
+      { start: 'Patient agreed to extraction', quotes: ['taking the tooth out today? I do'] },
+      { start: 'Patient consented', quotes: ['Yes'] },
+      { start: 'Review booked', quotes: ['we can book a review'] }] }
+  });
+  const ctx = await boot({ onFetch: async (e) => {
+    if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns });
+    if (e.url.includes('/api/extract')) return json200({ status: 'done', note });
+  }});
+  const { doc } = ctx;
+  await toDraft(ctx);
+  const w = [...doc.querySelectorAll('#fields .field')].find((x) => x.dataset.key === 'decision');
+  ok('a quote stitched from pieces with "..." is not accepted, nor one across two speakers, nor a lone "yes"',
+    /1 of 4 — 3 not found/.test(w.querySelector('.src-toggle').textContent), w.querySelector('.src-toggle').textContent);
+  ok('so an invented decision is listed for checking', $(doc, 'sourcecheck-list').children.length === 3 && !$(doc, 'sourcecheck').classList.contains('clear'));
+}
+
+async function testDictationIsNotProofOfConversation() {
+  section('Words dictated after the patient left do not support a conversation field');
+  const turns = [
+    { speaker: 'S1', start: 0.5, text: 'Right, we will take the tooth out today, is that alright?' },
+    { speaker: 'S2', start: 3, text: 'Yes that is fine by me.' },
+    { speaker: 'S1', start: 30, text: 'Dictation. Discussed risk of permanent nerve damage. Examination shows a partially erupted lower left eight.' }
+  ];
+  const note = note27({ risks: 'Permanent nerve damage was discussed.', examination: 'Partially erupted lower left eight.',
+    speakers: { S1: 'clinician', S2: 'patient' },
+    sources: { risks: [{ start: 'Permanent nerve damage was discussed', quotes: ['Discussed risk of permanent nerve damage'] }],
+               examination: [{ start: 'Partially erupted lower left eight', quotes: ['a partially erupted lower left eight'] }] } });
+  const ctx = await boot({ onFetch: async (e) => {
+    if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns });
+    if (e.url.includes('/api/extract')) return json200({ status: 'done', note });
+  }});
+  const { doc } = ctx;
+  armStart(doc, ctx.win); await tick();
+  click($(doc, 'start')); await tick(60);
+  click($(doc, 'dictate')); await tick(20);
+  click($(doc, 'stop')); await tick(300);
+  const risks = [...doc.querySelectorAll('#fields .field')].find((x) => x.dataset.key === 'risks');
+  click(risks.querySelector('.src-toggle'));
+  ok('a risk found only in dictation is not counted as said to the patient',
+    /0 of 1/.test(risks.querySelector('.src-toggle').textContent) && /only in your dictation/i.test(risks.textContent), risks.textContent);
+  ok('and is listed as such', [...$(doc, 'sourcecheck-list').children].some((li) => /Permanent nerve damage.*only in your dictation/.test(li.textContent)));
+  const exam = [...doc.querySelectorAll('#fields .field')].find((x) => x.dataset.key === 'examination');
+  click(exam.querySelector('.src-toggle'));
+  ok('while a dictated field is supported by the dictation, and says so', /1 of 1/.test(exam.querySelector('.src-toggle').textContent) && /\(dictated\)/.test(exam.textContent), exam.textContent);
+}
+
+async function testNothingOverAHeldExtraRecording() {
+  section('Nothing starts or redrafts over an extra recording waiting to be transcribed');
+  let posts = 0, bodies = [], failNext = false;
+  const ctx = await boot({ onFetch: async (e, opts) => {
+    if (e.url.includes('/api/transcribe') && e.method === 'POST') {
+      posts++;
+      if (failNext) { failNext = false; return { ok: false, status: 502, json: async () => ({ error: 'x', detail: 'upstream 500' }) }; }
+      return json200({ status: 'done', turns: longTurns() });
+    }
+    if (e.url.includes('/api/extract')) { bodies.push(JSON.parse(opts.body)); return json200({ status: 'done', note: note27() }); }
+  }});
+  const { doc } = ctx;
+  await toDraft(ctx);
+  failNext = true;
+  click($(doc, 'add-part')); await tick(80); click($(doc, 'stop')); await tick(300);
+  ok('"Record more" is not offered while one is waiting', $(doc, 'add-part').classList.contains('hidden'));
+  const n = bodies.length;
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'full'));
+  await tick(200);
+  ok('a length change does not redraft over it', bodies.length === n && /waiting/.test($(doc, 'error-title').textContent), $(doc, 'error-title').textContent);
+  ok('and still offers to transcribe it or drop it',
+    $(doc, 'retry').textContent === 'Try transcribing again' && $(doc, 'discard-transcript').textContent === 'Discard the extra recording');
+  click($(doc, 'retry')); await tick(300);
+  const last = bodies[bodies.length - 1];
+  ok('transcribing it adds it to the note', posts === 3 && last.parts && last.parts.length === 2);
+}
+
+async function testSpeakerConfirmationIsPerRecording() {
+  section('Correcting the speakers in one recording confirms that recording only');
+  let bodies = [];
+  const ctx = await boot({ onFetch: async (e, opts) => {
+    if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns: longTurns() });
+    if (e.url.includes('/api/extract')) {
+      const b = JSON.parse(opts.body); bodies.push(b);
+      const guess = b.parts ? { S1: 'patient', S2: 'clinician', 'R2-S1': 'patient', 'R2-S2': 'clinician' } : { S1: 'patient', S2: 'clinician' };
+      return json200({ status: 'done', note: note27({ speakers: Object.assign(guess, b.speakerRoles || {}), speakerConfidence: 'medium' }) });
+    }
+  }});
+  const { doc } = ctx;
+  await toDraft(ctx);
+  click($(doc, 'swap-speakers')); await tick(300);
+  ok('a swap in a single recording is confirmed', /confirmed by you$/.test($(doc, 'speaker-map').querySelector('h2').textContent));
+  click($(doc, 'add-part')); await tick(80); click($(doc, 'stop')); await tick(300);
+  const mb = bodies[bodies.length - 1];
+  ok('the next recording is sent with only the first recording\'s labels confirmed',
+    mb.speakerRoles && Object.keys(mb.speakerRoles).sort().join() === 'S1,S2', JSON.stringify(mb.speakerRoles));
+  ok('and the banner does not call the second recording confirmed',
+    /recording 1 confirmed by you, the rest not yet/.test($(doc, 'speaker-map').querySelector('h2').textContent), $(doc, 'speaker-map').querySelector('h2').textContent);
+  click($(doc, 'swap-speakers-2')); await tick(300);
+  const sb = bodies[bodies.length - 1];
+  ok('confirming the second recording adds its labels and keeps the first\'s',
+    sb.speakerRoles && sb.speakerRoles['R2-S1'] === 'clinician' && sb.speakerRoles.S1 === 'clinician', JSON.stringify(sb.speakerRoles));
+  ok('after which both are confirmed', /Speaker mapping — confirmed by you$/.test($(doc, 'speaker-map').querySelector('h2').textContent));
+}
+
+async function testAnEditKeepsUntouchedWarnings() {
+  section('Editing one sentence does not clear the warning on another');
+  const turns = [{ speaker: 'S1', start: 3, text: 'You will be sore and swollen for a few days after it.' }];
+  const note = note27({ risks: 'Soreness for a few days. Nerve damage in one in ten.',
+    sources: { risks: [{ start: 'Soreness for a few days', quotes: ['sore and swollen for a few days'] },
+                       { start: 'Nerve damage in one in', quotes: [] }] } });
+  const ctx = await boot({ onFetch: async (e) => {
+    if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns });
+    if (e.url.includes('/api/extract')) return json200({ status: 'done', note });
+  }});
+  const { doc, win } = ctx;
+  await toDraft(ctx);
+  const pre = fieldPre(doc, 'Material risks named, per option');
+  pre.textContent = 'Soreness and swelling for a few days. Nerve damage in one in ten.';
+  pre.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(500);
+  ok('the untouched unmatched sentence is still listed',
+    [...$(doc, 'sourcecheck-list').children].some((li) => /Nerve damage in one in ten/.test(li.textContent)));
+  pre.textContent = 'Soreness and swelling for a few days. Numbness of the lip, usually temporary.';
+  pre.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(500);
+  ok('and leaves the list once the clinician has changed it', $(doc, 'sourcecheck-list').children.length === 0);
+}
+
+async function testATurnAcrossDictationOrAPauseIsCut() {
+  section('A turn that runs across Dictate or a pause is cut there for the source check');
+  const text1 = 'Right, see you on the day then. Discussed risk of permanent nerve damage with the patient.';
+  const text2 = 'Do you want to go ahead with it? Right, all done, bite on this.';
+  // Words before the cut are timed before any mark the page can make; words
+  // after it long after. The marks themselves come from pressing the buttons.
+  const wordsOf = (t, n, early, late) => { const out = []; const re = /\S+/g; let m, i = 0; while ((m = re.exec(t))) { out.push({ at: m.index, start: i < n ? early + i * 0.1 : late + i }); i++; } return out; };
+  const turns = [
+    { speaker: 'S1', start: -10, end: 2000, text: text1, words: wordsOf(text1, 7, -10, 1000) },
+    { speaker: 'S1', start: -5, end: 2000, text: text2, words: wordsOf(text2, 7, -5, 1500) }
+  ];
+  const note = note27({ risks: 'Permanent nerve damage was discussed.', decision: 'Patient wished to go ahead.',
+    speakers: { S1: 'clinician' },
+    sources: { risks: [{ start: 'Permanent nerve damage was discussed', quotes: ['Discussed risk of permanent nerve damage'] }],
+               decision: [{ start: 'Patient wished to go ahead', quotes: ['go ahead with it? Right, all done'] }] } });
+  const run = async (dictate) => {
+    const ctx = await boot({ onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns });
+      if (e.url.includes('/api/extract')) return json200({ status: 'done', note });
+    }});
+    const { doc, win } = ctx;
+    armStart(doc, win); await tick();
+    click($(doc, 'start')); await tick(60);
+    const realNow = win.Date.now.bind(win.Date);
+    let offset = 0;
+    win.Date.now = () => realNow() + offset;
+    click($(doc, 'pause')); await tick(20);
+    offset += 5000;
+    click($(doc, dictate ? 'dictate' : 'pause')); await tick(20);
+    click($(doc, 'stop')); await tick(300);
+    for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+    return doc;
+  };
+  let doc = await run(true);
+  const risks = [...doc.querySelectorAll('#fields .field')].find((x) => x.dataset.key === 'risks');
+  ok('words dictated inside a turn that began as conversation do not support a conversation field',
+    /0 of 1/.test(risks.querySelector('.src-toggle').textContent) && /only in your dictation/.test(risks.textContent),
+    risks.querySelector('.src-toggle').textContent);
+  doc = await run(false);
+  const decision = [...doc.querySelectorAll('#fields .field')].find((x) => x.dataset.key === 'decision');
+  ok('and a quote cannot bridge a pause inside one turn', /0 of 1/.test(decision.querySelector('.src-toggle').textContent), decision.querySelector('.src-toggle').textContent);
+  const risks2 = [...doc.querySelectorAll('#fields .field')].find((x) => x.dataset.key === 'risks');
+  ok('while words on one side of the pause still count', /1 of 1/.test(risks2.querySelector('.src-toggle').textContent), risks2.querySelector('.src-toggle').textContent);
+  // A turn with no time at all cannot be placed against Dictate, so it is not
+  // taken as conversation either.
+  turns.length = 0;
+  turns.push({ speaker: 'S1', text: text1 });
+  doc = await run(true);
+  const risks3 = [...doc.querySelectorAll('#fields .field')].find((x) => x.dataset.key === 'risks');
+  ok('an untimed turn in a recording with Dictate supports nothing', /0 of 1/.test(risks3.querySelector('.src-toggle').textContent), risks3.querySelector('.src-toggle').textContent);
+}
+
+
+/* ================================================================
+   27 September 2026, second batch: answering gaps, BPE, to do
+   ================================================================ */
+function fieldWrap(doc, key) {
+  return [...doc.querySelectorAll('#fields .field')].find((x) => x.dataset.key === key);
+}
+
+async function testAnswerAGap() {
+  section('A gap can be answered from memory, into the field it belongs in');
+  let extracts = 0;
+  const gaps = ['Costs were not discussed', 'No questions recorded', 'A gap with a bad question', 'A gap with no question'];
+  const questions = [
+    { gap: 'Costs were not discussed', field: 'costs', ask: 'Were costs discussed? If so, what was said?' },
+    { gap: 'No questions recorded', field: 'patientQuestions', ask: 'Did the patient ask anything?' },
+    { gap: 'A gap with a bad question', field: 'examination', ask: 'Into a dictated field?' },
+    { gap: 'Not mentioned: bleeding.', field: 'risks', ask: 'Did you mention bleeding?' }
+  ];
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: longTurns() });
+      if (e.url.includes('/api/extract')) {
+        extracts++;
+        return json200({ status: 'done', note: note27({ gaps, questions, notSaid: ['Not mentioned: bleeding.'], patientQuestions: 'Will it hurt?' }) });
+      }
+    }
+  });
+  const { doc, win } = ctx;
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  await toDraft(ctx);
+
+  const find = (re) => [...$(doc, 'gaps-list').children].find((li) => re.test(li.textContent));
+  ok('a gap with a question offers Answer', !!find(/Costs were not/)?.querySelector('.answer-btn'));
+  ok('a gap without one does not', !find(/with no question/).querySelector('.answer-btn'));
+  ok('a question into a dictated field is not offered', !find(/bad question/).querySelector('.answer-btn'));
+  ok('a "not said" item never offers Answer, even with a question naming it',
+    ![...$(doc, 'notsaid-list').children].some((li) => li.querySelector('.answer-btn, .answer-form')) &&
+    ![...$(doc, 'gaps-list').children].some((li) => /bleeding/.test(li.textContent)));
+
+  // An edit made before answering keeps its mark after the redraw.
+  const dec = fieldPre(doc, 'Decision');
+  dec.textContent = 'Proceed under LA.';
+  dec.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(10);
+  click(find(/Costs were not/).querySelector('.answer-btn'));
+  let form = find(/Costs were not/).querySelector('.answer-form');
+  ok('"Not discussed" is offered for an empty field', [...form.querySelectorAll('.chip')].some((c) => c.textContent === 'Not discussed'));
+  ok('it asks the question and says where the answer goes',
+    /Were costs discussed\?/.test(form.textContent) && /Goes into: Costs discussed/.test(form.textContent), form.textContent);
+  click(form.querySelector('.add'));
+  await tick(10);
+  ok('and adds nothing until it is told', fieldPre(doc, 'Costs discussed').textContent === '');
+  form.querySelector('input').value = '  Quoted  £250, NHS band 2 explained. ';
+  click(form.querySelector('.add'));
+  await tick(20);
+  ok('the answer goes into that field, as typed', fieldPre(doc, 'Costs discussed').textContent === 'Quoted £250, NHS band 2 explained.',
+    fieldPre(doc, 'Costs discussed').textContent);
+  ok('the field says on screen that it was added by you', !!fieldWrap(doc, 'costs').querySelector('.added-tag'));
+  ok('and a field edited earlier is still marked edited', fieldWrap(doc, 'decision').classList.contains('edited'));
+  ok('the gap shows what was added, and the heading counts it',
+    /Added to Costs discussed/.test(find(/Costs were not/).textContent) && /1 answered/.test($(doc, 'gaps-title').textContent),
+    $(doc, 'gaps-title').textContent);
+
+  // A field with something in it keeps it; the answer goes after.
+  click(find(/No questions recorded/).querySelector('.answer-btn'));
+  form = find(/No questions recorded/).querySelector('.answer-form');
+  ok('but not under text already in the field, where it would read as the whole field',
+    ![...form.querySelectorAll('.chip')].some((c) => c.textContent === 'Not discussed') && /after what is already there/.test(form.textContent));
+  form.querySelector('input').value = 'Asked about time off work.';
+  click(form.querySelector('.add'));
+  await tick(20);
+  ok('what was already in the field is kept', fieldPre(doc, 'Patient\'s own questions and concerns').textContent === 'Will it hurt?\nAsked about time off work.',
+    fieldPre(doc, 'Patient\'s own questions and concerns').textContent);
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('both are in the copied note', /Costs discussed\nQuoted £250, NHS band 2 explained\./.test(copied) && /Will it hurt\?\nAsked about time off work\./.test(copied), copied);
+  ok('with nothing added to the pasted text to mark them', !/added by you/i.test(copied));
+
+  // Undo takes out exactly what was added.
+  click([...find(/Costs were not/).querySelectorAll('button')].find((b) => b.textContent === 'Undo'));
+  await tick(20);
+  ok('Undo takes the answer out again', fieldPre(doc, 'Costs discussed').textContent === '' && !!find(/Costs were not/).querySelector('.answer-btn'));
+
+  // Edited since: Undo will not take the clinician's edit with it.
+  const pq = fieldPre(doc, 'Patient\'s own questions and concerns');
+  pq.textContent = 'Will it hurt?\nAsked about time off work. Two weeks.';
+  pq.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(20);
+  click([...find(/No questions recorded/).querySelectorAll('button')].find((b) => b.textContent === 'Undo'));
+  await tick(20);
+  ok('Undo leaves a field alone once it has been edited', /Two weeks\./.test(fieldPre(doc, 'Patient\'s own questions and concerns').textContent) &&
+    /Added to/.test(find(/No questions recorded/).textContent));
+
+  // Words typed away: the gap is open again, and Undo is not needed.
+  click(find(/Costs were not/).querySelector('.answer-btn'));
+  form = find(/Costs were not/).querySelector('.answer-form');
+  form.querySelector('input').value = 'Quoted £250.';
+  click(form.querySelector('.add'));
+  await tick(20);
+  const costsPre = fieldPre(doc, 'Costs discussed');
+  costsPre.textContent = '';
+  costsPre.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(600);
+  ok('an answer deleted from its field leaves the gap open again', !!find(/Costs were not/).querySelector('.answer-btn') &&
+    /, 1 answered$/.test($(doc, 'gaps-title').textContent) && !fieldWrap(doc, 'costs').querySelector('.added-tag'), $(doc, 'gaps-title').textContent);
+
+  // Two answers into one field: either can be undone.
+  const g2 = ['Costs were not discussed', 'Price of the crown not given'];
+  const q2 = [{ gap: g2[0], field: 'costs', ask: 'Were costs discussed?' }, { gap: g2[1], field: 'costs', ask: 'Was a price given?' }];
+  const ctx2 = await boot({ onFetch: async (e) => {
+    if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: longTurns() });
+    if (e.url.includes('/api/extract')) return json200({ status: 'done', note: note27({ gaps: g2, questions: q2 }) });
+  } });
+  await toDraft(ctx2);
+  const d2 = ctx2.doc;
+  const find2 = (re) => [...$(d2, 'gaps-list').children].find((li) => re.test(li.textContent));
+  for (const [re, text] of [[/Costs were not/, 'NHS band 2.'], [/Price of the crown/, 'Crown £300.']]) {
+    click(find2(re).querySelector('.answer-btn'));
+    const f2 = find2(re).querySelector('.answer-form');
+    f2.querySelector('input').value = text;
+    click(f2.querySelector('.add'));
+    await tick(20);
+  }
+  click([...find2(/Costs were not/).querySelectorAll('button')].find((b) => b.textContent === 'Undo'));
+  await tick(20);
+  ok('the first of two answers in one field can be undone on its own', fieldPre(d2, 'Costs discussed').textContent === 'Crown £300.',
+    fieldPre(d2, 'Costs discussed').textContent);
+
+  // Typed text is text.
+  click(find(/Costs were not/).querySelector('.answer-btn'));
+  form = find(/Costs were not/).querySelector('.answer-form');
+  form.querySelector('input').value = '<img src=x onerror=alert(1)>';
+  click(form.querySelector('.add'));
+  await tick(20);
+  ok('a typed answer is shown as text', !doc.querySelector('#fields img, #gaps img') && /<img src=x/.test(fieldPre(doc, 'Costs discussed').textContent));
+
+  // A redraft replaces the fields the answers went into.
+  win.confirm = () => true;
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
+  await tick(200);
+  ok('a redraft starts with nothing answered', extracts === 2 && !/answered/.test($(doc, 'gaps-title').textContent) &&
+    !!find(/Costs were not/).querySelector('.answer-btn') && fieldPre(doc, 'Costs discussed').textContent === '');
+}
+
+async function testBpe() {
+  section('BPE: the scores as said, on the chart and in the note');
+  const turns = [
+    { speaker: 'S1', start: 2, text: 'BPE two one two, three star two two. Soft tissues normal.' },
+    ...longTurns().map((t, i) => ({ ...t, start: 10 + i * 5 }))
+  ];
+  const bodies = [];
+  let bpe = { UR: '2', UA: '1', UL: '2', LR: '3*', LA: '2', LL: '2', quotes: ['BPE two one two, three star two two'] };
+  let withSources = false, withExam = false;
+  const mk = () => boot({
+    onFetch: async (e, opts) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns });
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body || '{}');
+        bodies.push(b);
+        if (b.kind === 'referral') return json200({ status: 'done', referral: { situation: 'x', background: null, assessment: null, recommendation: null, redFlags: [] } });
+        if (b.kind === 'postop') return json200({ status: 'done', postop: { expect: 'x' } });
+        return json200({ status: 'done', note: note27(Object.assign({ bpe }, withSources ? { sources: {} } : {},
+          withExam ? { examination: 'BPE 2 1 2, 3 2 2. Soft tissues normal.' } : {})) });
+      }
+    }
+  });
+  let ctx = await mk();
+  let { doc, win } = ctx;
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  await toDraft(ctx);
+  const sel = (d, s) => d.querySelector('#bpe-block select[data-sextant="' + s + '"]');
+  ok('the chart shows each sextant as said, in chart order',
+    ['UR', 'UA', 'UL', 'LR', 'LA', 'LL'].map((s) => sel(doc, s)?.value).join(',') === '2,1,2,3*,2,2');
+  ok('with the words the scores were heard in', /Heard: “BPE two one two, three star two two”/.test($(doc, 'bpe-block').textContent), $(doc, 'bpe-block').textContent);
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('and the scores are in the copied note', /\nBPE\n\n2 1 2 \/ 3\* 2 2 \(UR UA UL \/ LR LA LL\)/.test(copied), copied.slice(-200));
+
+  sel(doc, 'LL').value = '3';
+  sel(doc, 'LL').dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(20);
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('a score changed on the chart is what is copied', /2 1 2 \/ 3\* 2 3 \(/.test(copied));
+  ok('and the chart says it was edited', /Edited by you/.test($(doc, 'bpe-block').textContent));
+
+  click($(doc, 'make-referral'));
+  await tick(150);
+  const ref = bodies.find((b) => b.kind === 'referral');
+  ok('the referral is sent the BPE as checked', ref?.note?.bpe === '2 1 2 / 3* 2 3 (UR UA UL / LR LA LL)', JSON.stringify(ref?.note));
+  click($(doc, 'make-postop'));
+  await tick(150);
+  const po = bodies.find((b) => b.kind === 'postop');
+  ok('the post-op sheet is not', !!po && !('bpe' in (po.note || {})));
+
+  // Words that are not in the recording.
+  bpe = { UR: '2', UA: '1', UL: '2', LR: '3', LA: '2', LL: '9', quotes: ['BPE all fours today'] };
+  withSources = true;
+  ctx = await mk();
+  ({ doc, win } = ctx);
+  await toDraft(ctx);
+  ok('a code that does not exist is shown as blank', sel(doc, 'LL').value === '');
+  ok('and the blank sextant is named', /Not stated: LL/.test($(doc, 'bpe-block').textContent));
+  ok('scores whose words cannot be found say so', /could not be found in the recording/.test($(doc, 'bpe-block').textContent));
+  ok('and are listed with the sentences not found', [...$(doc, 'sourcecheck-list').children].some((li) => /^BPE: the scores could not be matched/.test(li.textContent)));
+
+  // Scores said without their sextants, and a BPE also in the examination field.
+  bpe = { UR: '2', UA: '1', UL: '2', LR: '3', LA: '2', LL: '2', named: false, quotes: ['BPE two one two, three star two two'] };
+  withSources = false; withExam = true;
+  ctx = await mk();
+  ({ doc, win } = ctx);
+  await toDraft(ctx);
+  ok('scores said without their sextants carry a warning about the order', /were not named/.test($(doc, 'bpe-block').textContent));
+  ok('and a BPE also in the examination field is pointed out', /examination field mentions a BPE too/.test($(doc, 'bpe-block').textContent));
+  withExam = false;
+
+  // No BPE said: an exam gets an empty chart to fill in; a surgical consult none.
+  bpe = null;
+  ctx = await mk();
+  ({ doc, win } = ctx);
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  armStart(doc, win, /Exam/);
+  await tick();
+  click($(doc, 'start')); await tick(60);
+  click($(doc, 'stop')); await tick(300);
+  for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+  ok('an exam with no BPE heard shows an empty chart', !!$(doc, 'bpe-block') && /No BPE scores came back/.test($(doc, 'bpe-block').textContent) &&
+    ['UR', 'LL'].every((s) => sel(doc, s).value === ''));
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('and nothing about a BPE is copied', !/BPE/.test(copied));
+  sel(doc, 'UR').value = '4*';
+  sel(doc, 'UR').dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(20);
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('until one is filled in by hand', /BPE\n\n4\* - - \/ - - - \(/.test(copied), copied.slice(-120));
+  ctx = await mk();
+  ({ doc, win } = ctx);
+  await toDraft(ctx);
+  ok('a third molar consult with no BPE heard shows no chart', !$(doc, 'bpe-block'));
+}
+
+async function testTodo() {
+  section('To do: tasks said in the recording, kept out of the note');
+  const turns = [
+    { speaker: 'S1', start: 2, text: 'I will see you again in two weeks for a review.' },
+    ...longTurns().map((t, i) => ({ ...t, start: 10 + i * 5 }))
+  ];
+  let extracts = 0;
+  let actions = [
+    { text: 'Book review in two weeks', quotes: ['see you again in two weeks'] },
+    { text: 'Send referral letter', quotes: ['nothing like this was said'] },
+    { text: '<b>bold</b> task', quotes: [] }
+  ];
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns });
+      if (e.url.includes('/api/extract')) { extracts++; return json200({ status: 'done', note: note27({ actions }) }); }
+    }
+  });
+  const { doc, win } = ctx;
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  await toDraft(ctx);
+  const lis = () => [...$(doc, 'todo-list').children];
+  ok('the tasks are listed, with a count', !$(doc, 'todo').classList.contains('hidden') && lis().length === 3 && /3 tasks/.test($(doc, 'todo-title').textContent));
+  ok('each with the words it was said in', /“see you again in two weeks”/.test(lis()[0].textContent));
+  ok('and one whose words cannot be found says so', /Not found in the recording/.test(lis()[1].textContent) && /Not found in the recording/.test(lis()[2].textContent));
+  ok('a task is shown as text', !lis()[2].querySelector('b') && /<b>bold<\/b>/.test(lis()[2].textContent));
+  const cb = lis()[0].querySelector('input');
+  cb.checked = true;
+  cb.dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(10);
+  ok('ticking one marks it done', lis()[0].classList.contains('done'));
+  click($(doc, 'copy-todo'));
+  await tick(20);
+  ok('the list copies on its own', copied === 'To do\n- Book review in two weeks (done)\n- Send referral letter\n- <b>bold</b> task', copied);
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('and is not part of the note', !/Book review in two weeks|To do/.test(copied));
+
+  win.confirm = () => true;
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
+  await tick(200);
+  ok('a redraft starts with nothing ticked', extracts === 2 && lis().length === 3 && !lis()[0].querySelector('input').checked);
+
+  click($(doc, 'clear'));
+  await tick(20);
+  ok('Clear takes the list away', $(doc, 'todo').classList.contains('hidden') && lis().length === 0);
+
+  actions = [];
+  await toDraft(ctx);
+  ok('with no tasks said there is no list', $(doc, 'todo').classList.contains('hidden'));
+}
+
+async function testDraftChecklistNotice() {
+  section('An unreviewed checklist says so');
+  let draft = true;
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: longTurns() });
+      if (e.url.includes('/api/extract')) return json200({ status: 'done', note: note27({ notSaid: draft ? ['Not recorded: recall interval.'] : ['Not recorded: recall interval.', 'Not mentioned: bleeding.'], checklistDraft: draft }) });
+    }
+  });
+  const { doc } = ctx;
+  await toDraft(ctx);
+  ok('under a draft checklist the page says it has not been reviewed',
+    !$(doc, 'notsaid-draft').classList.contains('hidden') && /not been reviewed/.test($(doc, 'notsaid-draft').textContent));
+  ok('a "not recorded" item is listed under its own heading', $(doc, 'notsaid-said').classList.contains('hidden') &&
+    !$(doc, 'notrec').classList.contains('hidden') && $(doc, 'notrec-list').children.length === 1 &&
+    /^Not recorded in this consultation/.test($(doc, 'notsaid-title').textContent), $(doc, 'notsaid-title').textContent);
+  ok('and can be covered elsewhere like any other', !![...$(doc, 'notrec-list').children][0].querySelector('.cover-btn'));
+  click([...$(doc, 'notrec-list').children][0].querySelector('.cover-btn'));
+  const f = [...$(doc, 'notrec-list').children][0].querySelector('.cover-form');
+  f.querySelector('input').value = 'Recall card';
+  click(f.querySelector('.add'));
+  await tick(10);
+  click([...$(doc, 'covered-block').querySelectorAll('button')].find((b) => b.textContent === 'Undo'));
+  await tick(10);
+  ok('the notice is still there when an item comes back', !$(doc, 'notsaid-draft').classList.contains('hidden') && !$(doc, 'notsaid').classList.contains('hidden'));
+  click($(doc, 'clear'));
+  await tick(20);
+  draft = false;
+  await toDraft(ctx);
+  for (let i = 0; i < 30 && $(doc, 'notsaid').classList.contains('hidden'); i++) await tick(100);
+  ok('under a reviewed one it does not', $(doc, 'notsaid-draft').classList.contains('hidden') && !$(doc, 'notsaid').classList.contains('hidden'));
+  ok('with both kinds, each sits in its own list', $(doc, 'notsaid-list').children.length === 1 && $(doc, 'notrec-list').children.length === 1 &&
+    /^Not said during this consultation \u2014 2 items$/.test($(doc, 'notsaid-title').textContent), $(doc, 'notsaid-title').textContent);
+}
+
+async function testAReplyWithNoNote() {
+  section('A reply with no note in it is a failed draft, not a stuck page');
+  const ctx = await boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe')) return json200({ status: 'done', turns: longTurns() });
+      if (e.url.includes('/api/extract')) return json200({ status: 'done' });
+    }
+  });
+  const { doc } = ctx;
+  await toDraft(ctx);
+  ok('it says the draft failed', !$(doc, 'error').classList.contains('hidden') && /Could not draft the note/.test($(doc, 'error-title').textContent) &&
+    /No note came back/.test($(doc, 'error-body').textContent), $(doc, 'error-title').textContent + ' / ' + $(doc, 'error-body').textContent);
+  ok('and offers to try again', !$(doc, 'error-actions').classList.contains('hidden'));
+}
+
+async function testTreatmentToday() {
+  section('Treatment carried out today, and the LA given — from the dictation only');
+  const conv = "We'll take the lower left eight out today under local.";
+  const dict1 = 'Surgical removal of the lower left eight, two sutures placed, haemostasis achieved.';
+  const dict2 = 'Two cartridges of articaine four percent, batch AB123, inferior alveolar block.';
+  const turns = [
+    { speaker: 'S1', start: 1, end: 2.5, text: conv },
+    { speaker: 'S2', start: 3, end: 4, text: 'Okay, that is fine.' },
+    { speaker: 'S1', start: 100, end: 108, text: dict1 },
+    { speaker: 'S1', start: 110, end: 118, text: dict2 },
+    { speaker: 'S2', start: 120, end: 124, text: 'Last time I had three cartridges of lidocaine.' }
+  ];
+  const bodies = [];
+  let note = note27({
+    examination: 'Partially erupted 38.',
+    treatmentToday: 'Surgical removal of 38. Two sutures placed. Taken out today under local.',
+    laLog: [
+      { agent: 'Articaine', strength: '4%', amount: 'Two cartridges', technique: 'Inferior alveolar block', site: null, batch: 'AB123', notes: null,
+        quotes: ['Two cartridges of articaine four percent'] },
+      { agent: 'Lidocaine', strength: null, amount: 'One cartridge', technique: null, site: null, batch: null, notes: null,
+        quotes: ["take the lower left eight out today"] },
+      { agent: 'Lidocaine', strength: null, amount: 'Three cartridges', technique: null, site: null, batch: null, notes: null,
+        quotes: ['I had three cartridges of lidocaine'] },
+      { agent: 'Articaine', strength: '4%', amount: null, technique: null, site: null, batch: 'ZZ999', notes: null,
+        quotes: ['Two cartridges of articaine four percent'] }
+    ],
+    speakers: { S1: 'clinician', S2: 'patient' },
+    sources: {
+      treatmentToday: [
+        { start: 'Surgical removal of 38', quotes: ['Surgical removal of the lower left eight'] },
+        { start: 'Two sutures placed', quotes: ['two sutures placed'] },
+        { start: 'Taken out today under local', quotes: ["take the lower left eight out today"] }]
+    }
+  });
+  const run = async ({ type = /Third molar/, dictate = true } = {}) => {
+    const ctx = await boot({ onFetch: async (e, opts) => {
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns });
+      if (e.url.includes('/api/extract')) {
+        const b = JSON.parse(opts.body || '{}');
+        bodies.push(b);
+        if (b.kind === 'postop') return json200({ status: 'done', postop: { expect: 'x' } });
+        return json200({ status: 'done', note: JSON.parse(JSON.stringify(note)) });
+      }
+    } });
+    const { doc, win } = ctx;
+    armStart(doc, win, type); await tick();
+    click($(doc, 'start')); await tick(60);
+    const realNow = win.Date.now.bind(win.Date);
+    let offset = 0;
+    win.Date.now = () => realNow() + offset;
+    offset += 5000;
+    if (dictate) { click($(doc, 'dictate')); await tick(20); }
+    offset += 5000;
+    click($(doc, 'stop')); await tick(300);
+    for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+    return ctx;
+  };
+  let { doc, win } = await run();
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  const headings = () => [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent);
+  ok('the treatment has its own section, between the discussion and the outcome',
+    /Discussion\|Treatment\|Outcome/.test(headings().join('|')), headings().join('|'));
+  const tw = fieldWrap(doc, 'treatmentToday');
+  ok('and is marked as dictated', !!tw && !!tw.querySelector('.dictated-tag'));
+  tw.querySelector('.src-toggle').click();
+  const srcText = tw.querySelector('.src-list').textContent;
+  ok('a sentence found in the dictation counts', /“Surgical removal of the lower left eight”/.test(srcText));
+  ok('a sentence found only in the conversation does not, and says why',
+    /Found only in the conversation, not in your dictation\. Check this treatment was actually carried out\./.test(srcText), srcText);
+  ok('and is listed with the sentences not found',
+    [...$(doc, 'sourcecheck-list').children].some((li) => /Taken out today under local\. \(only in the conversation, not dictated\)/.test(li.textContent)));
+
+  const la = $(doc, 'la-block');
+  ok('the LA given is set out as a table', !!la && la.querySelectorAll('tr').length === 5 && /AB123/.test(la.textContent));
+  ok('a row not found in the dictation is named', /Row 2: found only in the conversation, not in your dictation/.test(la.textContent) && !/Row 1:/.test(la.textContent), la.textContent);
+  ok('the patient\'s words after Dictate are not dictation', /Row 3: found only in the conversation/.test(la.textContent));
+  ok('a batch number that is nowhere in the dictation is named', /Row 4: batch ZZ999 not found in your dictation/.test(la.textContent));
+  ok('and the rows that do not check out are in the headline list',
+    ['row 2', 'row 3', 'row 4'].every((r) => [...$(doc, 'sourcecheck-list').children].some((li) => new RegExp('^Local anaesthetic, ' + r + ':').test(li.textContent))));
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('the treatment is in the copied note under its own heading',
+    /TREATMENT\n\nTreatment carried out today \(dictated\)\nSurgical removal of 38\./.test(copied), copied);
+  ok('and so is the LA, exactly as dictated',
+    /LOCAL ANAESTHETIC \(DICTATED\)\n\nLA 1: Agent Articaine, Strength 4%, Amount Two cartridges, Technique Inferior alveolar block, Batch AB123\nLA 2: Agent Lidocaine, Amount One cartridge/.test(copied), copied);
+  // Emptying a row: it is not copied, and the rest are numbered as copied.
+  [...la.querySelectorAll('tr')][2].querySelectorAll('td').forEach((td) => { td.textContent = ''; td.dispatchEvent(new win.Event('input', { bubbles: true })); });
+  await tick(10);
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('an emptied row is not copied, and the rows are numbered as copied', /\nLA 2: Agent Lidocaine, Amount Three cartridges\nLA 3: Agent Articaine/.test(copied) && !/One cartridge/.test(copied), copied.slice(-300));
+  ok('and a row the clinician changed is theirs: no warning on it', !/Row 2:/.test(la.textContent));
+  const batch = [...la.querySelectorAll('td')].find((td) => td.textContent === 'AB123');
+  batch.textContent = 'AB124<b>';
+  batch.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(10);
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('a corrected batch number is what is copied, as text', /Batch AB124<b>/.test(copied) && !la.querySelector('b') && la.classList.contains('edited'));
+
+  // Other layouts place it too.
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap'));
+  await tick(20);
+  const order = [...$(doc, 'fields').querySelectorAll('.field h3')].map((h) => h.textContent);
+  ok('in SOAP it leads the plan', order.indexOf('Treatment carried out today') !== -1 && order.indexOf('Treatment carried out today') < order.indexOf('Decision'), JSON.stringify(order));
+  ok('an LA edit is still marked after the layout changes', $(doc, 'la-block').classList.contains('edited'));
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'consent'));
+  await tick(20);
+  ok('and in the consent record it has its own section', headings().includes('Treatment'));
+
+  // The post-op sheet request: the page sends the note; the server leaves the
+  // treatment out (tested there). Here: the page never adds the LA to it.
+  click($(doc, 'make-postop'));
+  await tick(150);
+  const po = bodies.find((b) => b.kind === 'postop');
+  ok('the LA table is not sent for the post-op sheet', !!po && !('laLog' in (po.note || {})));
+
+  // Empty: offered for a treatment type when Dictate was pressed, not otherwise.
+  note = note27({ examination: 'Partially erupted 38.' });
+  ({ doc } = await run());
+  ok('a treatment type with dictation offers an empty treatment section to fill in',
+    !!fieldWrap(doc, 'treatmentToday') && fieldPre(doc, 'Treatment carried out today').textContent === '');
+  ok('and an empty LA block with a way to add one', !!$(doc, 'la-block') && /No local anaesthetic came back/.test($(doc, 'la-block').textContent));
+  let w2;
+  ({ doc, win: w2 } = await run());
+  let copied2 = '';
+  w2.navigator.clipboard.writeText = async (t) => { copied2 = t; };
+  click($(doc, 'la-block').querySelector('.add-row'));
+  await tick(20);
+  const cell = $(doc, 'la-block').querySelector('td');
+  cell.textContent = 'Lidocaine 2% with adrenaline';
+  cell.dispatchEvent(new w2.Event('input', { bubbles: true }));
+  await tick(10);
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('a row added by hand is copied', /LA 1: Agent Lidocaine 2% with adrenaline/.test(copied2) && !/not found/.test($(doc, 'la-block').textContent), copied2.slice(-200));
+  ({ doc } = await run({ dictate: false }));
+  ok('without dictation it does not appear', !fieldWrap(doc, 'treatmentToday'));
+  // Without dictation the page drops them even if a draft carries them.
+  note = note27({ treatmentToday: 'Removed 38.', laLog: [{ agent: 'Articaine', quotes: [] }] });
+  let w3;
+  ({ doc, win: w3 } = await run({ dictate: false }));
+  let copied3 = '';
+  w3.navigator.clipboard.writeText = async (t) => { copied3 = t; };
+  click($(doc, 'copy-all'));
+  await tick(20);
+  ok('with no dictation, a treatment or LA that came back is neither shown nor copied',
+    !fieldWrap(doc, 'treatmentToday') && !$(doc, 'la-block') && !/Removed 38|Articaine/.test(copied3), copied3.slice(-200));
+  note = note27({ examination: 'Partially erupted 38.' });
+  ({ doc } = await run({ type: /Exam/ }));
+  ok('nor on an exam, even with dictation', !fieldWrap(doc, 'treatmentToday'));
+  note = note27({ treatmentToday: 'Scale and polish.', sources: {} });
+  ({ doc } = await run({ type: /Exam/ }));
+  ok('unless something was dictated into it', !!fieldWrap(doc, 'treatmentToday'));
+  ok('and no LA table without an LA', !$(doc, 'la-block'));
 }
