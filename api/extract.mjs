@@ -30,7 +30,7 @@ import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS
          buildSummarySystemPrompt, parseSummary, buildAskSystemPrompt,
          buildReferralSystemPrompt, buildReferralUserMessage, parseReferral,
          buildPostopSystemPrompt, parsePostop, asText, pauseMarker, partMarker, SPEAKER_LABEL,
-         cleanQuestions, LA_LOG_FIELDS } from './_prompt.mjs';
+         cleanQuestions, LA_LOG_FIELDS, PMPR_LINE } from './_prompt.mjs';
 import { checklistGaps, checklistIsDraft } from './_checklists.mjs';
 import { sessionStillGood } from './_store.mjs';
 
@@ -244,6 +244,8 @@ export default async function handler(req, res) {
         const v = incoming[key];
         if (typeof v === 'string' && v.trim()) note[key] = v.trim().slice(0, 4000);
       }
+      // The clinician's PMPR tick: the fixed line, and nothing else.
+      if (incoming.pmpr === PMPR_LINE) note.pmpr = PMPR_LINE;
       // The BPE line from the page's grid, as the clinician left it, in exactly
       // the page's format: three codes / three codes (UR UA UL / LR LA LL).
       // Anything else is dropped rather than passed on to the model.
@@ -259,7 +261,7 @@ export default async function handler(req, res) {
         max_tokens: 2048,
         temperature: 0,
         system: buildReferralSystemPrompt(consultType),
-        messages: [{ role: 'user', content: buildReferralUserMessage(note, context, buildUserMessage(transcript, pauses, roles, { note: false, parts: partCount })) }]
+        messages: [{ role: 'user', content: buildReferralUserMessage(note, context, buildUserMessage(transcript, pauses, roles, { note: false, parts: partCount }), { dictated: body?.dictated !== false }) }]
       }, creds, arrivedAt);
       if (raw?.stop_reason === 'max_tokens') {
         return res.status(502).json({ error: 'response_truncated', detail: 'The referral was cut off. Try again.' });
@@ -335,6 +337,12 @@ export default async function handler(req, res) {
       if (note.sources) delete note.sources.treatmentToday;
       if (had) note.gaps.push('Treatment or local anaesthetic came back although nothing was dictated, so it was left out: ' +
         'they are taken from your dictation only. Press Record more and dictate them, or add them by hand.');
+      // The radiograph report likewise (27 September 2026).
+      if (note.radiographs) {
+        note.radiographs = null;
+        note.gaps.push('Radiograph details came back although nothing was dictated, so they were left out: the radiograph ' +
+          'report is taken from your dictation only. Press Record more and dictate it.');
+      }
     }
 
     // A page from before 27 September 2026 (a tab left open over a deploy)
@@ -351,6 +359,23 @@ export default async function handler(req, res) {
       if (extra.length) note.plan = [typeof note.plan === 'string' ? note.plan.trim() : '', ...extra].filter(Boolean).join('\n');
       delete note.treatmentToday;
       delete note.laLog;
+    }
+
+    // The same for the radiograph report: a page that does not know it gets it
+    // at the head of the radiographic findings, labelled.
+    if (!features.includes('radiographs')) {
+      const r = note.radiographs;
+      if (r) {
+        const lines = [];
+        if (r.views) lines.push(`Views: ${r.views}`);
+        if (r.justification) lines.push(`Justification: ${r.justification}`);
+        if (r.quality) lines.push(`Image quality: ${r.quality === 'A' ? 'A (diagnostically acceptable)' : 'N (not acceptable)'}`);
+        if (r.fault) lines.push(`Fault, cause and repeat: ${r.fault}`);
+        const findings = typeof note.radiographicFindings === 'string' ? note.radiographicFindings.trim() : '';
+        if (findings) lines.push(`Report: ${findings}`);
+        if (lines.length) note.radiographicFindings = lines.join('\n');
+      }
+      delete note.radiographs;
     }
 
     // Last, once every gap is in the list: a question must answer one of them.

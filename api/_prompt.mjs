@@ -260,16 +260,16 @@ The clinician may DICTATE after the patient has left. If so, a line reading
 examination findings, radiographic findings, the treatment carried out, the local
 anaesthetic given, the plan, and — for implant surgery — the implant log.
 
-- Dictated content fills ONLY examination, radiographicFindings, treatmentToday,
-  plan, implantLog and laLog. Record it as dictated; do not rewrite it into a
+- Dictated content fills ONLY examination, radiographicFindings, radiographs,
+  treatmentToday, plan, implantLog and laLog. Record it as dictated; do not rewrite it into a
   consent discussion.
 - The consent fields (proposed, alternatives, risks, benefits, costs,
   patientQuestions, patientFactors, informationGiven, decision) come ONLY from the
   conversation with the patient. Something the clinician dictated to the record
   was not said to the patient and must not appear as if it was.
 - If there is no dictation, set examination, radiographicFindings,
-  treatmentToday and plan to null, and implantLog and laLog to [], and do NOT
-  add gaps for them — they are optional.
+  treatmentToday and plan to null, radiographs to null, and implantLog and
+  laLog to [], and do NOT add gaps for them — they are optional.
 - treatmentToday: the treatment CARRIED OUT at this appointment, taken ONLY from
   the dictation, and only where it is described as done — the procedure, the
   tooth, what was found and used, sutures, haemostasis, any complication, as
@@ -403,6 +403,29 @@ in the same order:
   check it, which is the point.
 - Leave out fields that are null.
 
+## RADIOGRAPH REPORT
+
+"radiographs": the report of any radiographs taken, taken ONLY from the dictation.
+null if no radiograph was dictated.
+
+  { "views": string | null, "justification": string | null,
+    "quality": "A" | "N" | null, "fault": string | null,
+    "quotes": ["<words copied exactly from the dictation where this was said>"] }
+
+- views: which radiographs, as dictated ("bitewings left and right", "periapical 36", "OPT").
+- justification: why they were taken, as dictated. Never supply a reason that was not said,
+  and never work one out from the findings or the consult type.
+- quality: "A" only if the image was dictated as diagnostically acceptable (or "A"); "N"
+  only if dictated as not acceptable (or "N"); otherwise null. Never convert another
+  grading (such as 1, 2 or 3) into A or N.
+- fault: for an image rated N, the fault, its likely cause and whether it was repeated, as
+  dictated. null otherwise.
+- Each image is graded on its own. If the images were not all given the same grade, set
+  quality to null and put each image's grade, as dictated, in fault.
+- quotes: one or two, word for word, at least four words, under the same rules as SOURCES.
+- What the radiographs SHOW stays in radiographicFindings, exactly as before; do not repeat
+  it here.
+
 ## QUESTIONS FOR THE DENTIST
 
 The dentist fills gaps from memory before pasting. Make that quick. For each
@@ -482,6 +505,7 @@ Every key below must appear, even where it does not apply to this appointment: u
   "radiographicFindings": string | null,
   "treatmentToday": string | null,
   "plan": string | null,
+  "radiographs": { "views": string | null, "justification": string | null, "quality": "A" | "N" | null, "fault": string | null, "quotes": string[] } | null,
   "implantLog": object[],
   "laLog": [ { "agent": string | null, "strength": string | null, "amount": string | null, "technique": string | null, "site": string | null, "batch": string | null, "notes": string | null, "quotes": string[] } ],
   "teeth": string[],
@@ -810,6 +834,59 @@ export function cleanQuestions(raw, gaps, consultTypeKey) {
 /* The LA log. Unlike the implant log, a row of the wrong shape does not cost
    the whole note: it is dropped and a gap says so, so the clinician enters it
    from what they dictated rather than finding it silently missing. */
+/* The radiograph report (27 September 2026, second evening). Dictation only,
+   like the other dictated fields; the findings stay in radiographicFindings.
+   Quality is the A/N scale of the current UK guidance and nothing else: a
+   grade that is not A or N is not converted, it is left blank for the
+   clinician. Something that was given but cannot be read becomes a gap. */
+export const XRAY_TEXT_FIELDS = ['views', 'justification', 'fault'];
+const XRAY_NONE = /^\s*(none|null|nil|n\/?a|not (stated|taken|dictated|done))?\.?\s*$/i;
+
+function xrayText1(v) {
+  // A list of strings (views given one per image) is joined; anything else
+  // that is not text is not read.
+  if (Array.isArray(v) && v.every((x) => typeof x === 'string')) v = v.map((x) => x.trim()).filter(Boolean).join('; ');
+  if (typeof v === 'number') return String(v);
+  if (typeof v !== 'string' || !v.trim() || XRAY_NONE.test(v)) return null;
+  return v.replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
+// N is tested first: "not acceptable" and "unacceptable" contain "acceptable".
+function xrayQuality(q) {
+  const s = String(q || '').trim();
+  if (!s) return null;
+  if (/^(n\b|not\b|un|diagnostically (not|un)|not diagnostically)/i.test(s)) return 'N';
+  if (/^(a\b|acceptable|diagnostically acceptable)/i.test(s)) return 'A';
+  return undefined;   // given, but not on the A/N scale
+}
+
+export function cleanRadiographs(raw) {
+  if (raw === null || raw === undefined || raw === false) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    if (typeof raw === 'string' && XRAY_NONE.test(raw)) return null;
+    if (Array.isArray(raw) && !raw.length) return null;
+    return { unreadable: true };
+  }
+  const out = {};
+  let any = false;
+  for (const k of XRAY_TEXT_FIELDS) {
+    out[k] = xrayText1(raw[k]);
+    if (out[k]) any = true;
+  }
+  const q = xrayQuality(typeof raw.quality === 'string' ? raw.quality : '');
+  out.quality = q || null;
+  if (out.quality) any = true;
+  // Content under keys it does not know, with nothing it does: something was
+  // given and could not be read.
+  const unknown = Object.keys(raw).some((k) => !['views', 'justification', 'fault', 'quality', 'quotes'].includes(k) &&
+    raw[k] !== null && raw[k] !== undefined && raw[k] !== '' && !(typeof raw[k] === 'string' && XRAY_NONE.test(raw[k])));
+  if (!any) return unknown ? { unreadable: true } : null;
+  out.quotes = quoteList(raw.quotes);
+  // A grade that is not A or N is left blank, and the clinician is told.
+  if (q === undefined) out.offScale = String(raw.quality).trim().slice(0, 40);
+  return out;
+}
+
 const LA_NONE = (v) => v === undefined || v === null || v === false || v === 0 ||
   (typeof v === 'string' && /^\s*(none|null|nil|n\/?a|not (stated|recorded|dictated|given|used))?\.?\s*$/i.test(v));
 
@@ -909,6 +986,15 @@ export function parseNote(raw, consultTypeKey) {
     const la = cleanLaLog(parsed.laLog);
     parsed.laLog = la.rows;
     parserGaps.push(...la.gaps);
+  }
+  parsed.radiographs = cleanRadiographs(parsed.radiographs);
+  if (parsed.radiographs && parsed.radiographs.unreadable) {
+    parsed.radiographs = null;
+    parserGaps.push('The radiograph details came back in a form that could not be read. Check the radiograph report against what was said.');
+  }
+  if (parsed.radiographs && parsed.radiographs.offScale) {
+    parserGaps.push(`An image quality was given that is not on the A/N scale ("${parsed.radiographs.offScale}"), so it was left blank. Record A or N.`);
+    delete parsed.radiographs.offScale;
   }
   parsed.bpe = cleanBpe(parsed.bpe);
   if (parsed.bpe && parsed.bpe.unreadable) {
@@ -1172,7 +1258,9 @@ Return ONLY a JSON object with exactly these keys:
 /* The note the clinician corrected leads; their added context follows; the
    transcript trails as backup. Order on the page is order of authority, and the
    system prompt says so explicitly. */
-export function buildReferralUserMessage(note, context, transcriptMessage) {
+export const PMPR_LINE = 'Full mouth professional mechanical plaque removal (PMPR) carried out.';
+
+export function buildReferralUserMessage(note, context, transcriptMessage, { dictated = true } = {}) {
   const parts = ['THE CORRECTED NOTE (authoritative):'];
   const all = [...FIELDS, ...DICTATED_FIELDS];
   let any = false;
@@ -1180,7 +1268,13 @@ export function buildReferralUserMessage(note, context, transcriptMessage) {
     const v = note && note[key];
     if (typeof v !== 'string' || !v.trim()) continue;
     any = true;
-    parts.push(`${label}: ${v.trim()}`);
+    // With nothing dictated, a dictated field can only have been typed.
+    parts.push(`${dictated ? label : label.replace(/ \(dictated\)$/, '')}: ${v.trim()}`);
+  }
+  // The clinician's PMPR tick: the fixed line, and nothing else, is accepted.
+  if (note && note.pmpr === PMPR_LINE) {
+    any = true;
+    parts.push(`Recorded by the clinician: ${PMPR_LINE}`);
   }
   // BPE scores the clinician checked on the grid, as one line (27 Sep 2026).
   if (note && typeof note.bpe === 'string' && note.bpe.trim()) {
