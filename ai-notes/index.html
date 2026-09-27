@@ -919,7 +919,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-09-27.4';
+  var BUILD = '2026-09-27.5';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1044,11 +1044,12 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
     ['treatmentToday',       'Treatment carried out today'],
     ['plan',                 'Treatment plan']
   ];
-  // Where treatment is carried out on the day (27 Sep 2026): the treatment
-  // section is offered, empty, whenever Dictate was pressed. Elsewhere it only
-  // appears if something was dictated into it.
-  var TREATMENT_TYPES = ['extraction-surgery', 'third-molar', 'implant-surgery', 'emergency',
-                         'restorative', 'endo', 'perio', 'sedation'];
+  // Treatment carried out today and the LA table are always shown, for every
+  // consult type, empty when nothing was dictated, so either can be filled in
+  // by hand (the practice owner's decision, 27 September 2026). They were
+  // shown only after Dictate on the treatment types, and a clinician who had
+  // not dictated could not find them. What the draft may put IN them is still
+  // dictation only (see the draft handler and api/extract.mjs).
   // How the note READS, which is not the order the fields are extracted in.
   // A template is a LAYOUT: which fields appear, in what order, under what
   // headings. It never changes what was extracted, so switching between them
@@ -2955,7 +2956,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
         // Dictated fields appear when there is something in them, and also
         // whenever Dictate was pressed — otherwise a field the model left
         // empty could not be filled in by hand, unlike every other field here.
-        if (k[0] === 'treatmentToday') return hasText(note[k[0]]) || (anyDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1);
+        if (k[0] === 'treatmentToday') return true;   // always shown (see the note above TEMPLATES)
         if (k[1]) return hasText(note[k[0]]) || anyDictation();
         return true;                            // consent fields always show, gap or not
       });
@@ -3661,10 +3662,7 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
 
   function renderLaLog(note, host) {
     var rows = laRows(note);
-    // Offered empty, to fill in by hand, where treatment is done on the day
-    // and something was dictated; otherwise only when there is a row.
-    var offer = anyDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1;
-    if (!rows.length && !offer) return;
+    // Always shown, empty when nothing was dictated, to fill in by hand.
     var hd = document.createElement('h3');
     hd.className = 'section-heading';
     hd.textContent = 'Local anaesthetic';
@@ -3700,7 +3698,8 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
       });
       status.className = 'bpe-note' + (notes.length ? ' warn' : '');
       status.textContent = !laRows(S.note).length
-        ? 'No local anaesthetic came back from your dictation. If you gave one, add it here.'
+        ? (anyDictation() ? 'No local anaesthetic came back from your dictation. If you gave one, add it here.'
+                          : 'Nothing was dictated. If you gave local anaesthetic, add it here.')
         : notes.length ? notes.join(' ') + ' Check before you paste.'
         : 'Taken as dictated: nothing is converted or calculated.' + (laEdited() ? ' Edited by you.' : ' Every row was found in your dictation.');
       wrap.classList.toggle('edited', laEdited());
