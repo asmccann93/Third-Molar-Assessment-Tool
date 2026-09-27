@@ -856,7 +856,8 @@ async function testPolish() {
   // 5. templates are layout only
   const heads = () => [...$(doc, 'fields').children].filter((e) => e.classList.contains('section-heading')).map((e) => e.textContent);
   const fields = () => [...$(doc, 'fields').querySelectorAll('.field h3')].map((h) => h.textContent);
-  ok('the default layout is the clinical one', heads().join('|') === 'Presentation|Findings|Discussion|Outcome', heads().join('|'));
+  // An exam: the Treatment section is there for the PMPR tick (27 Sep 2026).
+  ok('the default layout is the clinical one', heads().join('|') === 'Presentation|Findings|Discussion|Treatment|Outcome', heads().join('|'));
   const before = fields().slice().sort().join('|');
   const soap = [...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap');
   click(soap);
@@ -1780,7 +1781,7 @@ async function testOneResetPathNotTwo() {
 
   // Anything a new consultation must not inherit. Each of these caused, or
   // would have caused, a wrong-patient bug.
-  const mustClear = ['note', 'parts', 'pendingPart', 'noteParts', 'moreRecording', 'covered', 'answered', 'todoDone', 'summary', 'summaryText', 'heldAudio',
+  const mustClear = ['note', 'parts', 'pendingPart', 'noteParts', 'moreRecording', 'covered', 'answered', 'todoDone', 'pmpr', 'summary', 'summaryText', 'heldAudio',
                      'referral', 'referralText', 'dictationFromMs', 'pauses'];
   const missing = mustClear.filter((f) => !new RegExp('\\bS\\.' + f + '\\s*=').test(shared));
   ok('it clears every piece of the last patient\'s consultation',
@@ -3111,6 +3112,8 @@ await testTodo();
 await testDraftChecklistNotice();
 await testAReplyWithNoNote();
 await testTreatmentToday();
+await testPmpr();
+await testRadiographReport();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
@@ -5510,4 +5513,216 @@ async function testTreatmentToday() {
   ({ doc } = await run({ type: /Exam/ }));
   ok('unless something was dictated into it', !!fieldWrap(doc, 'treatmentToday'));
   ok('and no LA table without an LA', !$(doc, 'la-block'));
+}
+
+async function runType(onNote, { type = /Third molar/, dictate = false, turns = longTurns(), bodies = [] } = {}) {
+  const ctx = await boot({ onFetch: async (e, opts) => {
+    if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns });
+    if (e.url.includes('/api/extract')) {
+      const b = JSON.parse(opts.body || '{}');
+      bodies.push(b);
+      if (b.kind === 'referral') return json200({ status: 'done', referral: { situation: 'x', background: null, assessment: null, recommendation: null, redFlags: [] } });
+      return json200({ status: 'done', note: JSON.parse(JSON.stringify(onNote())) });
+    }
+  } });
+  const { doc, win } = ctx;
+  armStart(doc, win, type); await tick();
+  click($(doc, 'start')); await tick(60);
+  const realNow = win.Date.now.bind(win.Date);
+  let offset = 0;
+  win.Date.now = () => realNow() + offset;
+  offset += 5000;
+  if (dictate) { click($(doc, 'dictate')); await tick(20); }
+  offset += 5000;
+  click($(doc, 'stop')); await tick(300);
+  for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+  let copied = '';
+  win.navigator.clipboard.writeText = async (t) => { copied = t; };
+  ctx.copy = async () => { click($(doc, 'copy-all')); await tick(20); return copied; };
+  return ctx;
+}
+
+async function testPmpr() {
+  section('PMPR: ticked by the clinician on an exam or perio, into the treatment section');
+  const bodies = [];
+  let ctx = await runType(() => note27({}), { type: /Exam/, bodies });
+  let { doc, win } = ctx;
+  const heads = () => [...$(doc, 'fields').children].filter((e) => e.classList.contains('section-heading')).map((e) => e.textContent);
+  ok('an exam offers the PMPR tick, under Treatment', !!$(doc, 'pmpr') && heads().includes('Treatment') && !$(doc, 'pmpr').checked);
+  let text = await ctx.copy();
+  ok('unticked, nothing about PMPR is copied', !/PMPR/.test(text));
+  $(doc, 'pmpr').checked = true;
+  $(doc, 'pmpr').dispatchEvent(new win.Event('change', { bubbles: true }));
+  text = await ctx.copy();
+  ok('ticked, the line is copied under Treatment in fixed words',
+    /\nTREATMENT\n\nFull mouth professional mechanical plaque removal \(PMPR\) carried out\.\n/.test(text + '\n'), text);
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap'));
+  await tick(30);
+  text = await ctx.copy();
+  ok('it follows the layout (under Plan in SOAP) and stays ticked', $(doc, 'pmpr').checked && /\nPLAN\n\nFull mouth professional mechanical plaque removal/.test(text), text);
+  const planKids = [...$(doc, 'fields').children];
+  const planAt = planKids.findIndex((e) => e.classList.contains('section-heading') && e.textContent === 'Plan');
+  ok('and on screen it sits where the treatment does, first under Plan', planKids[planAt + 1] && planKids[planAt + 1].id === 'pmpr-block');
+  let one = '';
+  win.navigator.clipboard.writeText = async (t) => { one = t; };
+  click($(doc, 'pmpr-block').querySelector('.copy'));
+  await tick(10);
+  ok('the tick has its own Copy', one === 'Full mouth professional mechanical plaque removal (PMPR) carried out.', one);
+  win.navigator.clipboard.writeText = async (t) => { ctx.last = t; };
+  ctx.copy = async () => { click($(doc, 'copy-all')); await tick(20); return ctx.last; };
+  win.confirm = () => true;
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
+  await tick(200);
+  ok('a redraft keeps the tick', $(doc, 'pmpr') && $(doc, 'pmpr').checked);
+  click($(doc, 'make-referral'));
+  await tick(150);
+  const ref = bodies.find((b) => b.kind === 'referral');
+  ok('the referral is told the PMPR was done, as the clinician\'s own item', ref?.note?.pmpr === 'Full mouth professional mechanical plaque removal (PMPR) carried out.' &&
+    !/PMPR/.test(ref?.note?.treatmentToday || ''), JSON.stringify(ref?.note));
+  ok('and nothing is labelled dictated when nothing was', ref?.dictated === false);
+  click($(doc, 'clear'));
+  await tick(30);
+  armStart(doc, win, /Exam/); await tick();
+  click($(doc, 'start')); await tick(60); click($(doc, 'stop')); await tick(300);
+  for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+  ok('the next patient starts unticked', $(doc, 'pmpr') && !$(doc, 'pmpr').checked);
+
+  ctx = await runType(() => note27({ treatmentToday: 'Root surface debridement UR and UL.' }), { type: /Perio/, dictate: true });
+  ok('perio offers it too, right after the treatment', !!$(ctx.doc, 'pmpr') && fieldWrap(ctx.doc, 'treatmentToday').nextElementSibling?.id === 'pmpr-block');
+  $(ctx.doc, 'pmpr').checked = true;
+  $(ctx.doc, 'pmpr').dispatchEvent(new ctx.win.Event('change', { bubbles: true }));
+  let tc = '';
+  ctx.win.navigator.clipboard.writeText = async (t) => { tc = t; };
+  click(fieldWrap(ctx.doc, 'treatmentToday').querySelector('.copy'));
+  await tick(10);
+  ok('and the treatment field\'s own Copy carries it', tc === 'Treatment carried out today (dictated)\nRoot surface debridement UR and UL.\nFull mouth professional mechanical plaque removal (PMPR) carried out.', tc);
+  ctx = await runType(() => note27({}), { type: /Third molar/ });
+  ok('a third molar consult does not', !$(ctx.doc, 'pmpr'));
+}
+
+async function testRadiographReport() {
+  section('Radiograph report: views, justification, A/N quality and the report, from dictation only');
+  // An exam with nothing dictated: an empty report to fill in by hand.
+  let ctx = await runType(() => note27({}), { type: /Exam/ });
+  let { doc, win } = ctx;
+  let rf = fieldWrap(doc, 'radiographicFindings');
+  ok('an exam offers an empty radiograph report', !!rf && !!rf.querySelector('.xray') && rf.querySelector('[data-xray=quality]').value === '');
+  ok('without the Dictated tag when nothing was dictated', !rf.querySelector('.dictated-tag'));
+  const set = (w, k, v) => { const el = w.querySelector('[data-xray=' + k + ']'); el.value = v; el.dispatchEvent(new win.Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); };
+  set(rf, 'views', 'Bitewings left and right');
+  set(rf, 'quality', 'A');
+  const pre = fieldPre(doc, 'Radiographic findings');
+  pre.textContent = 'No caries. Bone levels normal.';
+  pre.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(20);
+  let text = await ctx.copy();
+  ok('filled in by hand, it is copied as a report, not labelled dictated',
+    /\nRadiographic findings\nViews: Bitewings left and right\nImage quality: A \(diagnostically acceptable\)\nReport: No caries\. Bone levels normal\.\n/.test(text) && !/Radiographic findings \(dictated\)/.test(text), text);
+  let fc = '';
+  win.navigator.clipboard.writeText = async (t) => { fc = t; };
+  click(fieldWrap(doc, 'radiographicFindings').querySelector('.copy'));
+  await tick(10);
+  ok('and its own Copy gives the same report, unlabelled', fc === 'Radiographic findings\nViews: Bitewings left and right\nImage quality: A (diagnostically acceptable)\nReport: No caries. Bone levels normal.', fc);
+
+  // Dictated, rated N with no fault given.
+  const turns = [
+    { speaker: 'S1', start: 1, end: 3, text: 'We will take an x-ray of the wisdom tooth today.' },
+    { speaker: 'S2', start: 4, end: 5, text: 'That is fine.' },
+    { speaker: 'S1', start: 100, end: 108, text: 'OPT taken to assess the lower left eight before surgery. Image not acceptable. Roots close to the canal.' }
+  ];
+  const bodies = [];
+  let rad = { views: 'OPT', justification: 'To assess the lower left eight before surgery', quality: 'N', fault: null, quotes: ['OPT taken to assess the lower left eight'] };
+  ctx = await runType(() => note27({ radiographicFindings: 'Roots close to the canal.', radiographs: rad }), { dictate: true, turns, bodies });
+  ({ doc, win } = ctx);
+  rf = fieldWrap(doc, 'radiographicFindings');
+  ok('the dictated report fills the fields', rf.querySelector('[data-xray=views]').value === 'OPT' && rf.querySelector('[data-xray=quality]').value === 'N' &&
+    /before surgery/.test(rf.querySelector('[data-xray=justification]').value));
+  ok('an N asks for the fault, and shows where to put it', /Rated N: record the fault/.test(rf.textContent) && !rf.querySelector('[data-xray=fault]').closest('label').classList.contains('hidden'));
+  ok('and says where the words were heard', /Heard in your dictation: “OPT taken to assess the lower left eight”/.test(rf.textContent), rf.textContent);
+  text = await ctx.copy();
+  ok('the copied report, labelled dictated',
+    /Radiographic findings \(dictated\)\nViews: OPT\nJustification: To assess the lower left eight before surgery\nImage quality: N \(not acceptable\)\nReport: Roots close to the canal\./.test(text), text);
+  set(rf, 'fault', 'Patient moved; repeated once');
+  await tick(10);
+  ok('a fault entered clears the prompt and is marked as edited', !/Rated N: record the fault/.test(rf.textContent) && /Edited by you/.test(rf.textContent));
+  text = await ctx.copy();
+  ok('and is copied', /Fault, cause and repeat: Patient moved; repeated once\nReport:/.test(text));
+  click($(doc, 'make-referral'));
+  await tick(150);
+  const ref = bodies.find((b) => b.kind === 'referral');
+  ok('the referral gets the whole report', /^Views: OPT\n[\s\S]*Report: Roots close to the canal\.$/.test(ref?.note?.radiographicFindings || ''), ref?.note?.radiographicFindings);
+
+  // Views said to the patient but never dictated.
+  const turns2 = [
+    { speaker: 'S1', start: 1, end: 3, text: 'We will take a periapical of 36 today.' },
+    { speaker: 'S1', start: 100, end: 108, text: 'Radiograph taken. Periradicular radiolucency. Justified by pain.' }
+  ];
+  rad = { views: 'Periapical 36', justification: 'Pain', quality: null, fault: null, quotes: ['take a periapical of 36'] };
+  ctx = await runType(() => note27({ radiographs: rad, sources: {} }), { dictate: true, turns: turns2 });
+  ({ doc } = ctx);
+  rf = fieldWrap(doc, 'radiographicFindings');
+  ok('views that were not dictated are named', /Not found in your dictation: views\./.test(rf.textContent), rf.textContent);
+  ok('and are in the headline list', [...$(doc, 'sourcecheck-list').children].some((li) => /^Radiograph report: views not found in your dictation/.test(li.textContent)));
+  ok('a report with no grade is reminded of one', /No image quality grade recorded/.test(rf.textContent));
+
+  // One matching quote does not clear parts that were never said.
+  const turns3 = [
+    { speaker: 'S1', start: 1, end: 3, text: 'Any problems?' },
+    { speaker: 'S1', start: 100, end: 108, text: 'Bitewings left and right taken. No caries.' }
+  ];
+  rad = { views: 'Bitewings left and right', justification: 'Routine six-monthly caries risk assessment', quality: 'A', fault: null, quotes: ['Bitewings left and right taken'] };
+  ctx = await runType(() => note27({ radiographicFindings: 'No caries.', radiographs: rad, sources: {} }), { dictate: true, turns: turns3 });
+  ({ doc } = ctx);
+  rf = fieldWrap(doc, 'radiographicFindings');
+  ok('a justification and a grade that were never dictated are named, though the views were',
+    /Not found in your dictation: justification, image quality\./.test(rf.textContent) && !/Heard in your dictation/.test(rf.textContent), rf.textContent);
+  const turns4 = [
+    { speaker: 'S1', start: 1, end: 3, text: 'Any problems?' },
+    { speaker: 'S1', start: 100, end: 108, text: 'Bitewings left and right taken, routine six-monthly caries risk assessment, graded A. No caries.' }
+  ];
+  ctx = await runType(() => note27({ radiographicFindings: 'No caries.', radiographs: rad, sources: {} }), { dictate: true, turns: turns4 });
+  rf = fieldWrap(ctx.doc, 'radiographicFindings');
+  ok('when every part was dictated, it says so', /Heard in your dictation/.test(rf.textContent) && !/Not found/.test(rf.textContent), rf.textContent);
+  rad = { views: 'Bitewings left and right', justification: null, quality: 'N', fault: null, quotes: [] };
+  const turns5 = [{ speaker: 'S1', start: 1, end: 3, text: 'Any problems?' },
+    { speaker: 'S1', start: 100, end: 108, text: 'Bitewings left and right, image acceptable.' }];
+  ctx = await runType(() => note27({ radiographs: rad, sources: {} }), { dictate: true, turns: turns5 });
+  rf = fieldWrap(ctx.doc, 'radiographicFindings');
+  ok('an N is not supported by "acceptable" alone', /Not found in your dictation: image quality/.test(rf.textContent), rf.textContent);
+  ok('and a report with no justification is reminded of one', /No justification recorded/.test(rf.textContent));
+
+  // A failed extra recording with Dictate does not make typed text "dictated".
+  {
+    let n = 0, fail = false;
+    const c2 = await boot({ onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns: longTurns() });
+      if (e.url.includes('/api/extract')) { n++; if (fail) return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed', detail: 'bedrock 503' }) }; return json200({ status: 'done', note: note27({}) }); }
+    } });
+    const d = c2.doc, w = c2.win;
+    armStart(d, w, /Exam/); await tick();
+    click($(d, 'start')); await tick(60); click($(d, 'stop')); await tick(300);
+    for (let i = 0; i < 30 && !$(d, 'working').classList.contains('hidden'); i++) await tick(100);
+    const p2 = fieldPre(d, 'Radiographic findings');
+    p2.textContent = 'Typed by hand.';
+    p2.dispatchEvent(new w.Event('input', { bubbles: true }));
+    fail = true;
+    click($(d, 'add-part')); await tick(80);
+    const realNow = w.Date.now.bind(w.Date); let off = 0; w.Date.now = () => realNow() + off;
+    off += 3000; click($(d, 'dictate')); await tick(20); off += 3000;
+    click($(d, 'stop')); await tick(300);
+    for (let i = 0; i < 30 && !$(d, 'working').classList.contains('hidden'); i++) await tick(100);
+    let got = '';
+    w.navigator.clipboard.writeText = async (t) => { got = t; };
+    click($(d, 'copy-all')); await tick(20);
+    ok('after a failed extra recording with Dictate, typed text is still not labelled dictated',
+      n === 2 && /Radiographic findings\nTyped by hand\./.test(got) && !/\(dictated\)/.test(got), got);
+  }
+
+  // Nothing dictated, not an exam: no report field.
+  ctx = await runType(() => note27({}), { type: /Third molar/ });
+  ok('a consult with nothing dictated and no report shows none', !fieldWrap(ctx.doc, 'radiographicFindings'));
+  // And a report that came back without dictation is not shown or copied.
+  ctx = await runType(() => note27({ radiographs: { views: 'OPT', quality: 'A', quotes: [] } }), { type: /Third molar/ });
+  text = await ctx.copy();
+  ok('a report that came back with nothing dictated is dropped', !fieldWrap(ctx.doc, 'radiographicFindings') && !/OPT/.test(text));
 }
