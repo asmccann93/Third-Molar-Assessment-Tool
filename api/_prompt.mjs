@@ -77,6 +77,22 @@ export const CONSULT_TYPES = {
       'Expect discussion of restoration options, materials, longevity expectations, ' +
       'and the possibility of future endodontic treatment or extraction.',
   },
+  denture: {
+    label: 'Dentures',
+    emphasis:
+      'A removable denture, complete or partial, at any stage — the consultation, ' +
+      'impressions, the try-in, the fit, or an adjustment. Expect discussion of what ' +
+      'the denture is made of, the alternatives (a bridge, implants, or accepting the ' +
+      'gap), the adaptation period, how firm it will be — particularly for a lower ' +
+      'complete denture — sore spots and adjustment visits, the ridge shrinking so it ' +
+      'will need relining or remaking, the effect of a partial denture on the remaining ' +
+      'teeth, the stages and number of visits, and the cost including any remake. ' +
+      'Capture what was said about how the denture will FEEL, and what it will and will ' +
+      'not do, as precisely as you would capture a surgical risk: that is the substance ' +
+      'of a denture discussion and it is where the record usually falls short. Record ' +
+      'the shade, tooth position or material only as stated, and never a stage, a visit ' +
+      'count or a timescale that was not said.',
+  },
   perio: {
     label: 'Perio',
     emphasis:
@@ -150,6 +166,53 @@ export const IMPLANT_LOG_FIELDS = ['site', 'system', 'diameter', 'length', 'lot'
    per agent as dictated. Taken as dictated and never computed: no cartridges
    turned into millilitres or milligrams, no dose worked out or checked. */
 export const LA_LOG_FIELDS = ['agent', 'strength', 'amount', 'technique', 'site', 'batch', 'notes'];
+
+/* The sedation episode itself (26 October 2026).
+ *
+ * THIS IS CLINICAL CONTENT, DRAFTED BY THE ASSISTANT AND NOT YET REVIEWED.
+ * `SEDATION_DRAFT` is true and the page says so under the block, the same way
+ * the six unreviewed checklists do.
+ *
+ * The sedation CHECKLIST covers the discussion beforehand — technique, amnesia,
+ * escort, fasting, driving, fitness, interacting medication. Until now the
+ * episode that followed had nowhere structured to go: the prompt sent sedation
+ * drugs into treatmentToday as prose, so an omitted titration series or absent
+ * monitoring was invisible. The point of this block is that a missing line is
+ * visible as a gap.
+ *
+ * Taken as dictated and never computed, exactly like laLog: no increment is
+ * added up, no total is checked against the increments, no dose is converted,
+ * commented on or compared with a weight. `total` is whatever was dictated as
+ * the total, or null.
+ *
+ * `escort` records THAT a responsible adult was there and took them home. No
+ * names, ever — the escort is a third party and identifiers stay out of this
+ * tool entirely (DPIA). The prompt says so and cleanSedation does not care:
+ * whatever is dictated is kept, so the rule is enforced where it belongs, in
+ * what the clinician dictates. The block's note on the page repeats it. */
+export const SEDATION_TEXT_FIELDS = [
+  'technique', 'agent', 'cannulaSite', 'total', 'oxygen', 'monitoring',
+  'reversal', 'recovery', 'discharge', 'escort', 'notes'
+];
+export const SEDATION_DOSE_FIELDS = ['time', 'dose', 'response'];
+export const SEDATION_DRAFT = true;
+
+/* Labels, used by the page for the block and by the referral for its one line.
+   Order is the order a sedation record is read in: what was given, how the
+   patient was watched, how they left. */
+export const SEDATION_LABELS = {
+  technique:  'Technique',
+  agent:      'Agent',
+  cannulaSite: 'Cannulation site',
+  total:      'Total dose given',
+  oxygen:     'Supplemental oxygen',
+  monitoring: 'Monitoring',
+  reversal:   'Reversal agent',
+  recovery:   'Recovery',
+  discharge:  'Discharge',
+  escort:     'Escort',
+  notes:      'Notes'
+};
 
 /* ------------------------------------------------------------------ *
  * System prompt
@@ -261,14 +324,14 @@ examination findings, radiographic findings, the treatment carried out, the loca
 anaesthetic given, the plan, and — for implant surgery — the implant log.
 
 - Dictated content fills ONLY examination, radiographicFindings, radiographs,
-  treatmentToday, plan, implantLog and laLog. Record it as dictated; do not rewrite it into a
+  treatmentToday, plan, implantLog, laLog and sedation. Record it as dictated; do not rewrite it into a
   consent discussion.
 - The consent fields (proposed, alternatives, risks, benefits, costs,
   patientQuestions, patientFactors, informationGiven, decision) come ONLY from the
   conversation with the patient. Something the clinician dictated to the record
   was not said to the patient and must not appear as if it was.
 - If there is no dictation, set examination, radiographicFindings,
-  treatmentToday and plan to null, radiographs to null, and implantLog and
+  treatmentToday and plan to null, radiographs and sedation to null, and implantLog and
   laLog to [], and do NOT add gaps for them — they are optional.
 - treatmentToday: the treatment CARRIED OUT at this appointment, taken ONLY from
   the dictation, and only where it is described as done — the procedure, the
@@ -279,7 +342,8 @@ anaesthetic given, the plan, and — for implant surgery — the implant log.
   only what was dictated: never add "no complications", "haemostasis achieved"
   or any other negative or routine step that was not said. Take every figure,
   material and count exactly as dictated. Local anaesthetic goes in laLog, not
-  here; any other drug given (sedation, for example) stays here, as dictated.
+  here; conscious sedation goes in "sedation", not here; any other drug given
+  stays here, as dictated.
   null if no treatment was dictated.
 - laLog: LOCAL ANAESTHETIC ONLY. An array, one object per local anaesthetic
   statement as dictated, with the keys agent, strength, amount, technique, site,
@@ -292,6 +356,8 @@ anaesthetic given, the plan, and — for implant surgery — the implant log.
 - implantLog: an array, one object per implant placed, with the keys site, system,
   diameter, length, lot, torque, isq, graft, notes — each a string or null. Take
   values exactly as dictated. Empty array if none.
+- sedation: the conscious sedation given, if any. See SEDATION RECORD below.
+  null if no sedation was dictated.
 
 ## PAUSED RECORDINGS
 
@@ -425,6 +491,53 @@ null if no radiograph was dictated.
 - quotes: one or two, word for word, at least four words, under the same rules as SOURCES.
 - What the radiographs SHOW stays in radiographicFindings, exactly as before; do not repeat
   it here.
+
+## SEDATION RECORD
+
+"sedation": the conscious sedation given at this appointment, taken ONLY from the
+dictation. null if no sedation was dictated. This is the record of what was DONE.
+What was discussed beforehand — the technique explained, the escort, fasting,
+driving, fitness — belongs in the consent fields and the checklist, not here.
+
+  { "technique": string | null, "agent": string | null, "cannulaSite": string | null,
+    "increments": [ { "time": string | null, "dose": string | null,
+                      "response": string | null,
+                      "quotes": ["<words copied exactly from the dictation>"] } ],
+    "total": string | null, "oxygen": string | null, "monitoring": string | null,
+    "reversal": string | null, "recovery": string | null, "discharge": string | null,
+    "escort": string | null, "notes": string | null,
+    "quotes": ["<words copied exactly from the dictation>"] }
+
+- technique: the route and method as dictated ("IV midazolam", "inhalation
+  sedation nitrous oxide and oxygen", "titrated IV").
+- agent: the drug and its strength as dictated ("midazolam 5 mg in 5 ml").
+- cannulaSite: where the cannula went, as dictated. null for inhalation sedation.
+- increments: one object per increment as dictated, IN THE ORDER DICTATED. time is
+  the clock time or the elapsed time as dictated; dose is that increment's dose as
+  dictated; response is what was observed after it, as dictated (level of sedation,
+  Verrill's sign, "settled", "still anxious"). Empty array if no increments were
+  dictated.
+- total: the total dose ONLY if a total was dictated as a total. NEVER add the
+  increments up, and never check a dictated total against them. If the figures
+  seem not to agree, record both exactly as dictated and say nothing about it:
+  that is for the clinician and the drug chart.
+- oxygen: supplemental oxygen as dictated — flow rate, when it was given, whether
+  it was given at all if that was said. Never infer that oxygen was or was not given.
+- monitoring: what was monitored and the readings as dictated — oxygen saturation,
+  pulse, blood pressure, the lowest saturation. Figures exactly as dictated.
+- reversal: any reversal agent given (flumazenil), with dose and time as dictated.
+  null if none was dictated. Never write "none given" unless that was said.
+- recovery: time in recovery and the observations there, as dictated.
+- discharge: that the discharge criteria were met and the time, as dictated.
+- escort: THAT a responsible adult was present and took the patient home, as
+  dictated. NEVER record a name, for the escort or for anyone else. If a name was
+  dictated, record the relationship only ("escorted home by a relative") and leave
+  the name out.
+- Record only what was dictated. Never add a routine step, a normal reading, a
+  "patient tolerated well", or any observation that was not said. A sedation record
+  that reports monitoring which was not dictated is a false record.
+- quotes: one or two, word for word, at least four words, under the same rules as
+  SOURCES — on the record itself and on each increment.
 
 ## QUESTIONS FOR THE DENTIST
 
@@ -920,6 +1033,103 @@ export function cleanLaLog(raw) {
   return { rows, gaps };
 }
 
+/* The sedation episode. One record, not a list: one appointment, one episode,
+   with a titration series inside it. Shaped like cleanRadiographs (an object of
+   scalars that collapses to null when nothing was dictated) with a row list
+   shaped like cleanLaLog inside it.
+
+   Nothing here is computed. The increments are not added up and `total` is not
+   checked against them: a total that disagrees with the increments is the
+   clinician's to resolve against the drug chart, and a figure this tool worked
+   out would be a figure nobody said. */
+export function cleanSedation(raw) {
+  const unreadable = 'The sedation record came back in a form that could not be read. Enter it from what you dictated.';
+  if (LA_NONE(raw)) return { record: null, gaps: [] };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { record: null, gaps: [unreadable] };
+
+  const gaps = [];
+  const out = {};
+  let any = false, wrong = false;
+
+  for (const k of SEDATION_TEXT_FIELDS) {
+    const v = raw[k];
+    if (LA_NONE(v)) { out[k] = null; continue; }
+    if (typeof v !== 'string' && typeof v !== 'number') { wrong = true; out[k] = null; continue; }
+    const s = String(v).replace(/\s+/g, ' ').trim().slice(0, 300);
+    out[k] = s || null;
+    if (s) any = true;
+  }
+
+  // The titration series. Capped at 24: more increments than that in one
+  // appointment is not a sedation record, it is a misread response.
+  out.increments = [];
+  if (!LA_NONE(raw.increments)) {
+    const list = Array.isArray(raw.increments) ? raw.increments : [raw.increments];
+    if (list.length > 24) wrong = true;
+    for (const row of list.slice(0, 24)) {
+      if (LA_NONE(row)) continue;
+      if (typeof row !== 'object' || Array.isArray(row)) { wrong = true; continue; }
+      const r = {};
+      let rowAny = false;
+      for (const k of SEDATION_DOSE_FIELDS) {
+        const v = row[k];
+        if (LA_NONE(v)) { r[k] = null; continue; }
+        if (typeof v !== 'string' && typeof v !== 'number') { wrong = true; r[k] = null; continue; }
+        const s = String(v).replace(/\s+/g, ' ').trim().slice(0, 200);
+        r[k] = s || null;
+        if (s) rowAny = true;
+      }
+      if (!rowAny) continue;
+      r.quotes = quoteList(row.quotes);
+      out.increments.push(r);
+    }
+    if (out.increments.length) any = true;
+  }
+
+  // Content under keys it does not know, with nothing it does: something was
+  // dictated and could not be read. Never reported as "no sedation recorded".
+  const known = [...SEDATION_TEXT_FIELDS, 'increments', 'quotes'];
+  const unknownKeys = Object.keys(raw).some((k) => !known.includes(k) && !LA_NONE(raw[k]));
+
+  if (wrong) gaps.push('Part of the sedation record came back in a form that could not be read. Check it against what you dictated.');
+  if (!any) {
+    if (gaps.length) return { record: null, gaps };
+    return { record: null, gaps: unknownKeys ? [unreadable] : [] };
+  }
+  out.quotes = quoteList(raw.quotes);
+  return { record: out, gaps };
+}
+
+/* The record as lines of text, in SEDATION_LABELS order with the increments in
+   the middle, where they are read. One wording, shared by the page's clipboard,
+   the referral's sedation line, and the server's fallback for a page that does
+   not know this block yet — so the three can never drift apart. */
+export function sedationAsLines(rec) {
+  if (!sedationAny(rec)) return [];
+  const out = [];
+  const put = (k) => {
+    const v = rec[k];
+    if (typeof v === 'string' && v.trim()) out.push(`${SEDATION_LABELS[k]}: ${v.trim()}`);
+  };
+  ['technique', 'agent', 'cannulaSite'].forEach(put);
+  (Array.isArray(rec.increments) ? rec.increments : []).forEach((r, i) => {
+    const cells = SEDATION_DOSE_FIELDS
+      .filter((k) => typeof r[k] === 'string' && r[k].trim())
+      .map((k) => `${k === 'time' ? 'at' : k === 'dose' ? 'dose' : 'response'} ${r[k].trim()}`);
+    if (cells.length) out.push(`Increment ${i + 1}: ${cells.join(', ')}`);
+  });
+  ['total', 'oxygen', 'monitoring', 'reversal', 'recovery', 'discharge', 'escort', 'notes'].forEach(put);
+  return out;
+}
+
+/* Does this record carry anything at all? Used by the page to decide whether to
+   show the block on a consult type that is not itself a sedation appointment. */
+export function sedationAny(rec) {
+  if (!rec || typeof rec !== 'object') return false;
+  if (Array.isArray(rec.increments) && rec.increments.length) return true;
+  return SEDATION_TEXT_FIELDS.some((k) => typeof rec[k] === 'string' && rec[k].trim());
+}
+
 export function parseNote(raw, consultTypeKey) {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
@@ -986,6 +1196,11 @@ export function parseNote(raw, consultTypeKey) {
     const la = cleanLaLog(parsed.laLog);
     parsed.laLog = la.rows;
     parserGaps.push(...la.gaps);
+  }
+  {
+    const sed = cleanSedation(parsed.sedation);
+    parsed.sedation = sed.record;
+    parserGaps.push(...sed.gaps);
   }
   parsed.radiographs = cleanRadiographs(parsed.radiographs);
   if (parsed.radiographs && parsed.radiographs.unreadable) {
@@ -1280,6 +1495,13 @@ export function buildReferralUserMessage(note, context, transcriptMessage, { dic
   if (note && typeof note.bpe === 'string' && note.bpe.trim()) {
     any = true;
     parts.push(`BPE: ${note.bpe.trim()}`);
+  }
+  // The sedation given, as the page's lines (26 October 2026). A referral for a
+  // patient sedated today should say what they had; it arrives already laid out
+  // by sedationAsLines, so there is one wording across the note and the letter.
+  if (note && typeof note.sedation === 'string' && note.sedation.trim()) {
+    any = true;
+    parts.push(`Sedation given: ${note.sedation.trim().replace(/\n/g, '; ')}`);
   }
   if (!any) parts.push('(The note is empty. Work from the context and transcript below.)');
   if (context && context.trim()) {

@@ -178,7 +178,12 @@ async function testConsentGate() {
   const types = $(doc, 'types');
 
   ok('Start is disabled on load', start.disabled);
-  ok('eleven consult types offered, three of them oral surgery', types.children.length === 11, String(types.children.length));
+  // Twelve since 26 October 2026: removable prosthodontics had no type, and
+  // dentures existed in this tool only as an alternative inside the implant list.
+  ok('twelve consult types offered, three of them oral surgery', types.children.length === 12, String(types.children.length));
+  ok('and dentures are one of them',
+    [...types.children].some((b) => b.textContent === 'Dentures'),
+    [...types.children].map((b) => b.textContent).join('|'));
   ok('no consult type preselected',
     ![...types.children].some((b) => b.getAttribute('aria-pressed') === 'true'));
 
@@ -731,8 +736,25 @@ async function testDerivedAndDictation() {
   const headings = [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent);
   ok('findings appear under their own heading, before the discussion',
     // A third molar consult with dictation offers the treatment section too (27 Sep 2026).
-    // ...and, with nothing given, an empty LA block to fill in.
-    headings.join('|') === 'Presentation|Findings|Discussion|Treatment|Outcome|Local anaesthetic|Implant log', headings.join('|'));
+    // The LA log and the implant log no longer add headings of their own: since
+    // 26 October 2026 the layout places them, inside Treatment (see BLOCKS).
+    headings.join('|') === 'Presentation|Findings|Discussion|Treatment|Outcome', headings.join('|'));
+  // ...and they really are inside that section, not merely heading-less. The
+  // host is flat, so position between the Treatment and Outcome headings is
+  // what "inside Treatment" means on screen.
+  {
+    const kids = [...$(doc, 'fields').children];
+    const at = (pred) => kids.findIndex(pred);
+    const hAt = (t) => at((el) => el.classList.contains('section-heading') && el.textContent === t);
+    const treatment = hAt('Treatment'), outcome = hAt('Outcome');
+    const la = at((el) => el.id === 'la-block');
+    const implant = at((el) => [...el.querySelectorAll('h3')].some((h) => h.textContent === 'Implants placed'));
+    ok('the LA log sits inside the Treatment section, not after the whole note',
+      treatment > -1 && outcome > treatment && la > treatment && la < outcome,
+      JSON.stringify({ treatment, la, outcome }));
+    ok('and so does the implant log',
+      implant > treatment && implant < outcome, JSON.stringify({ treatment, implant, outcome }));
+  }
   const order = [...$(doc, 'fields').querySelectorAll('.field h3')].map((h) => h.textContent);
   ok('examination is read before the treatment proposed, not after next step',
     order.indexOf('Examination findings') < order.indexOf('Treatment proposed'), JSON.stringify(order));
@@ -760,7 +782,13 @@ async function testDerivedAndDictation() {
   ok('and marks dictated fields inline so the record cannot mislead',
     /Examination findings \(dictated\)/.test(copied) && /Treatment plan \(dictated\)/.test(copied), copied.slice(0, 300));
   ok('a consent field is not marked dictated in the paste', !/Treatment proposed \(dictated\)/.test(copied));
-  ok('the implant log is still included', /IMPLANT LOG/.test(copied) && /Implant 1: Site LL6, System Straumann BLT, Diameter 4.1/.test(copied), copied.slice(-300));
+  // Since 26 October 2026 the implant log is laid out by the template, so it is
+  // labelled like a field under TREATMENT rather than given a block heading of
+  // its own after the note. The rows are unchanged.
+  ok('the implant log is still included', /Implants placed \(dictated\)/.test(copied) && /Implant 1: Site LL6, System Straumann BLT, Diameter 4.1/.test(copied), copied.slice(-300));
+  ok('and it is under TREATMENT, not after the outcome',
+    /TREATMENT[\s\S]*Implants placed \(dictated\)[\s\S]*OUTCOME/.test(copied), copied.slice(0, 400));
+  ok('the old trailing IMPLANT LOG heading is gone', !/\nIMPLANT LOG\n/.test(copied), copied.slice(-300));
   ok('findings are pasted before the discussion', copied.indexOf('FINDINGS') < copied.indexOf('DISCUSSION'));
 
   // Consent form text: assembled, not generated; blanks stay blank.
@@ -856,20 +884,24 @@ async function testPolish() {
   // 5. templates are layout only
   const heads = () => [...$(doc, 'fields').children].filter((e) => e.classList.contains('section-heading')).map((e) => e.textContent);
   const fields = () => [...$(doc, 'fields').querySelectorAll('.field h3')].map((h) => h.textContent);
-  // An exam: the Treatment section is there for the PMPR tick (27 Sep 2026).
-  ok('the default layout is the clinical one', heads().join('|') === 'Presentation|Findings|Discussion|Treatment|Outcome', heads().join('|'));
+  // An exam opens in SOAP since 26 October 2026 — the chart and the findings
+  // lead, and the discussion is usually short. (It used to open in 'clinical'
+  // whatever the appointment was.) The guarantee under test here is not which
+  // layout, it is that a layout is ONLY a layout.
+  ok('an exam opens in the SOAP layout', heads().join('|') === 'Subjective|Objective|Assessment|Plan', heads().join('|'));
   const before = fields().slice().sort().join('|');
-  const soap = [...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap');
-  click(soap);
+  const clinical = [...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'clinical');
+  click(clinical);
   await tick(40);
-  ok('switching to SOAP relayouts the note', heads().join('|') === 'Subjective|Objective|Assessment|Plan', heads().join('|'));
+  // The Treatment section is there for the PMPR tick (27 Sep 2026).
+  ok('switching to the clinical note relayouts it', heads().join('|') === 'Presentation|Findings|Discussion|Treatment|Outcome', heads().join('|'));
   ok('with exactly the same fields, none lost or duplicated', fields().slice().sort().join('|') === before);
   ok('and without a model call', !win.__extraCall);
   const consentT = [...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'consent');
   click(consentT);
   await tick(40);
   ok('the consent layout leads with the discussion', heads()[0] === 'The discussion', heads().join('|'));
-  ok('the picker shows which layout is active', consentT.classList.contains('on') && !soap.classList.contains('on'));
+  ok('the picker shows which layout is active', consentT.classList.contains('on') && !clinical.classList.contains('on'));
 
   // 6. ask
   $(doc, 'ask-input').value = 'Did I mention the cost?';
@@ -1463,8 +1495,13 @@ async function testUrlSwitches() {
   section('URL switches');
   const src = html;
   ok('the consult type can be preselected', /PARAMS\.get\('type'\) === pair\[0\]/.test(src));
+  // The guarantee is that the ?type= click sits INSIDE the CONSULT_TYPES loop
+  // and compares against pair[0], so an unknown type matches nothing and
+  // selects nothing. The window was 900 characters and the per-type default
+  // layout (26 October 2026) pushed the loop body past it; widened rather than
+  // loosened, because what is being pinned is the comparison, not its distance.
   ok('validated against the real list rather than trusted',
-    /CONSULT_TYPES\.forEach[\s\S]{0,900}PARAMS\.get\('type'\) === pair\[0\]/.test(src));
+    /CONSULT_TYPES\.forEach[\s\S]{0,1400}PARAMS\.get\('type'\) === pair\[0\]/.test(src));
   ok('audio processing can be turned off for a comparison', /RAW_AUDIO = PARAMS\.get\('audio'\) === 'raw'/.test(src));
   ok('one constraint builder serves both the check and the recording',
     /function micConstraints\(\)/.test(src) &&
@@ -2712,8 +2749,12 @@ async function testNotePreferencesDoNotFollowThePatientOut() {
 
   ok('the next patient is drafted at standard detail, not the last one\'s Full',
     sent[sent.length - 1]?.length === 'standard', JSON.stringify(sent.map((b) => b.length)));
-  ok('and laid out as a clinical note again',
-    [...doc.querySelectorAll('#template-picker button')].find((b) => b.classList.contains('on'))?.dataset.template === 'clinical');
+  // Back to the DEFAULT for this appointment — an exam, so SOAP since 26
+  // October 2026 — and not the layout the last patient's note was switched to.
+  // This proves wipe() forgot the hand-picked layout as well as the choice.
+  ok('and laid out at this appointment\'s default again, not the last one\'s choice',
+    [...doc.querySelectorAll('#template-picker button')].find((b) => b.classList.contains('on'))?.dataset.template === 'soap',
+    [...doc.querySelectorAll('#template-picker button')].find((b) => b.classList.contains('on'))?.dataset.template);
   ok('the length buttons are usable, not left disabled by the last redraft',
     ![...doc.querySelectorAll('.length-picker:not(#template-picker) button')].some((b) => b.disabled));
 
@@ -3114,6 +3155,9 @@ await testAReplyWithNoNote();
 await testTreatmentToday();
 await testPmpr();
 await testRadiographReport();
+await testSedationRecord();
+await testBlocksFollowTheLayout();
+await testPerTypeDefaultLayout();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
@@ -4590,8 +4634,13 @@ async function testSources() {
   ok('a sentence whose quote is not in the transcript is listed',
     listed.length === 1 && /^Material risks named, per option: Nerve damage in one in ten\.$/.test(listed[0]), JSON.stringify(listed));
   ok('with a plain title', /Not found in the recording — 1 sentence$/.test($(doc, 'sourcecheck-title').textContent), $(doc, 'sourcecheck-title').textContent);
+  // Which fields were unchecked, not what order they are named in: the lead
+  // names them in the layout's reading order, and a third molar case now opens
+  // in the consent record rather than the clinical note.
   ok('a field with no sources at all is said to be unchecked, not listed as not found',
-    /No sources came back for Reason for attendance, Treatment proposed, Decision, Next step/.test($(doc, 'sourcecheck-lead').textContent) &&
+    /No sources came back for /.test($(doc, 'sourcecheck-lead').textContent) &&
+    ['Reason for attendance', 'Treatment proposed', 'Decision', 'Next step']
+      .every((f) => new RegExp('No sources came back for [^.]*\\b' + f).test($(doc, 'sourcecheck-lead').textContent)) &&
     /No sources came back for this field/.test([...doc.querySelectorAll('#fields .field')].find((w) => w.dataset.key === 'decision').textContent),
     $(doc, 'sourcecheck-lead').textContent);
   ok('and the invented quote itself is never shown', !doc.body.textContent.includes('lose the feeling in your lip'));
@@ -5187,7 +5236,15 @@ async function testBpe() {
   ok('with the words the scores were heard in', /Heard: “BPE two one two, three star two two”/.test($(doc, 'bpe-block').textContent), $(doc, 'bpe-block').textContent);
   click($(doc, 'copy-all'));
   await tick(20);
-  ok('and the scores are in the copied note', /\nBPE\n\n2 1 2 \/ 3\* 2 2 \(UR UA UL \/ LR LA LL\)/.test(copied), copied.slice(-200));
+  // The BPE is laid out by the template now, under FINDINGS on the clinical
+  // layout — on a perio exam the chart IS the objective finding, and it used to
+  // print after the whole note. Labelled like a field: label, then the line.
+  ok('and the scores are in the copied note', /\nBPE\n2 1 2 \/ 3\* 2 2 \(UR UA UL \/ LR LA LL\)/.test(copied), copied.slice(-400));
+  // Under the layout's own section rather than appended after the whole note.
+  // Which section depends on the layout — testBlocksFollowTheLayout walks all
+  // three; here it is enough that it is not trailing the record.
+  ok('and they sit inside a section, not after the outcome',
+    /\nBPE\n2 1 2 \//.test(copied) && !/(OUTCOME|NEXT)[\s\S]*\nBPE\n/.test(copied), copied.slice(0, 500));
 
   sel(doc, 'LL').value = '3';
   sel(doc, 'LL').dispatchEvent(new win.Event('change', { bubbles: true }));
@@ -5247,7 +5304,9 @@ async function testBpe() {
   await tick(20);
   click($(doc, 'copy-all'));
   await tick(20);
-  ok('until one is filled in by hand', /BPE\n\n4\* - - \/ - - - \(/.test(copied), copied.slice(-120));
+  // Label then line, like any field: the BPE is laid out by the template now
+  // rather than printed as a block of its own after the note.
+  ok('until one is filled in by hand', /\nBPE\n4\* - - \/ - - - \(/.test(copied), copied.slice(-200));
   ctx = await mk();
   ({ doc, win } = ctx);
   await toDraft(ctx);
@@ -5418,6 +5477,12 @@ async function testTreatmentToday() {
   let copied = '';
   win.navigator.clipboard.writeText = async (t) => { copied = t; };
   const headings = () => [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent);
+  // A third molar case opens in the consent record since 26 October 2026. What
+  // is under test below is where the treatment and the LA sit relative to the
+  // discussion and the outcome, so the clinical layout is selected explicitly
+  // rather than relied on as a default.
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'clinical'));
+  await tick(30);
   ok('the treatment has its own section, between the discussion and the outcome',
     /Discussion\|Treatment\|Outcome/.test(headings().join('|')), headings().join('|'));
   const tw = fieldWrap(doc, 'treatmentToday');
@@ -5441,8 +5506,13 @@ async function testTreatmentToday() {
   await tick(20);
   ok('the treatment is in the copied note under its own heading',
     /TREATMENT\n\nTreatment carried out today \(dictated\)\nSurgical removal of 38\./.test(copied), copied);
+  // The LA now sits inside TREATMENT, labelled like a field, immediately after
+  // the treatment it was given for — not as a trailing block of its own.
   ok('and so is the LA, exactly as dictated',
-    /LOCAL ANAESTHETIC \(DICTATED\)\n\nLA 1: Agent Articaine, Strength 4%, Amount Two cartridges, Technique Inferior alveolar block, Batch AB123\nLA 2: Agent Lidocaine, Amount One cartridge/.test(copied), copied);
+    /Local anaesthetic given \(dictated\)\nLA 1: Agent Articaine, Strength 4%, Amount Two cartridges, Technique Inferior alveolar block, Batch AB123\nLA 2: Agent Lidocaine, Amount One cartridge/.test(copied), copied);
+  ok('and it reads with the treatment, inside TREATMENT, before the outcome',
+    /TREATMENT\n\nTreatment carried out today \(dictated\)[\s\S]*Local anaesthetic given \(dictated\)[\s\S]*OUTCOME/.test(copied), copied.slice(0, 600));
+  ok('the old trailing LOCAL ANAESTHETIC heading is gone', !/LOCAL ANAESTHETIC \(DICTATED\)/.test(copied), copied.slice(-300));
   // Emptying a row: it is not copied, and the rest are numbered as copied.
   [...la.querySelectorAll('tr')][2].querySelectorAll('td').forEach((td) => { td.textContent = ''; td.dispatchEvent(new win.Event('input', { bubbles: true })); });
   await tick(10);
@@ -5542,13 +5612,263 @@ async function runType(onNote, { type = /Third molar/, dictate = false, turns = 
   return ctx;
 }
 
+/**
+ * The sedation record (26 October 2026).
+ *
+ * The sedation checklist has always covered the discussion BEFORE sedation —
+ * technique explained, escort, fasting, driving, fitness. What was then given
+ * had nowhere to go: the prompt sent it into treatmentToday as prose, so an
+ * absent titration series, or no monitoring at all, was invisible. The point of
+ * the block is that a missing line is visible.
+ */
+// A function declaration, not a const: the `await test…()` lines that drive this
+// file sit ABOVE these definitions, so a const here is still in its temporal
+// dead zone when they run, and the ReferenceError surfaces inside the page's
+// stubbed fetch as a failed draft rather than as a test error.
+function SED_FULL() { return {
+  technique: 'IV midazolam, titrated',
+  agent: 'Midazolam 5 mg in 5 ml',
+  cannulaSite: 'Right antecubital fossa',
+  increments: [
+    { time: '09:42', dose: '2 mg', response: 'Settled, eyelids heavy', quotes: [] },
+    { time: '09:46', dose: '1 mg', response: 'Verrill’s sign positive', quotes: [] }
+  ],
+  total: '3 mg',
+  oxygen: 'None required',
+  monitoring: 'SpO2 97 to 99 per cent, pulse 68 to 76, BP 128 over 78',
+  reversal: null,
+  recovery: '35 minutes, obeying commands throughout',
+  discharge: 'Criteria met at 10:35',
+  escort: 'Escorted home by a relative',
+  notes: null,
+  quotes: []
+}; }
+
+async function testSedationRecord() {
+  section('The sedation record: dictated only, and laid out by the template');
+
+  let ctx = await runType(() => note27({ sedation: SED_FULL(), sedationDraft: true }),
+    { type: /Sedation/, dictate: true });
+  let { doc, win } = ctx;
+  let block = $(doc, 'sedation-block');
+  ok('a sedation consult with dictation shows the sedation record', !!block);
+  ok('the technique, agent and cannulation site are set out as labelled lines',
+    !!block && /Technique[\s\S]*IV midazolam, titrated/.test(block.textContent) &&
+    /Cannulation site[\s\S]*Right antecubital fossa/.test(block.textContent), block && block.textContent.slice(0, 200));
+  ok('the titration series is a table, one row per increment, in the order dictated',
+    !!block && block.querySelectorAll('table.sed-log tr').length === 3 &&
+    /09:42[\s\S]*2 mg[\s\S]*09:46[\s\S]*1 mg/.test(block.querySelector('table.sed-log').textContent));
+  ok('it is marked as dictated, so it cannot read as something said to the patient',
+    !!block && !!block.querySelector('.dictated-tag') && block.classList.contains('is-dictated'));
+  ok('a record with everything on the list carries no "not recorded" warning',
+    !!block && !/Not recorded:/.test(block.textContent), block && block.textContent.slice(-300));
+  ok('and it says nothing is added up or checked',
+    !!block && /no dose is added up and no total is checked against the increments/.test(block.textContent));
+  ok('the no-names rule is on screen where the escort is typed in',
+    !!block && /No names, here or anywhere on this page/.test(block.textContent), block && block.textContent.slice(-300));
+  ok('the list itself is flagged as awaiting clinical review',
+    !!block && /has not been\s+clinically reviewed|has not been clinically reviewed/.test(block.textContent.replace(/\s+/g, ' ')),
+    block && block.textContent.slice(-260));
+
+  // Where it sits. The sedation consult opens in the consent layout, so the
+  // block belongs between Treatment and Context — never inside the discussion.
+  {
+    const kids = [...$(doc, 'fields').children];
+    const hAt = (t) => kids.findIndex((el) => el.classList.contains('section-heading') && el.textContent === t);
+    const at = kids.findIndex((el) => el.id === 'sedation-block');
+    const treatment = hAt('Treatment'), context = hAt('Context');
+    ok('the block sits inside the Treatment section, not after the whole note',
+      treatment > -1 && at > treatment && (context === -1 || at < context),
+      JSON.stringify({ treatment, at, context }));
+    ok('and never inside the consent discussion',
+      at > hAt('The discussion') && at > hAt('The patient'), JSON.stringify({ at }));
+  }
+
+  let text = await ctx.copy();
+  ok('the copied note carries the record under TREATMENT, labelled dictated',
+    /TREATMENT[\s\S]*Sedation given \(dictated\)\nTechnique: IV midazolam, titrated/.test(text), text.slice(0, 700));
+  ok('with the increments numbered and read in order',
+    /Increment 1: at 09:42, dose 2 mg, response Settled, eyelids heavy\nIncrement 2: at 09:46, dose 1 mg/.test(text), text);
+  ok('and the monitoring, recovery, discharge and escort after them',
+    /Total dose given: 3 mg[\s\S]*Monitoring: SpO2 97 to 99[\s\S]*Recovery: 35 minutes[\s\S]*Discharge: Criteria met at 10:35[\s\S]*Escort: Escorted home by a relative/.test(text), text);
+  ok('a field the model left null is simply absent, never invented',
+    !/Reversal agent/.test(text) && !/Notes:/.test(text), text);
+
+  // An omission must be visible. This is the whole reason the block exists.
+  ctx = await runType(() => note27({
+    sedation: Object.assign(SED_FULL(), { monitoring: null, recovery: null, increments: [] })
+  }), { type: /Sedation/, dictate: true });
+  block = $(ctx.doc, 'sedation-block');
+  ok('a record with no monitoring says so, by name',
+    !!block && /Not recorded:[^.]*monitoring/.test(block.textContent), block && block.textContent.slice(-300));
+  ok('and names the missing titration series and recovery too',
+    !!block && /the incremental doses/.test(block.textContent) && /recovery/.test(block.textContent),
+    block && block.textContent.slice(-300));
+  ok('a reversal agent that was not given is NOT reported as missing',
+    !!block && !/reversal/i.test(block.textContent.replace(/Reversal agent/g, '')),
+    block && block.textContent.slice(-300));
+
+  // Offered empty, to fill in by hand, exactly as the LA log is.
+  ctx = await runType(() => note27({}), { type: /Sedation/, dictate: true });
+  block = $(ctx.doc, 'sedation-block');
+  ok('a sedation consult with nothing dictated into it is still offered the block',
+    !!block && !!block.querySelector('.sed-value[contenteditable="true"]'));
+  text = await ctx.copy();
+  ok('but an empty block is not copied into the record', !/Sedation given/.test(text), text.slice(0, 300));
+
+  // Typed in by hand: it is theirs, it is copied, and it is marked as edited.
+  {
+    const val = [...ctx.doc.querySelectorAll('#sedation-block .sed-row')]
+      .find((r) => /^Technique/.test(r.textContent)).querySelector('.sed-value');
+    val.textContent = 'Inhalation sedation, nitrous oxide and oxygen<b>';
+    val.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+    await tick(20);
+    text = await ctx.copy();
+    ok('a technique typed in by hand is copied, as text, and the block says it was edited',
+      /Technique: Inhalation sedation, nitrous oxide and oxygen<b>/.test(text) &&
+      !ctx.doc.querySelector('#sedation-block b') &&
+      $(ctx.doc, 'sedation-block').classList.contains('edited'), text.slice(0, 300));
+  }
+
+  // Not a sedation appointment and nothing sedation-shaped dictated: no block.
+  ctx = await runType(() => note27({}), { type: /Third molar/, dictate: true });
+  ok('a third molar case with no sedation dictated shows no sedation block', !$(ctx.doc, 'sedation-block'));
+  // But sedation for oral surgery may well be filed under the surgery, so a
+  // record that IS there shows, whatever the consult type is called.
+  ctx = await runType(() => note27({ sedation: SED_FULL() }), { type: /Third molar/, dictate: true });
+  ok('and one that was dictated shows even though the type is not "Sedation"', !!$(ctx.doc, 'sedation-block'));
+}
+
+/**
+ * The four clinical blocks are placed by the layout now, so switching layout
+ * must MOVE them. Before 26 October 2026 they were appended after the last
+ * section in a fixed order, identically in every template.
+ */
+async function testBlocksFollowTheLayout() {
+  section('The structured blocks move with the layout');
+  // The page takes the BPE as the six sextants, not as the rendered line.
+  const ctx = await runType(() => note27({
+    bpe: { UR: '2', UA: '1', UL: '2', LR: '3*', LA: '2', LL: '2', quotes: [] }
+  }), { type: /Perio/, dictate: true });
+  const { doc, win } = ctx;
+  const kids = () => [...$(doc, 'fields').children];
+  const hAt = (t) => kids().findIndex((el) => el.classList.contains('section-heading') && el.textContent === t);
+  const bpeAt = () => kids().findIndex((el) => el.id === 'bpe-block');
+
+  // Perio opens in SOAP, where the chart is the objective finding.
+  ok('on SOAP the BPE sits inside Objective', bpeAt() > hAt('Objective') && bpeAt() < hAt('Assessment'),
+    JSON.stringify({ objective: hAt('Objective'), bpe: bpeAt(), assessment: hAt('Assessment') }));
+  let text = await ctx.copy();
+  ok('and prints under OBJECTIVE, not after the plan',
+    /OBJECTIVE[\s\S]*\nBPE\n2 1 2 \//.test(text) && !/PLAN[\s\S]*\nBPE\n/.test(text), text.slice(0, 600));
+
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'clinical'));
+  await tick(30);
+  ok('switching to the clinical layout moves it into Findings',
+    bpeAt() > hAt('Findings') && bpeAt() < hAt('Discussion'),
+    JSON.stringify({ findings: hAt('Findings'), bpe: bpeAt(), discussion: hAt('Discussion') }));
+  text = await ctx.copy();
+  ok('and it prints under FINDINGS there', /FINDINGS[\s\S]*\nBPE\n2 1 2 \//.test(text), text.slice(0, 600));
+
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'consent'));
+  await tick(30);
+  ok('on the consent layout it moves into Context, below the discussion',
+    bpeAt() > hAt('Context') && bpeAt() > hAt('The discussion'),
+    JSON.stringify({ context: hAt('Context'), bpe: bpeAt() }));
+
+  // The invariant that makes placing them by layout safe at all.
+  ok('every layout is checked to lay out every field AND every block exactly once',
+    /every field AND every block exactly once/.test(html) &&
+    /\.concat\(Object\.keys\(BLOCKS\)\)\.sort\(\)/.test(html));
+  ok('and a layout that forgot one is reported with what is missing',
+    /does not lay out every field and block exactly once/.test(html) &&
+    /unknown: keys\.filter/.test(html));
+}
+
+/**
+ * Which layout a consult type opens in (26 October 2026). Defaults only: the
+ * picker is one tap away, and a layout chosen by hand must never be moved by a
+ * later change of consult type.
+ */
+async function testPerTypeDefaultLayout() {
+  section('Each consult type opens in the layout it reads best in');
+  const ctx = await boot();
+  const { doc, win } = ctx;
+  const on = () => [...doc.querySelectorAll('#template-picker button')].find((b) => b.classList.contains('on'));
+  const pick = (re) => click([...$(doc, 'types').children].find((b) => re.test(b.textContent)));
+  const hint = () => $(doc, 'template-hint').textContent;
+
+  ok('before any type is chosen the layout is the clinical note', on().dataset.template === 'clinical');
+
+  pick(/^Perio/); await tick(20);
+  ok('perio opens in SOAP', on().dataset.template === 'soap', on().dataset.template);
+  ok('and the hint on screen changes with it', /Subjective, objective/.test(hint()), hint());
+
+  pick(/^Exam/); await tick(20);
+  ok('an exam or recall opens in SOAP too', on().dataset.template === 'soap');
+
+  pick(/^Implant consult/); await tick(20);
+  ok('an implant consult opens in the consent record', on().dataset.template === 'consent');
+  pick(/^Treatment plan/); await tick(20);
+  ok('so does a treatment plan consult', on().dataset.template === 'consent');
+  pick(/^Third molar/); await tick(20);
+  ok('and third molar surgery, where the warning is the record', on().dataset.template === 'consent');
+
+  pick(/^Restorative/); await tick(20);
+  ok('a restorative visit opens chronologically, in the clinical note', on().dataset.template === 'clinical');
+  pick(/^Endo/); await tick(20);
+  ok('so does endo', on().dataset.template === 'clinical');
+  pick(/^Emergency/); await tick(20);
+  ok('and an emergency', on().dataset.template === 'clinical');
+  // Dentures are deliberately not defaulted to the consent layout: the type
+  // covers impressions, try-in, fit and adjustment as well as the consultation,
+  // and only the first of those is a consent discussion.
+  pick(/^Dentures/); await tick(20);
+  ok('a denture appointment opens chronologically, since most are a stage not a consult',
+    on().dataset.template === 'clinical', on().dataset.template);
+
+  // The important half: a choice made by hand is the clinician's and stands.
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap'));
+  await tick(20);
+  ok('a layout chosen by hand is selected', on().dataset.template === 'soap');
+  pick(/^Implant consult/); await tick(20);
+  ok('and changing the consult type afterwards does NOT move it',
+    on().dataset.template === 'soap', on().dataset.template);
+  pick(/^Perio/); await tick(20);
+  ok('however many times the type changes', on().dataset.template === 'soap');
+
+  // Choosing the layout already showing is still a choice.
+  const ctx2 = await boot();
+  const on2 = () => [...ctx2.doc.querySelectorAll('#template-picker button')].find((b) => b.classList.contains('on'));
+  click([...ctx2.doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'clinical'));
+  await tick(20);
+  click([...$(ctx2.doc, 'types').children].find((b) => /^Perio/.test(b.textContent)));
+  await tick(20);
+  ok('tapping the layout already showing also pins it',
+    on2().dataset.template === 'clinical', on2().dataset.template);
+
+  // And the next patient starts clean.
+  click([...$(doc, 'types').children].find((b) => /^Perio/.test(b.textContent)));
+  await tick(20);
+  click($(doc, 'clear'));
+  await tick(40);
+  ok('Clear forgets the layout the clinician picked, with everything else',
+    on().dataset.template === 'clinical', on().dataset.template);
+}
+
 async function testPmpr() {
   section('PMPR: ticked by the clinician on an exam or perio, into the treatment section');
   const bodies = [];
   let ctx = await runType(() => note27({}), { type: /Exam/, bodies });
   let { doc, win } = ctx;
   const heads = () => [...$(doc, 'fields').children].filter((e) => e.classList.contains('section-heading')).map((e) => e.textContent);
-  ok('an exam offers the PMPR tick, under Treatment', !!$(doc, 'pmpr') && heads().includes('Treatment') && !$(doc, 'pmpr').checked);
+  // An exam opens in SOAP since 26 October 2026, where the treatment sits under
+  // Plan — asserted at the end of this test. The clinical note is selected here
+  // explicitly so the Treatment-section half still gets exercised.
+  ok('an exam offers the PMPR tick', !!$(doc, 'pmpr') && heads().includes('Plan') && !$(doc, 'pmpr').checked, heads().join('|'));
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'clinical'));
+  await tick(30);
+  ok('and on the clinical layout it is under Treatment', !!$(doc, 'pmpr') && heads().includes('Treatment') && !$(doc, 'pmpr').checked);
   let text = await ctx.copy();
   ok('unticked, nothing about PMPR is copied', !/PMPR/.test(text));
   $(doc, 'pmpr').checked = true;

@@ -423,6 +423,25 @@ table.la-log td[contenteditable]:not([contenteditable="false"]) { min-width: 3em
 table.la-log td[contenteditable]:not([contenteditable="false"]):focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 #la-block .add-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
 table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+/* The sedation record. The same editable-cell behaviour as the LA log, which is
+   why .sed-log is given the la-log rules too, plus a label/value list for the
+   scalars — a table of one row each would be unreadable on a phone. */
+table.sed-log td[contenteditable]:not([contenteditable="false"]):empty::before { content: attr(data-placeholder); color: var(--ink-faint); }
+table.sed-log td[contenteditable]:not([contenteditable="false"]) { min-width: 3em; }
+table.sed-log td[contenteditable]:not([contenteditable="false"]):focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+#sedation-block .add-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
+.sed-group { font-family: var(--mono); font-size: .68rem; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-faint); margin: 12px 0 4px; }
+.sed-group:first-of-type { margin-top: 4px; }
+.sed-row { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.sed-label { flex: 0 0 11em; font-size: .8125rem; font-weight: 600; color: var(--ink-muted); }
+.sed-value { flex: 1; font-size: .875rem; min-height: 1.4em; }
+.sed-value[contenteditable]:not([contenteditable="false"]):empty::before { content: attr(data-placeholder); color: var(--ink-faint); }
+.sed-value[contenteditable]:not([contenteditable="false"]):focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 480px) {
+  .sed-row { display: block; }
+  .sed-label { display: block; flex: none; }
+}
 .ask-row { display: flex; gap: 8px; }
 .ask-row input {
   flex: 1; min-height: var(--tap); padding: 0 14px; font: inherit;
@@ -1022,6 +1041,7 @@ label.pmpr input { margin-top: 4px; }
     ['restorative',        'Restorative'],
     ['perio',              'Perio'],
     ['endo',               'Endo'],
+    ['denture',            'Dentures'],
     ['extraction-surgery', 'Extraction / surgery'],
     ['third-molar',        'Third molar surgery'],
     ['implant-consult',    'Implant consult'],
@@ -1061,22 +1081,85 @@ label.pmpr input { margin-top: 4px; }
   var PMPR_TYPES = ['exam-recall', 'perio'];
   var PMPR_LINE = 'Full mouth professional mechanical plaque removal (PMPR) carried out.';
   var TREATMENT_TYPES = ['extraction-surgery', 'third-molar', 'implant-surgery', 'emergency',
-                         'restorative', 'endo', 'perio', 'sedation'];
+                         'restorative', 'endo', 'perio', 'sedation', 'denture'];
+  // Where the sedation block is OFFERED empty, to fill in by hand. Everywhere
+  // else it appears only if something sedation-shaped was actually dictated —
+  // sedation for oral surgery may well be filed under the surgery, not under
+  // 'sedation', and the block should follow the dictation rather than the label.
+  var SEDATION_TYPES = ['sedation'];
+  /* ---- the structured blocks, placed by layout (26 October 2026) ----
+     The BPE chart, the LA log, the sedation record and the implant log used to
+     render after the last section, in a fixed order, in every template. So in
+     SOAP the BPE — which on a perio exam IS the objective finding — appeared
+     after Plan, and in the clinical layout the LA given and the implants placed
+     came after the treatment PLAN. The template's whole promise is that it
+     controls how the note reads; for these four it did not.
+
+     They are now entries in a template's section list, marked with a leading
+     '@'. Each one knows whether it has anything to show, so a section that
+     holds only empty blocks is omitted exactly as a section of empty fields is.
+
+     The earlier note on the implant log — that it belongs at the end of the
+     record rather than inside the discussion — still holds, and is why every
+     layout puts all four under what was FOUND or what was DONE, never inside
+     the consent discussion. */
+  var BLOCKS = {
+    '@bpe': {
+      label: 'BPE',
+      has: function (note) { return bpeAny(note.bpe) || BPE_TYPES.indexOf(S.consultType) !== -1; },
+      render: function (note, host) { renderBpe(note, host); },
+      text: function (note) { return bpeAsText(note.bpe); }
+    },
+    '@la': {
+      label: 'Local anaesthetic given',
+      dictated: true,
+      has: function (note) {
+        return laRows(note).length > 0 || (noteDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1);
+      },
+      render: function (note, host) { renderLaLog(note, host); },
+      text: function (note) { return laLogAsText(note); }
+    },
+    '@sedation': {
+      label: 'Sedation given',
+      dictated: true,
+      has: function (note) {
+        return sedAny(note) || (noteDictation() && SEDATION_TYPES.indexOf(S.consultType) !== -1);
+      },
+      render: function (note, host) { renderSedation(note, host); },
+      text: function (note) { return sedationAsText(note); }
+    },
+    '@implant': {
+      label: 'Implants placed',
+      dictated: true,
+      has: function (note) { return Array.isArray(note.implantLog) && note.implantLog.length > 0; },
+      render: function (note, host) { renderImplantLog(note, host); },
+      text: function (note) {
+        return (Array.isArray(note.implantLog) && note.implantLog.length) ? implantLogAsText(note.implantLog) : '';
+      }
+    }
+  };
+
+  function isBlock(key) {
+    return typeof key === 'string' && key.charAt(0) === '@' &&
+           Object.prototype.hasOwnProperty.call(BLOCKS, key);
+  }
+
   // How the note READS, which is not the order the fields are extracted in.
-  // A template is a LAYOUT: which fields appear, in what order, under what
-  // headings. It never changes what was extracted, so switching between them
-  // is instant and cannot alter the content of the note.
-  //   [key, dictated?]
+  // A template is a LAYOUT: which fields and blocks appear, in what order,
+  // under what headings. It never changes what was extracted, so switching
+  // between them is instant and cannot alter the content of the note.
+  //   [key, dictated?] — a key beginning '@' is a block, see BLOCKS above
   var TEMPLATES = {
     clinical: {
       label: 'Clinical note',
       hint: 'Chronological. What brought them in, what was found, what was discussed, what was decided.',
       sections: [
         ['Presentation', [['reasonForAttendance', false], ['medicalHistory', false]]],
-        ['Findings',     [['examination', true], ['radiographicFindings', true]]],
+        ['Findings',     [['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
         ['Discussion',   [['proposed', false], ['alternatives', false], ['patientFactors', false],
                           ['risks', false], ['benefits', false], ['costs', false], ['patientQuestions', false]]],
-        ['Treatment',    [['treatmentToday', true]]],
+        // Chronological inside the section too: sedated, anaesthetised, treated.
+        ['Treatment',    [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true]]],
         ['Outcome',      [['decision', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
       ]
     },
@@ -1087,9 +1170,9 @@ label.pmpr input { margin-top: 4px; }
         ['The discussion', [['proposed', false], ['alternatives', false], ['risks', false],
                             ['benefits', false], ['patientFactors', false], ['costs', false]]],
         ['The patient',    [['patientQuestions', false], ['informationGiven', false], ['decision', false]]],
-        ['Treatment',      [['treatmentToday', true]]],
+        ['Treatment',      [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true]]],
         ['Context',        [['reasonForAttendance', false], ['medicalHistory', false],
-                            ['examination', true], ['radiographicFindings', true]]],
+                            ['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
         ['Next',           [['nextStep', false], ['plan', true]]]
       ]
     },
@@ -1098,25 +1181,78 @@ label.pmpr input { margin-top: 4px; }
       hint: 'Subjective, objective, assessment, plan.',
       sections: [
         ['Subjective', [['reasonForAttendance', false], ['medicalHistory', false], ['patientQuestions', false], ['patientFactors', false]]],
-        ['Objective',  [['examination', true], ['radiographicFindings', true]]],
+        ['Objective',  [['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
         ['Assessment', [['proposed', false], ['alternatives', false], ['risks', false], ['benefits', false]]],
-        ['Plan',       [['treatmentToday', true], ['decision', false], ['costs', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
+        ['Plan',       [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true],
+                        ['decision', false], ['costs', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
       ]
     }
   };
 
-  // Every template must lay out every field exactly once, or a field could be
-  // silently dropped from a record. Checked at load, not left to review.
+  /* ---- which layout a consult type opens in (26 October 2026) ----
+     The layout was always 'clinical' until the clinician changed it, which on a
+     perio exam or a recall meant changing it every single time. These are
+     DEFAULTS and nothing more: the picker is one tap away, a type not listed
+     here opens in 'clinical' as before, and once the clinician has chosen a
+     layout by hand, changing the consult type never moves it back (see
+     S.templatePicked). Content is untouched either way — a template is a
+     layout. */
+  var DEFAULT_TEMPLATE = {
+    // The chart and the findings lead; the discussion is usually short.
+    'exam-recall': 'soap',
+    perio:         'soap',
+    // Consultations where the whole point is what was proposed, offered,
+    // warned about and decided. Montgomery order puts that first.
+    'implant-consult': 'consent',
+    'treatment-plan':  'consent',
+    'third-molar':     'consent',
+    sedation:          'consent'
+    // Everything else — restorative, endo, extraction-surgery, implant-surgery,
+    // emergency — reads best chronologically, which is 'clinical', the default.
+    //
+    // 'denture' is deliberately NOT listed, so it opens chronologically. Its
+    // checklist is a consent list, but the type covers every stage — the
+    // consultation, impressions, the try-in, the fit, an adjustment — and only
+    // the first of those is a consent discussion. The consent layout puts the
+    // examination and the radiographs down in Context, which is the wrong way
+    // round for a fit or a review, where what was found and what was done ARE
+    // the record. One tap to Consent on the day of the consultation.
+  };
+
+  function templateFor(consultType) {
+    return (consultType && Object.prototype.hasOwnProperty.call(DEFAULT_TEMPLATE, consultType) &&
+            TEMPLATES[DEFAULT_TEMPLATE[consultType]]) ? DEFAULT_TEMPLATE[consultType] : 'clinical';
+  }
+
+  // The one place the layout changes: state, buttons and hint together, so they
+  // cannot drift. `picked` is true only when the clinician chose it themselves.
+  function setTemplate(name, picked) {
+    if (!TEMPLATES[name]) return;
+    S.template = name;
+    if (picked) S.templatePicked = true;
+    [].forEach.call(document.querySelectorAll('#template-picker button'), function (b) {
+      b.classList.toggle('on', b.dataset.template === name);
+    });
+    $('template-hint').textContent = TEMPLATES[name].hint;
+  }
+
+  // Every template must lay out every field AND every block exactly once, or
+  // one could be silently dropped from a record. Checked at load, not left to
+  // review. The blocks are in this check for the same reason the fields are:
+  // placing them by layout is only safe if no layout can forget one.
   (function verifyTemplates() {
-    var all = FIELDS.map(function (f) { return f[0]; }).concat(DICTATED_FIELDS.map(function (f) { return f[0]; })).sort();
+    var all = FIELDS.map(function (f) { return f[0]; })
+      .concat(DICTATED_FIELDS.map(function (f) { return f[0]; }))
+      .concat(Object.keys(BLOCKS)).sort();
     Object.keys(TEMPLATES).forEach(function (name) {
       var keys = [];
       TEMPLATES[name].sections.forEach(function (sec) { sec[1].forEach(function (k) { keys.push(k[0]); }); });
       var sorted = keys.slice().sort();
       if (sorted.join(',') !== all.join(',')) {
-        console.error('AI Notes: template "' + name + '" does not lay out every field exactly once.',
+        console.error('AI Notes: template "' + name + '" does not lay out every field and block exactly once.',
           { missing: all.filter(function (k) { return keys.indexOf(k) === -1; }),
-            duplicated: keys.filter(function (k, i) { return keys.indexOf(k) !== i; }) });
+            duplicated: keys.filter(function (k, i) { return keys.indexOf(k) !== i; }),
+            unknown: keys.filter(function (k) { return all.indexOf(k) === -1; }) });
       }
     });
   })();
@@ -1167,6 +1303,8 @@ label.pmpr input { margin-top: 4px; }
     micLost: false,   // the recording's microphone track ended mid-recording
     noteLength: 'standard',  // brief | standard | full
     template: 'clinical',    // layout only; see TEMPLATES
+    templatePicked: false,   // the clinician chose the layout themselves, so
+                             // changing the consult type must not move it
     edited: false,    // the clinician has changed the draft in place
     paused: false,
     pausedAt: 0,      // when the current pause began
@@ -1553,6 +1691,9 @@ label.pmpr input { margin-top: 4px; }
       Array.prototype.forEach.call($('types').children, function (other) {
         other.setAttribute('aria-pressed', String(other === b));
       });
+      // Open in the layout this kind of appointment reads best in — unless the
+      // clinician has already chosen one, in which case theirs stands.
+      if (!S.templatePicked) setTemplate(templateFor(pair[0]), false);
       refreshStart();
       loadChecklist(pair[0]);
     });
@@ -2506,7 +2647,7 @@ label.pmpr input { margin-top: 4px; }
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment', 'radiographs'],
+        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment', 'radiographs', 'sedation'],
                                               speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
@@ -2969,6 +3110,10 @@ label.pmpr input { margin-top: 4px; }
       // A section with nothing in it is omitted entirely. Most consultations
       // have no dictation, so Findings usually does not appear at all.
       var visible = keys.filter(function (k) {
+        // A block decides for itself whether it has anything to show, so a
+        // section holding only empty blocks is omitted like a section of empty
+        // fields. Asked before fieldSpec, which knows nothing about blocks.
+        if (isBlock(k[0])) return BLOCKS[k[0]].has(note);
         var spec = fieldSpec(k[0]);
         if (!spec) return false;
         // Dictated fields appear when there is something in them, and also
@@ -2995,6 +3140,11 @@ label.pmpr input { margin-top: 4px; }
           if (pmprHere && k[0] === 'treatmentToday') host.appendChild(pmprBlock());
           return;
         }
+        // A block renders itself, in the layout's position. Its own heading is
+        // the one inside it ("BPE", "Sedation given"); the section's heading is
+        // already on screen above, which is why the renderers no longer append
+        // a section heading of their own.
+        if (isBlock(k[0])) { BLOCKS[k[0]].render(note, host); return; }
         var key = k[0], isDictated = k[1], spec = fieldSpec(key);
         var heading = spec.label, isCore = spec.core;
         var value = note[key];
@@ -3114,9 +3264,11 @@ label.pmpr input { margin-top: 4px; }
       });
     });
 
-    renderBpe(note, host);
-    renderLaLog(note, host);
-    renderImplantLog(note, host);
+    // The four clinical blocks are rendered by the layout above, in their
+    // section. What is left here is not note content: "Covered elsewhere" is an
+    // addendum about the discussion, the sources list is a checking aid, and
+    // the to-do list never goes into the record at all. Those stay at the end,
+    // the same in every layout.
     renderCovered();
     renderSources();
     renderTodo(note);
@@ -3914,11 +4066,8 @@ label.pmpr input { margin-top: 4px; }
     // and something was dictated; otherwise only when there is a row.
     var offer = noteDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1;
     if (!rows.length && !offer) return;
-    var hd = document.createElement('h3');
-    hd.className = 'section-heading';
-    hd.textContent = 'Local anaesthetic';
-    host.appendChild(hd);
-
+    // No section heading of its own: the layout's section heading is already on
+    // screen above this block. See BLOCKS.
     var wrap = document.createElement('div');
     wrap.className = 'field is-dictated' + (laEdited() ? ' edited' : '');
     wrap.id = 'la-block';
@@ -4017,16 +4166,267 @@ label.pmpr input { margin-top: 4px; }
     }).filter(Boolean).join('\n');
   }
 
+  /* ---- the sedation record (26 October 2026) ----
+     Mirrors SEDATION_TEXT_FIELDS, SEDATION_DOSE_FIELDS and SEDATION_LABELS in
+     api/_prompt.mjs. Keep them in step: a key here that the server does not know
+     is a field the clinician can type into and nothing will ever fill.
+
+     The sedation CHECKLIST covers the discussion beforehand. This is the record
+     of the episode: what was given, how the patient was watched, how they left.
+     Taken as dictated, like the LA log — no increment is added up and no total
+     is checked against them. CLINICAL CONTENT AWAITING REVIEW; the note under
+     the block says so. */
+  var SED_GROUPS = [
+    ['Technique and drug', ['technique', 'agent', 'cannulaSite']],
+    ['Monitoring',         ['total', 'oxygen', 'monitoring', 'reversal']],
+    ['Recovery and discharge', ['recovery', 'discharge', 'escort', 'notes']]
+  ];
+  var SED_TEXT = ['technique', 'agent', 'cannulaSite', 'total', 'oxygen', 'monitoring',
+                  'reversal', 'recovery', 'discharge', 'escort', 'notes'];
+  var SED_DOSE = [['time', 'Time'], ['dose', 'Dose'], ['response', 'Response']];
+  var SED_LABELS = {
+    technique: 'Technique', agent: 'Agent', cannulaSite: 'Cannulation site',
+    total: 'Total dose given', oxygen: 'Supplemental oxygen', monitoring: 'Monitoring',
+    reversal: 'Reversal agent', recovery: 'Recovery', discharge: 'Discharge',
+    escort: 'Escort', notes: 'Notes'
+  };
+
+  function sedRecord(note) {
+    var r = note && note.sedation;
+    return (r && typeof r === 'object' && !Array.isArray(r)) ? r : null;
+  }
+
+  function sedIncrements(note) {
+    var r = sedRecord(note);
+    return (r && Array.isArray(r.increments)) ? r.increments.filter(function (x) { return x && typeof x === 'object'; }) : [];
+  }
+
+  function sedAny(note) {
+    var r = sedRecord(note);
+    if (!r) return false;
+    if (sedIncrements(note).length) return true;
+    return SED_TEXT.some(function (k) { return hasText(r[k]); });
+  }
+
+  // An empty record the clinician can start typing into. Never put on the note
+  // by the model: only here, when the block is offered and nothing came back.
+  function sedBlank() {
+    var r = { increments: [], quotes: [], added: true };
+    SED_TEXT.forEach(function (k) { r[k] = null; });
+    return r;
+  }
+
+  function sedCells(note) {
+    var r = sedRecord(note) || {};
+    return SED_TEXT.map(function (k) { return hasText(r[k]) ? String(r[k]).replace(/\s+/g, ' ').trim() : ''; })
+      .concat(sedIncrements(note).map(function (row) {
+        return SED_DOSE.map(function (c) { return hasText(row[c[0]]) ? String(row[c[0]]).replace(/\s+/g, ' ').trim() : ''; }).join('\u0002');
+      })).join('\u0001');
+  }
+
+  // Worked out, never remembered, so a redraw cannot lose it — as laRowEdited.
+  function sedEdited() {
+    if (!S.drafted) return false;
+    return sedCells(S.note) !== sedCells(S.drafted);
+  }
+
+  function renderSedation(note, host) {
+    var offer = noteDictation() && SEDATION_TYPES.indexOf(S.consultType) !== -1;
+    if (!sedAny(note) && !offer) return;
+    // No section heading of its own; the layout provides it. See BLOCKS.
+    var wrap = document.createElement('div');
+    wrap.className = 'field is-dictated' + (sedEdited() ? ' edited' : '');
+    wrap.id = 'sedation-block';
+    var head = document.createElement('div');
+    head.className = 'field-head';
+    var h3 = document.createElement('h3');
+    h3.textContent = 'Sedation given';
+    head.appendChild(h3);
+    var dtag = document.createElement('span');
+    dtag.className = 'dictated-tag';
+    dtag.textContent = 'Dictated';
+    head.appendChild(dtag);
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', function () {
+      var t = sedationAsText(S.note);
+      if (t) writeClipboard('Sedation given (dictated)\n' + t, copy);
+    });
+    head.appendChild(copy);
+    wrap.appendChild(head);
+
+    if (!sedRecord(note)) note.sedation = sedBlank();
+    var rec = sedRecord(note);
+
+    var status = document.createElement('p');
+    var refresh = function () {
+      var missing = SED_TEXT.filter(function (k) {
+        return k !== 'notes' && k !== 'reversal' && k !== 'cannulaSite' && !hasText(rec[k]);
+      });
+      if (!sedIncrements(S.note).length) missing.unshift('increments');
+      status.className = 'bpe-note' + (missing.length ? ' warn' : '');
+      status.textContent = missing.length
+        ? 'Not recorded: ' + missing.map(function (k) {
+            return k === 'increments' ? 'the incremental doses' : SED_LABELS[k].toLowerCase();
+          }).join(', ') + '. Dictate them or add them here before you paste.'
+        : 'Taken as dictated: no dose is added up and no total is checked against the increments.' +
+          (sedEdited() ? ' Edited by you.' : '');
+      wrap.classList.toggle('edited', sedEdited());
+    };
+
+    // A text field per group. contenteditable, like every other block here, so
+    // the clinician corrects in place rather than retyping into their PMS.
+    SED_GROUPS.forEach(function (g) {
+      var gh = document.createElement('p');
+      gh.className = 'sed-group';
+      gh.textContent = g[0];
+      wrap.appendChild(gh);
+      g[1].forEach(function (k) {
+        var row = document.createElement('div');
+        row.className = 'sed-row';
+        var lab = document.createElement('span');
+        lab.className = 'sed-label';
+        lab.textContent = SED_LABELS[k];
+        row.appendChild(lab);
+        var val = document.createElement('span');
+        val.className = 'sed-value';
+        val.textContent = hasText(rec[k]) ? String(rec[k]) : '';
+        val.dataset.placeholder = '—';
+        val.setAttribute('contenteditable', EDITABLE);
+        val.setAttribute('role', 'textbox');
+        val.setAttribute('aria-label', 'Sedation, ' + SED_LABELS[k].toLowerCase());
+        val.addEventListener('paste', function (e) {
+          e.preventDefault();
+          document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+        });
+        val.addEventListener('input', function () {
+          var v = editableText(val).replace(/\s+/g, ' ').trim();
+          rec[k] = v ? v.slice(0, 300) : null;
+          S.edited = true;
+          refresh();
+          resetIdle();
+        });
+        row.appendChild(val);
+        wrap.appendChild(row);
+      });
+    });
+
+    // The titration series, as a table: times and doses line up and are read
+    // down the column, which prose cannot do.
+    var incs = sedIncrements(note);
+    var th = document.createElement('p');
+    th.className = 'sed-group';
+    th.textContent = 'Incremental doses';
+    wrap.appendChild(th);
+    if (incs.length) {
+      var table = document.createElement('table');
+      table.className = 'implant-log sed-log';
+      var thead = document.createElement('tr');
+      var hn = document.createElement('th');
+      hn.textContent = '#';
+      thead.appendChild(hn);
+      SED_DOSE.forEach(function (c) { var t = document.createElement('th'); t.textContent = c[1]; thead.appendChild(t); });
+      table.appendChild(thead);
+      incs.forEach(function (row, i) {
+        var tr = document.createElement('tr');
+        var num = document.createElement('td');
+        num.textContent = String(i + 1);
+        tr.appendChild(num);
+        SED_DOSE.forEach(function (c) {
+          var td = document.createElement('td');
+          td.textContent = hasText(row[c[0]]) ? String(row[c[0]]) : '';
+          td.dataset.placeholder = '—';
+          td.setAttribute('contenteditable', EDITABLE);
+          td.setAttribute('role', 'textbox');
+          td.setAttribute('aria-label', 'Increment ' + (i + 1) + ', ' + c[1].toLowerCase());
+          td.addEventListener('paste', function (e) {
+            e.preventDefault();
+            document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+          });
+          td.addEventListener('input', function () {
+            var v = editableText(td).replace(/\s+/g, ' ').trim();
+            row[c[0]] = v ? v.slice(0, 200) : null;
+            S.edited = true;
+            refresh();
+            resetIdle();
+          });
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      wrap.appendChild(table);
+    }
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'add-row';
+    add.textContent = incs.length ? 'Add an increment' : 'Add an incremental dose';
+    add.addEventListener('click', function () {
+      resetIdle();
+      var r = sedRecord(S.note);
+      if (!r) return;
+      if (!Array.isArray(r.increments)) r.increments = [];
+      var n = { quotes: [], added: true };
+      SED_DOSE.forEach(function (c) { n[c[0]] = null; });
+      r.increments.push(n);
+      S.edited = true;
+      render(S.note);
+    });
+    wrap.appendChild(add);
+
+    wrap.appendChild(status);
+
+    // The prompt forbids the model recording a name, but these boxes are typed
+    // into by hand, and the escort is a third party. No identifiers reach this
+    // tool at all — that is what the DPIA rests on — so the rule is on screen
+    // where the typing happens, not only in the prompt.
+    var noname = document.createElement('p');
+    noname.className = 'bpe-note';
+    noname.textContent = 'No names, here or anywhere on this page: record that an escort was present and ' +
+                         'their relationship, not who they were.';
+    wrap.appendChild(noname);
+
+    // Awaiting the clinical lead's review, like a first-draft checklist. Said
+    // under the block, not in a gap: it is about the LIST, not this patient.
+    if (note.sedationDraft) {
+      var dr = document.createElement('p');
+      dr.className = 'bpe-note';
+      dr.textContent = 'This is a first draft of what a sedation record should carry, and has not been ' +
+                       'clinically reviewed. "Not recorded" means it is not on this list — check it against ' +
+                       'your own sedation standards.';
+      wrap.appendChild(dr);
+    }
+
+    host.appendChild(wrap);
+    refresh();
+  }
+
+  // In SEDATION_LABELS order with the increments in the middle, matching
+  // sedationAsLines in api/_prompt.mjs. Empty rows are not copied.
+  function sedationAsText(note) {
+    if (!sedAny(note)) return '';
+    var rec = sedRecord(note);
+    var out = [];
+    var put = function (k) { if (hasText(rec[k])) out.push(SED_LABELS[k] + ': ' + String(rec[k]).replace(/\s+/g, ' ').trim()); };
+    ['technique', 'agent', 'cannulaSite'].forEach(put);
+    var n = 0;
+    sedIncrements(note).forEach(function (row) {
+      var cells = SED_DOSE.map(function (c) {
+        return hasText(row[c[0]]) ? (c[0] === 'time' ? 'at ' : c[0] === 'dose' ? 'dose ' : 'response ') +
+          String(row[c[0]]).replace(/\s+/g, ' ').trim() : null;
+      }).filter(Boolean);
+      if (cells.length) out.push('Increment ' + (++n) + ': ' + cells.join(', '));
+    });
+    ['total', 'oxygen', 'monitoring', 'reversal', 'recovery', 'discharge', 'escort', 'notes'].forEach(put);
+    return out.join('\n');
+  }
+
   // The implant log stays a block of its own: it is a table, not prose, and it
   // belongs at the end of the record rather than inside the discussion.
   function renderImplantLog(note, host) {
     if (!Array.isArray(note.implantLog) || !note.implantLog.length) return;
-
-    var hd = document.createElement('h3');
-    hd.className = 'section-heading';
-    hd.textContent = 'Implant log';
-    host.appendChild(hd);
-
+    // No section heading of its own; the layout provides it. See BLOCKS.
     var wrap = document.createElement('div');
     wrap.className = 'field is-dictated';
     var head = document.createElement('div');
@@ -4074,6 +4474,19 @@ label.pmpr input { margin-top: 4px; }
       var title = section[0], keys = section[1];
       var lines = [];
       keys.forEach(function (k) {
+        // A block is laid out where the template puts it, labelled like a
+        // field, so the pasted note reads in the order on screen. Empty blocks
+        // are left out, as empty fields are.
+        if (isBlock(k[0])) {
+          var b = BLOCKS[k[0]];
+          var bt = b.text(note);
+          if (bt && String(bt).trim()) {
+            lines.push(b.label + (b.dictated && noteDictation() ? ' (dictated)' : ''));
+            lines.push(String(bt).trim());
+            lines.push('');
+          }
+          return;
+        }
         var key = k[0], isDictated = k[1], spec = fieldSpec(key);
         if (!spec) return;
         var body = key === 'radiographicFindings' ? xrayText(note) : (hasText(note[key]) ? String(note[key]).trim() : '');
@@ -4093,26 +4506,10 @@ label.pmpr input { margin-top: 4px; }
       out.push('');
       out = out.concat(lines);
     });
-    var la = laLogAsText(note);
-    if (la) {
-      out.push('LOCAL ANAESTHETIC (DICTATED)');
-      out.push('');
-      out.push(la);
-      out.push('');
-    }
-    var bpe = bpeAsText(note.bpe);
-    if (bpe) {
-      out.push('BPE');
-      out.push('');
-      out.push(bpe);
-      out.push('');
-    }
-    if (Array.isArray(note.implantLog) && note.implantLog.length) {
-      out.push('IMPLANT LOG');
-      out.push('');
-      out.push(implantLogAsText(note.implantLog));
-      out.push('');
-    }
+    // The LA log, the BPE, the sedation record and the implant log used to be
+    // appended here, after the last section, in this fixed order whatever the
+    // layout said. They are now laid out by the template, above. What remains
+    // is the addendum that genuinely belongs last.
     var covered = coveredAsText();
     if (covered) {
       out.push('COVERED ELSEWHERE');
@@ -4154,6 +4551,10 @@ label.pmpr input { margin-top: 4px; }
     var x = S.note && xrayText(S.note);
     if (x) out.radiographicFindings = x;
     if (pmprOn()) out.pmpr = PMPR_LINE;
+    // The sedation given, as the block's own lines. A referral for a patient
+    // sedated today should say what they had.
+    var sed = S.note && sedationAsText(S.note);
+    if (sed) out.sedation = sed;
     return out;
   }
 
@@ -4544,13 +4945,13 @@ label.pmpr input { margin-top: 4px; }
   [].forEach.call(document.querySelectorAll('#template-picker button'), function (btn) {
     btn.addEventListener('click', function () {
       resetIdle();
-      if (!TEMPLATES[btn.dataset.template] || btn.dataset.template === S.template) return;
-      S.template = btn.dataset.template;
-      [].forEach.call(document.querySelectorAll('#template-picker button'), function (b) {
-        b.classList.toggle('on', b.dataset.template === S.template);
-      });
-      $('template-hint').textContent = TEMPLATES[S.template].hint;
-      if (S.note) render(S.note);
+      if (!TEMPLATES[btn.dataset.template]) return;
+      // Chosen by hand even if it is the layout already showing: that is the
+      // clinician saying "this one", and it must stop a later change of consult
+      // type moving it. Only the render is skipped when nothing changed.
+      var same = btn.dataset.template === S.template;
+      setTemplate(btn.dataset.template, true);
+      if (!same && S.note) render(S.note);
     });
   });
 
@@ -4907,6 +5308,7 @@ label.pmpr input { margin-top: 4px; }
       if (before !== after) out.push(k);
     });
     if (laEdited()) out.push('laLog');
+    if (sedEdited()) out.push('sedation');
     return out;
   }
 
@@ -5183,12 +5585,14 @@ label.pmpr input { margin-top: 4px; }
     // none: a warning that always fires is one you learn to click through, and
     // the time it is telling the truth you lose real corrections.
     S.noteLength = 'standard';
-    S.template = 'clinical';
     S.edited = false;
-    [].forEach.call(document.querySelectorAll('#template-picker button'), function (b) {
-      b.classList.toggle('on', b.dataset.template === 'clinical');
-    });
-    $('template-hint').textContent = TEMPLATES.clinical.hint;
+    // The layout goes back to this consult type's default — not to 'clinical',
+    // which is what this did until 26 October 2026. clearConsultation() also
+    // runs when Start is pressed, so forcing 'clinical' here threw away the
+    // per-type default the instant recording began, and the feature did
+    // nothing in the real flow. A layout the clinician chose by hand is theirs
+    // and survives; only wipe() forgets that, with everything else.
+    if (!S.templatePicked) setTemplate(templateFor(S.consultType), false);
     setLengthButtons(false);
 
     // The rendered note. Nulling S.note stops the logic reaching for it; this
@@ -5267,7 +5671,16 @@ label.pmpr input { margin-top: 4px; }
 
     abandonJob();
 
+    // The layout the clinician picked is forgotten here and only here: wipe()
+    // is the next patient.
+    S.templatePicked = false;
+
     clearConsultation();
+
+    // ...and forced back to the default AFTER it, because S.consultType is not
+    // nulled until further down: clearConsultation's re-derive would otherwise
+    // land on the layout of the patient being wiped.
+    setTemplate('clinical', false);
 
     // Session machinery — wipe() only. A new recording sets these up rather
     // than tearing them down.
@@ -5442,7 +5855,8 @@ label.pmpr input { margin-top: 4px; }
   }
 
   $('build-stamp').textContent = 'build ' + BUILD;
-  $('template-hint').textContent = TEMPLATES[S.template].hint;
+  // Buttons and hint in step with whatever ?type= may already have defaulted.
+  setTemplate(S.template, false);
   refreshStart();
   show('setup');
   checkSession();

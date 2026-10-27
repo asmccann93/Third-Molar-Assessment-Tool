@@ -33,6 +33,18 @@
  *                       of each new item is the assistant's. If one reads
  *                       oddly on a real case, that is why.
  *
+ *   denture             DRAFTED 26 October 2026 at AM's request — NOT YET
+ *                       REVIEWED. He said he does a lot of dentures and asked
+ *                       for a prosthodontic type; until now removable
+ *                       prosthodontics had no type at all, and dentures
+ *                       appeared in this tool only as an ALTERNATIVE inside the
+ *                       implant list. A consent list like the surgical ones.
+ *                       Weighted towards expectation rather than injury, which
+ *                       is where denture consent actually fails: lower complete
+ *                       denture retention, the adaptation period, and that the
+ *                       patient may never tolerate it. Every word is the
+ *                       assistant's draft and it carries `reviewed: false`.
+ *
  * For an unreviewed type, "no gaps flagged" means "nothing the draft list
  * looked for was missing", not a clinical all-clear. Nothing here is advice to
  * the patient and nothing here ever reaches the note as a fact. Each item is a
@@ -328,6 +340,53 @@ Object.assign(CHECKLISTS, {
       { key: 'tp-sequence',   ask: 'The order of treatment or the number of visits was described.', gap: 'Not mentioned: order of treatment or number of visits.' },
       { key: 'tp-longevity',  ask: 'How long the treatment may last, or the maintenance it needs, was discussed.', gap: 'Not mentioned: how long it may last, or the maintenance it needs.' },
       { key: 'tp-time',       ask: 'The patient was offered time to think it over, or a written plan.', gap: 'Not offered: time to think it over, or a written plan.' },
+    ]
+  },
+});
+
+/* ---- 26 October 2026: removable prosthodontics. DRAFT. ----
+   Deliberately weighted towards EXPECTATION rather than injury. A denture
+   rarely harms anyone; it disappoints them, and the complaint is almost always
+   that nobody said beforehand how it would feel, that a lower complete denture
+   may never be firm, or that the ridge would shrink and it would need redoing.
+   Those are the items at the top. */
+Object.assign(CHECKLISTS, {
+  denture: {
+    label: 'Dentures',
+    reviewed: false,
+    items: [
+      // What is being proposed, and what else there was.
+      { key: 'dn-type',       ask: 'Which denture was proposed was explained — complete or partial, and what it is made of (acrylic, or metal-based such as cobalt-chrome) — or why there is only one option.', gap: 'Not mentioned: which denture is proposed, and what it is made of.' },
+      { key: 'dn-alt',        ask: 'Alternatives to a denture were offered — a bridge, implants, an implant-retained denture, or accepting the gap and treating a shortened arch.', gap: 'Not offered: the alternatives to a denture (bridge, implants, or accepting the gap).' },
+      { key: 'dn-none',       ask: 'Leaving things as they are, and what that would mean, was mentioned.', gap: 'Not offered: leaving things as they are, and what that would mean.' },
+
+      // Expectation. This is where denture consent is won or lost.
+      { key: 'dn-adaptation', ask: 'The adaptation period was explained — that it will feel bulky and strange at first, and that speech and eating take time to get used to.', gap: 'Not mentioned: the adaptation period, and that speech and eating take time.' },
+      { key: 'dn-retention',  ask: 'The limits of how firm the denture will be were explained. For a LOWER complete denture, that it relies on the shape of the ridge and may never feel firm. Report found if the limits relevant to this denture were explained.', gap: 'Not mentioned: how firm the denture will be, and for a lower complete denture that it may never feel firm.' },
+      { key: 'dn-not-tolerate', ask: 'That the patient may not get on with the denture or be able to wear it, and what would happen then, was discussed.', gap: 'Not mentioned: that they may not be able to wear it, and what happens then.' },
+      { key: 'dn-sore',       ask: 'Sore spots after fitting, and that adjustment appointments are normal and expected, were mentioned.', gap: 'Not mentioned: sore spots, and that adjustments afterwards are normal.' },
+      { key: 'dn-appearance', ask: 'Appearance was discussed — the shade, shape and position of the teeth, and that the try-in is the stage at which to ask for changes.', gap: 'Not mentioned: the appearance, and that the try-in is the time to ask for changes.' },
+      { key: 'dn-palate',     ask: 'Where it applies, coverage of the palate and its effect on taste, temperature or gagging was mentioned. If it does not apply to this denture, report it as not applicable.', gap: 'Not mentioned, for a denture covering the palate: taste, temperature or gagging.' },
+
+      // What it does to what is left, and to the ridge underneath.
+      { key: 'dn-abutments',  ask: 'For a PARTIAL denture, the effect on the remaining teeth was discussed — plaque, decay and gum disease around the clasps and edges, and the hygiene needed to prevent it. If the denture is complete, report it as not applicable.', gap: 'Not mentioned, for a partial denture: decay and gum disease around the remaining teeth, and the hygiene needed.' },
+      { key: 'dn-resorption', ask: 'That the ridge continues to shrink, so the denture will loosen and need relining or remaking in time, was explained.', gap: 'Not mentioned: the ridge shrinking, and relining or remaking in time.' },
+
+      // Getting there.
+      { key: 'dn-stages',     ask: 'The stages and the number of visits were described — impressions, try-in, fitting, and review.', gap: 'Not mentioned: the stages and number of visits.' },
+      { key: 'dn-extractions', ask: 'Where teeth are to be taken out first, the healing time before the denture was discussed; or, for an immediate denture, that it will loosen as the gum heals and will need relining or remaking. If no extractions are planned, report it as not applicable.', gap: 'Not mentioned, for teeth being removed first: healing time, or that an immediate denture will need relining or remaking.' },
+
+      // Afterwards.
+      { key: 'dn-hygiene',    ask: 'How to clean the denture, and leaving it out overnight, was explained.', gap: 'Not mentioned: cleaning the denture and leaving it out overnight.' },
+      { key: 'dn-review',     ask: 'A review or adjustment appointment after fitting was arranged or offered.', gap: 'Not mentioned: a review or adjustment appointment after fitting.' },
+
+      // Money.
+      { key: 'dn-costs',      ask: 'The cost was discussed, and whether the treatment is NHS or private.', gap: 'Not mentioned: the cost, and whether it is NHS or private.' },
+      { key: 'dn-remake',     ask: 'What happens if the denture needs remaking — any guarantee, and whether a remake would be chargeable — was discussed.', gap: 'Not mentioned: what happens if it needs remaking, and whether that is chargeable.' },
+
+      // Medical history that bears on a denture specifically.
+      { key: 'dn-dry-mouth',  ask: 'A dry mouth, or medication that causes one, was asked about or discussed, where it affects how well the denture will be held in.', gap: 'Not asked about: a dry mouth or medication causing one.' },
+      MH.allergies,
     ]
   },
 });

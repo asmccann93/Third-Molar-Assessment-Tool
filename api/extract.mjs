@@ -30,7 +30,9 @@ import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS
          buildSummarySystemPrompt, parseSummary, buildAskSystemPrompt,
          buildReferralSystemPrompt, buildReferralUserMessage, parseReferral,
          buildPostopSystemPrompt, parsePostop, asText, pauseMarker, partMarker, SPEAKER_LABEL,
-         cleanQuestions, LA_LOG_FIELDS, PMPR_LINE } from './_prompt.mjs';
+         cleanQuestions, LA_LOG_FIELDS, PMPR_LINE,
+         SEDATION_TEXT_FIELDS, SEDATION_DOSE_FIELDS, SEDATION_LABELS, SEDATION_DRAFT,
+         sedationAny, sedationAsLines } from './_prompt.mjs';
 import { checklistGaps, checklistIsDraft } from './_checklists.mjs';
 import { sessionStillGood } from './_store.mjs';
 
@@ -252,6 +254,20 @@ export default async function handler(req, res) {
       if (typeof incoming.bpe === 'string' && BPE_LINE.test(incoming.bpe.trim())) {
         note.bpe = incoming.bpe.trim();
       }
+      // The sedation record, as the page's own lines (26 October 2026). Same
+      // strictness as the BPE line, for the same reason: this arrives from the
+      // browser, so every line must be one of the block's own labels or a
+      // numbered increment. Anything else and the whole thing is dropped rather
+      // than handed to the model as free text in a clinical letter.
+      if (typeof incoming.sedation === 'string' && incoming.sedation.trim()) {
+        const labels = new Set(Object.values(SEDATION_LABELS));
+        const lines = incoming.sedation.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+        const good = lines.length > 0 && lines.length <= 40 && lines.every((l) => {
+          const m = /^([^:]{1,40}):\s*(.+)$/.exec(l);
+          return !!m && (labels.has(m[1]) || /^Increment \d{1,2}$/.test(m[1]));
+        });
+        if (good) note.sedation = lines.join('\n').slice(0, 2000);
+      }
       const context = typeof body?.context === 'string' ? body.context.trim().slice(0, 2000) : '';
       if (!Object.keys(note).length && !context) {
         return res.status(400).json({ error: 'empty_referral_source', detail: 'Draft the note first — the referral is built from it.' });
@@ -343,12 +359,46 @@ export default async function handler(req, res) {
         note.gaps.push('Radiograph details came back although nothing was dictated, so they were left out: the radiograph ' +
           'report is taken from your dictation only. Press Record more and dictate it.');
       }
+      // And the sedation record (26 October 2026). Anything here with no
+      // dictation came out of the conversation — which on a sedation
+      // appointment is the discussion BEFORE sedation, not what was then
+      // given. Recording that as a sedation record would be a false record of
+      // drugs administered, so it goes, loudly.
+      if (note.sedation) {
+        note.sedation = null;
+        note.gaps.push('Sedation details came back although nothing was dictated, so they were left out: the sedation ' +
+          'record is taken from your dictation only, never from the discussion. Press Record more and dictate it, ' +
+          'or fill the block in by hand.');
+      }
     }
 
     // A page from before 27 September 2026 (a tab left open over a deploy)
     // knows neither field and would drop them silently. For it, they are
     // written into the plan instead, labelled, so nothing dictated is lost.
     const features = Array.isArray(body?.features) ? body.features : [];
+
+    // The sedation record (26 October 2026). A page that does not know the
+    // block would drop it silently, so it is folded into the treatment carried
+    // out, labelled. This runs BEFORE the treatment fallback below on purpose:
+    // a page old enough not to know 'treatment' does not know 'sedation'
+    // either, and chaining this way carries the merged text on into the plan
+    // rather than writing a field that page cannot render.
+    if (!features.includes('sedation')) {
+      const lines = sedationAsLines(note.sedation);
+      if (lines.length) {
+        note.treatmentToday = [
+          typeof note.treatmentToday === 'string' ? note.treatmentToday.trim() : '',
+          'Sedation given:',
+          ...lines
+        ].filter(Boolean).join('\n');
+      }
+      delete note.sedation;
+    } else if (sedationAny(note.sedation)) {
+      // Clinical content nobody has reviewed yet: the page says so under it,
+      // exactly as it does for a first-draft checklist.
+      note.sedationDraft = SEDATION_DRAFT;
+    }
+
     if (!features.includes('treatment')) {
       const extra = [];
       if (typeof note.treatmentToday === 'string' && note.treatmentToday.trim()) extra.push(`Treatment carried out today: ${note.treatmentToday.trim()}`);
