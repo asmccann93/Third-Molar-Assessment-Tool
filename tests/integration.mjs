@@ -3110,17 +3110,23 @@ async function testSept27b() {
   const types = Object.keys(pm.CONSULT_TYPES);
   ok('every consult type now has a checklist', types.every((t) => cl.checklistFor(t).length > 0), types.filter((t) => !cl.checklistFor(t).length).join());
   // The six drafted on 27 September, plus dentures on 26 October 2026.
-  const NEW = ['exam-recall', 'emergency', 'perio', 'restorative', 'endo', 'treatment-plan', 'denture'];
+  const NEW = ['exam-recall', 'emergency', 'perio', 'restorative', 'endo', 'treatment-plan',
+               'denture-consult', 'denture-stage'];
   ok('the unreviewed ones are marked as drafts, the reviewed ones are not',
     NEW.every((t) => cl.checklistIsDraft(t)) && types.filter((t) => !NEW.includes(t)).every((t) => !cl.checklistIsDraft(t)),
     JSON.stringify({ draftsExpected: NEW.filter((t) => !cl.checklistIsDraft(t)),
                      unexpectedDrafts: types.filter((t) => !NEW.includes(t) && cl.checklistIsDraft(t)) }));
   ok('an unknown type is not a draft', !cl.checklistIsDraft('nope') && !cl.checklistIsDraft('__proto__') && !cl.checklistIsDraft(undefined));
 
-  // --- dentures (26 October 2026) ---
+  // --- dentures (26 October 2026; split in two on the 27th) ---
   {
-    const dn = cl.checklistFor('denture');
-    ok('the denture list exists and is a consent list of a reviewable length',
+    ok('the single `denture` type is gone, replaced by the two',
+      !Object.prototype.hasOwnProperty.call(pm.CONSULT_TYPES, 'denture') &&
+      cl.checklistFor('denture').length === 0 &&
+      ['denture-consult', 'denture-stage'].every((t) => cl.checklistFor(t).length > 0));
+
+    const dn = cl.checklistFor('denture-consult');
+    ok('the denture consent list is a reviewable length',
       dn.length >= 12 && dn.length <= 22, String(dn.length));
     const keys = dn.map((i) => i.key);
     ok('it asks the three things denture consent actually fails on',
@@ -3132,15 +3138,57 @@ async function testSept27b() {
     ok('the partial-denture and palate items are conditional, so a complete denture is not failed by them',
       /not applicable/.test(dn.find((i) => i.key === 'dn-abutments').ask) &&
       /not applicable/.test(dn.find((i) => i.key === 'dn-palate').ask));
-    const dnSys = pm.buildSystemPrompt('denture', 'standard');
-    ok('the prompt has a denture emphasis covering every stage, not just the consult',
-      /impressions, the try-in, the fit, or an adjustment/.test(dnSys), 'missing');
-    ok('and tells the model to capture how it will FEEL as precisely as a surgical risk',
+    const dnSys = pm.buildSystemPrompt('denture-consult', 'standard');
+    ok('the consult prompt tells the model to capture how it will FEEL as precisely as a surgical risk',
       /as precisely as you would capture a surgical risk/.test(dnSys));
     ok('while forbidding an invented stage or timescale',
-      /never a stage, a visit \n?count or a timescale that was not said|never a stage, a visit count or a timescale that was not said/.test(dnSys.replace(/\s+/g, ' ')));
+      /never a stage, a visit count or a timescale that was not said/.test(dnSys.replace(/\s+/g, ' ')));
     ok('a denture consult is a full consent discussion, so no field is inapplicable',
-      pm.notApplicableFields('denture').length === 0);
+      pm.notApplicableFields('denture-consult').length === 0);
+
+    // The stage list, and the reason for the split.
+    const ds = cl.checklistFor('denture-stage');
+    ok('the stage list is short — the whole point of the split', ds.length <= 8, String(ds.length));
+    const dsKeys = ds.map((i) => i.key);
+    ok('it asks which stage, what was done, and the state of the tissues',
+      ['ds-stage', 'ds-done', 'ds-tissues'].every((k) => dsKeys.includes(k)), dsKeys.join());
+    ok('every stage item is a record-keeping one, findable in the dictation',
+      ds.every((i) => /^Not recorded/.test(i.gap) && /said or dictated/.test(i.ask)),
+      ds.filter((i) => !/said or dictated/.test(i.ask)).map((i) => i.key).join());
+    ok('the fit/adjust item is conditional, so impressions are not failed by it',
+      /not applicable/.test(ds.find((i) => i.key === 'ds-adjust').ask));
+    ok('a stage visit weighs nothing, so the consent fields are inapplicable',
+      ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'patientFactors', 'decision']
+        .every((f) => pm.notApplicableFields('denture-stage').includes(f)),
+      JSON.stringify(pm.notApplicableFields('denture-stage')));
+    const dsSys = pm.buildSystemPrompt('denture-stage', 'standard');
+    ok('and the prompt says an empty consent field is the normal shape of the visit',
+      /must not be reported as something missing/.test(dsSys.replace(/\s+/g, ' ')));
+
+    // THE REGRESSION. A five-minute ease produced 29 lines to dismiss under the
+    // single type: 19 consent items plus 10 blank-field gaps. A safety list that
+    // cries wolf four appointments in five is one the clinician stops reading.
+    const sparse = {
+      reasonForAttendance: 'Sore under the upper denture.',
+      medicalHistory: null, proposed: null, alternatives: null, risks: null, benefits: null,
+      costs: null, patientQuestions: null, patientFactors: null, informationGiven: null,
+      decision: null, nextStep: 'Review if still sore.', gaps: [], checklist: {}
+    };
+    const linesFor = (type) => {
+      const report = {};
+      for (const i of cl.checklistFor(type)) report[i.key] = 'Not discussed';
+      const n = pm.parseNote(JSON.stringify({ ...sparse, checklist: report }), type);
+      return n.gaps.length + cl.checklistGaps(type, report).length;
+    };
+    const stageLines = linesFor('denture-stage');
+    ok('an ease logged as a stage produces a list short enough to read',
+      stageLines <= 10, String(stageLines));
+    ok('and far fewer lines than the same visit logged as a consult',
+      stageLines < linesFor('denture-consult') / 2,
+      `stage ${stageLines} vs consult ${linesFor('denture-consult')}`);
+    ok('specifically, no gap is demanded for what was proposed, the risks or the decision',
+      !pm.parseNote(JSON.stringify(sparse), 'denture-stage').gaps.some((g) => /What was proposed|Material risks|^Decision/.test(g)),
+      JSON.stringify(pm.parseNote(JSON.stringify(sparse), 'denture-stage').gaps));
   }
   ok('every item has a unique key within its list', types.every((t) => { const k = cl.checklistFor(t).map((i) => i.key); return new Set(k).size === k.length; }));
   ok('every gap line has a lead-in the page understands, and a topic',

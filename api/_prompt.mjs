@@ -77,11 +77,11 @@ export const CONSULT_TYPES = {
       'Expect discussion of restoration options, materials, longevity expectations, ' +
       'and the possibility of future endodontic treatment or extraction.',
   },
-  denture: {
-    label: 'Dentures',
+  'denture-consult': {
+    label: 'Denture consult',
     emphasis:
-      'A removable denture, complete or partial, at any stage — the consultation, ' +
-      'impressions, the try-in, the fit, or an adjustment. Expect discussion of what ' +
+      'A consultation about a removable denture, complete or partial. ' +
+      'Expect discussion of what ' +
       'the denture is made of, the alternatives (a bridge, implants, or accepting the ' +
       'gap), the adaptation period, how firm it will be — particularly for a lower ' +
       'complete denture — sore spots and adjustment visits, the ridge shrinking so it ' +
@@ -92,6 +92,27 @@ export const CONSULT_TYPES = {
       'of a denture discussion and it is where the record usually falls short. Record ' +
       'the shade, tooth position or material only as stated, and never a stage, a visit ' +
       'count or a timescale that was not said.',
+  },
+  'denture-stage': {
+    label: 'Denture stage',
+    // A construction or maintenance visit, not a consultation. Nothing is being
+    // weighed, so the consent fields are INAPPLICABLE rather than missing —
+    // exactly as for a routine recall. Without this, a five-minute ease
+    // demanded ten blank-field gaps on top of a nineteen-item consent list.
+    // They may still be FILLED if something was in fact discussed; what this
+    // switches off is the demand for a gap when they are empty.
+    notApplicable: ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'patientFactors', 'decision'],
+    emphasis:
+      'A stage in making or maintaining a removable denture — impressions, the try-in, ' +
+      'the fitting, an adjustment or ease, or a reline. This is a RECORD of a visit, not ' +
+      'a consent discussion: expect the stage reached, what was done, the state of the ' +
+      'tissues under the denture, where it was rubbing and what was eased or adjusted, ' +
+      'what the patient said about comfort, fit, eating, speech or appearance, and the ' +
+      'next stage. Capture the shade, tooth position, material or impression material ' +
+      'only as stated. Do NOT treat a remark made in passing about a risk or a cost as a ' +
+      'consent discussion: if the fields about what was proposed, the alternatives, the ' +
+      'risks or the decision are empty, that is the normal shape of this appointment and ' +
+      'must not be reported as something missing.',
   },
   perio: {
     label: 'Perio',

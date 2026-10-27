@@ -131,7 +131,11 @@ button:disabled { opacity: .45; cursor: default; }
   #recbar, #setup, #recording, #working, #mask, #error-actions,
   .length-picker, #edit-hint, #template-hint, .rate-note, .actions,
   .field-head .copy, .derived .actions, #ask-box, #referral-box,
-  .mic-check, #idle-warn, #stats-row, #teeth-strip button, #postop-box .actions { display: none !important; }
+  .mic-check, #idle-warn, #stats-row, #teeth-strip button, #postop-box .actions,
+  /* "Add a row" / "Add an increment" are controls, not record. They were
+     printing on the paper note — the LA log's since 27 September, the sedation
+     block's since 26 October. */
+  .add-row { display: none !important; }
   .card { border: none; padding: 0; margin: 0 0 14pt; break-inside: avoid; }
   .card > h2 { color: #000; }
   .field { break-inside: avoid; }
@@ -948,7 +952,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-27.1';
+  var BUILD = '2026-10-27.2';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1041,7 +1045,8 @@ label.pmpr input { margin-top: 4px; }
     ['restorative',        'Restorative'],
     ['perio',              'Perio'],
     ['endo',               'Endo'],
-    ['denture',            'Dentures'],
+    ['denture-consult',    'Denture consult'],
+    ['denture-stage',      'Denture stage'],
     ['extraction-surgery', 'Extraction / surgery'],
     ['third-molar',        'Third molar surgery'],
     ['implant-consult',    'Implant consult'],
@@ -1081,7 +1086,8 @@ label.pmpr input { margin-top: 4px; }
   var PMPR_TYPES = ['exam-recall', 'perio'];
   var PMPR_LINE = 'Full mouth professional mechanical plaque removal (PMPR) carried out.';
   var TREATMENT_TYPES = ['extraction-surgery', 'third-molar', 'implant-surgery', 'emergency',
-                         'restorative', 'endo', 'perio', 'sedation', 'denture'];
+                         'restorative', 'endo', 'perio', 'sedation',
+                         'denture-consult', 'denture-stage'];
   // Where the sedation block is OFFERED empty, to fill in by hand. Everywhere
   // else it appears only if something sedation-shaped was actually dictated —
   // sedation for oral surgery may well be filed under the surgery, not under
@@ -1206,17 +1212,16 @@ label.pmpr input { margin-top: 4px; }
     'implant-consult': 'consent',
     'treatment-plan':  'consent',
     'third-molar':     'consent',
-    sedation:          'consent'
+    sedation:          'consent',
+    // A denture CONSULT is a consent discussion like any other, so it leads
+    // with it. The construction stages are not, and are deliberately left off
+    // this map so they open chronologically: the consent layout puts the
+    // examination down in Context, which is the wrong way round for a fit or an
+    // ease, where what was found and what was done ARE the record.
+    'denture-consult': 'consent'
     // Everything else — restorative, endo, extraction-surgery, implant-surgery,
-    // emergency — reads best chronologically, which is 'clinical', the default.
-    //
-    // 'denture' is deliberately NOT listed, so it opens chronologically. Its
-    // checklist is a consent list, but the type covers every stage — the
-    // consultation, impressions, the try-in, the fit, an adjustment — and only
-    // the first of those is a consent discussion. The consent layout puts the
-    // examination and the radiographs down in Context, which is the wrong way
-    // round for a fit or a review, where what was found and what was done ARE
-    // the record. One tap to Consent on the day of the consultation.
+    // emergency, denture-stage — reads best chronologically, which is
+    // 'clinical', the default.
   };
 
   function templateFor(consultType) {
@@ -4176,9 +4181,11 @@ label.pmpr input { margin-top: 4px; }
      Taken as dictated, like the LA log — no increment is added up and no total
      is checked against them. CLINICAL CONTENT AWAITING REVIEW; the note under
      the block says so. */
+  // The total dose belongs with the drug that was given, not with the
+  // observations. It sat under Monitoring until 27 October 2026.
   var SED_GROUPS = [
-    ['Technique and drug', ['technique', 'agent', 'cannulaSite']],
-    ['Monitoring',         ['total', 'oxygen', 'monitoring', 'reversal']],
+    ['Technique and drug', ['technique', 'agent', 'cannulaSite', 'total']],
+    ['Monitoring',         ['oxygen', 'monitoring', 'reversal']],
     ['Recovery and discharge', ['recovery', 'discharge', 'escort', 'notes']]
   ];
   var SED_TEXT = ['technique', 'agent', 'cannulaSite', 'total', 'oxygen', 'monitoring',
@@ -4230,6 +4237,80 @@ label.pmpr input { margin-top: 4px; }
     return sedCells(S.note) !== sedCells(S.drafted);
   }
 
+  function sedIncCells(row) {
+    return SED_DOSE.map(function (c) {
+      return row && hasText(row[c[0]]) ? String(row[c[0]]).replace(/\s+/g, ' ').trim() : '';
+    }).join('\u0001');
+  }
+
+  // An increment is edited when its cells differ from the draft's row in the
+  // same place, or it was added by hand — exactly as laRowEdited.
+  function sedIncEdited(row, i) {
+    var d = S.drafted && sedRecord(S.drafted);
+    var dr = (d && Array.isArray(d.increments)) ? d.increments[i] : null;
+    return !dr || row.added || sedIncCells(row) !== sedIncCells(dr);
+  }
+
+  // The scalars are checked as one block, because the model's quotes for them
+  // are one array covering the record — there is no per-field attribution to
+  // be had. So any change to any of them makes the whole set the clinician's.
+  function sedScalarsEdited() {
+    var d = S.drafted && sedRecord(S.drafted);
+    if (!d) return true;                    // nothing was drafted: this is theirs
+    var now = sedRecord(S.note) || {};
+    return SED_TEXT.some(function (k) {
+      var a = hasText(now[k]) ? String(now[k]).replace(/\s+/g, ' ').trim() : '';
+      var b = hasText(d[k]) ? String(d[k]).replace(/\s+/g, ' ').trim() : '';
+      return a !== b;
+    });
+  }
+
+  /* ---- is the sedation record actually in the dictation? (27 Oct 2026) ----
+     The LA log has been checked against the dictation since 27 September; the
+     sedation record went live on 26 October without the same check, so a
+     fabricated titration series or a set of observations nobody dictated would
+     have appeared with no warning beside an LA log that was being verified.
+     Sedation is the higher-liability record of the two.
+
+     The check is at the granularity the model's quotes exist at: the record as
+     a whole, and each increment. That catches an invented series or an invented
+     set of observations, which is the realistic failure. It CANNOT catch a
+     transposed digit inside an otherwise-supported quote, and no literal check
+     on a dose is possible — "two milligrams" spoken and "2 mg" written are both
+     right and neither contains the other. The LA log's literal check works only
+     because a batch number is read out character by character. */
+  function sedQuoteProblem(quotes, idx) {
+    var hit = null, spoken = false;
+    (Array.isArray(quotes) ? quotes : []).some(function (q) {
+      var h = findQuote(idx, q, 'only');
+      if (h && h.spokenOnly) { spoken = true; return false; }
+      if (h && !h.dictatedOnly) { hit = h; return true; }
+      return false;
+    });
+    if (!hit) return spoken ? 'found only in the conversation, not in your dictation' : 'not found in your dictation';
+    return null;
+  }
+
+  // [{ what, why }] for everything in the record, as drafted and unchanged,
+  // that does not check out. Empty when it all does, or the clinician has been
+  // in there — then the words are theirs.
+  function sedProblems(idx) {
+    var out = [];
+    var rec = sedRecord(S.note);
+    if (!rec) return out;
+    var anyScalar = SED_TEXT.some(function (k) { return hasText(rec[k]); });
+    if (anyScalar && !sedScalarsEdited()) {
+      var p = sedQuoteProblem(rec.quotes, idx);
+      if (p) out.push({ what: 'The record', why: p });
+    }
+    sedIncrements(S.note).forEach(function (row, i) {
+      if (sedIncEdited(row, i)) return;
+      var q = sedQuoteProblem(row.quotes, idx);
+      if (q) out.push({ what: 'Increment ' + (i + 1), why: q });
+    });
+    return out;
+  }
+
   function renderSedation(note, host) {
     var offer = noteDictation() && SEDATION_TYPES.indexOf(S.consultType) !== -1;
     if (!sedAny(note) && !offer) return;
@@ -4260,8 +4341,20 @@ label.pmpr input { margin-top: 4px; }
     if (!sedRecord(note)) note.sedation = sedBlank();
     var rec = sedRecord(note);
 
+    var idx = transcriptIndex();
+    // Two separate lines, because they say different things. `check` is "this
+    // may not have been said at all"; `status` is "this was not recorded".
+    // Crammed into one sentence the more serious of the two gets lost.
+    var check = document.createElement('p');
     var status = document.createElement('p');
     var refresh = function () {
+      var problems = sedProblems(idx);
+      check.className = 'bpe-note' + (problems.length ? ' warn' : '');
+      check.textContent = problems.length
+        ? problems.map(function (p) { return p.what + ': ' + p.why + '.'; }).join(' ') + ' Check before you paste.'
+        : '';
+      check.style.display = problems.length ? '' : 'none';
+
       var missing = SED_TEXT.filter(function (k) {
         return k !== 'notes' && k !== 'reversal' && k !== 'cannulaSite' && !hasText(rec[k]);
       });
@@ -4272,7 +4365,8 @@ label.pmpr input { margin-top: 4px; }
             return k === 'increments' ? 'the incremental doses' : SED_LABELS[k].toLowerCase();
           }).join(', ') + '. Dictate them or add them here before you paste.'
         : 'Taken as dictated: no dose is added up and no total is checked against the increments.' +
-          (sedEdited() ? ' Edited by you.' : '');
+          (sedEdited() ? ' Edited by you.'
+            : problems.length ? '' : ' Every line was found in your dictation.');
       wrap.classList.toggle('edited', sedEdited());
     };
 
@@ -4375,6 +4469,7 @@ label.pmpr input { margin-top: 4px; }
     });
     wrap.appendChild(add);
 
+    wrap.appendChild(check);
     wrap.appendChild(status);
 
     // The prompt forbids the model recording a name, but these boxes are typed
@@ -4822,6 +4917,13 @@ label.pmpr input { margin-top: 4px; }
       laRows(S.note).forEach(function (r, i) {
         var pr = laRowProblem(r, i, laIdx);
         if (pr) { unmatched.push('Local anaesthetic, row ' + (i + 1) + ': ' + pr); total++; }
+      });
+      // The sedation record, as drafted and unchanged (27 October 2026). It
+      // belongs in this headline list for the same reason the LA rows do: the
+      // block's own note is easy to miss on a long draft.
+      sedProblems(laIdx).forEach(function (p) {
+        unmatched.push('Sedation, ' + p.what.toLowerCase() + ': ' + p.why);
+        total++;
       });
     }
     // The radiograph report, as drafted and unchanged, not found in the dictation.

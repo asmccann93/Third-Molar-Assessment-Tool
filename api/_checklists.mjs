@@ -33,17 +33,32 @@
  *                       of each new item is the assistant's. If one reads
  *                       oddly on a real case, that is why.
  *
- *   denture             DRAFTED 26 October 2026 at AM's request — NOT YET
- *                       REVIEWED. He said he does a lot of dentures and asked
+ *   denture-consult     DRAFTED 26 October 2026 at AM's request — NOT YET
+ *   denture-stage       REVIEWED. He said he does a lot of dentures and asked
  *                       for a prosthodontic type; until now removable
  *                       prosthodontics had no type at all, and dentures
  *                       appeared in this tool only as an ALTERNATIVE inside the
- *                       implant list. A consent list like the surgical ones.
- *                       Weighted towards expectation rather than injury, which
- *                       is where denture consent actually fails: lower complete
- *                       denture retention, the adaptation period, and that the
- *                       patient may never tolerate it. Every word is the
- *                       assistant's draft and it carries `reviewed: false`.
+ *                       implant list.
+ *
+ *                       SPLIT IN TWO on 27 October 2026. A single `denture`
+ *                       type covered the consultation and every construction
+ *                       stage, so a five-minute ease fired all nineteen consent
+ *                       items plus ten blank-field gaps — twenty-nine lines to
+ *                       dismiss, measured, against three for the equivalent
+ *                       recall. A list that cries wolf on four appointments in
+ *                       five is a list the clinician stops reading, which is
+ *                       the one failure this tool cannot afford.
+ *
+ *                       denture-consult is the consent list, weighted towards
+ *                       expectation rather than injury — lower complete denture
+ *                       retention, the adaptation period, and that the patient
+ *                       may never tolerate it — which is where denture consent
+ *                       actually fails. denture-stage is a short
+ *                       RECORD-KEEPING list for impressions, try-in, fit,
+ *                       adjustment and reline, and declares the consent fields
+ *                       inapplicable so they are not demanded of a visit where
+ *                       nothing is being weighed. Every word is the
+ *                       assistant's draft; both carry `reviewed: false`.
  *
  * For an unreviewed type, "no gaps flagged" means "nothing the draft list
  * looked for was missing", not a clinical all-clear. Nothing here is advice to
@@ -349,10 +364,15 @@ Object.assign(CHECKLISTS, {
    rarely harms anyone; it disappoints them, and the complaint is almost always
    that nobody said beforehand how it would feel, that a lower complete denture
    may never be firm, or that the ridge would shrink and it would need redoing.
-   Those are the items at the top. */
+   Those are the items at the top.
+
+   Split from a single `denture` type on 27 October 2026. This list is for the
+   CONSULTATION. The construction stages have their own, much shorter list
+   below: firing nineteen consent items at a five-minute ease produced
+   twenty-nine lines to dismiss and taught the clinician to ignore the panel. */
 Object.assign(CHECKLISTS, {
-  denture: {
-    label: 'Dentures',
+  'denture-consult': {
+    label: 'Denture consult',
     reviewed: false,
     items: [
       // What is being proposed, and what else there was.
@@ -387,6 +407,27 @@ Object.assign(CHECKLISTS, {
       // Medical history that bears on a denture specifically.
       { key: 'dn-dry-mouth',  ask: 'A dry mouth, or medication that causes one, was asked about or discussed, where it affects how well the denture will be held in.', gap: 'Not asked about: a dry mouth or medication causing one.' },
       MH.allergies,
+    ]
+  },
+
+  /* The construction and maintenance visits: impressions, try-in, fit,
+     adjustment, reline. Nothing is being weighed at these, so this is a
+     RECORD-KEEPING list in the manner of exam-recall — every item may be found
+     in the conversation OR in the dictation — and `notApplicable` in
+     _prompt.mjs stops the consent fields being demanded of it.
+
+     Short on purpose. The whole reason for the split is that a long list on a
+     short appointment is noise, and noise is how a safety list dies. */
+  'denture-stage': {
+    label: 'Denture stage',
+    reviewed: false,
+    items: [
+      { key: 'ds-stage',    ask: 'Which stage of the denture this visit was — impressions, try-in, fitting, adjustment or reline — was recorded, said or dictated.', gap: 'Not recorded: which denture stage this visit was.' },
+      { key: 'ds-done',     ask: 'What was actually done at this visit was recorded, said or dictated.', gap: 'Not recorded: what was done at this visit.' },
+      { key: 'ds-tissues',  ask: 'The state of the tissues under the denture was recorded — sore spots, ulceration, inflammation, or that they were healthy — said or dictated.', gap: 'Not recorded: the state of the tissues under the denture.' },
+      { key: 'ds-adjust',   ask: 'For a fitting, adjustment or reline, where the denture was rubbing or catching and what was eased, adjusted or added was recorded, said or dictated. If this visit was impressions or a try-in, report it as not applicable.', gap: 'Not recorded, for a fitting or adjustment: where it was rubbing and what was adjusted.' },
+      { key: 'ds-patient',  ask: 'What the patient said about comfort, fit, eating, speech or appearance was recorded, said or dictated.', gap: 'Not recorded: what the patient said about comfort, fit or appearance.' },
+      { key: 'ds-next',     ask: 'The next stage, or a review, was arranged or offered, said or dictated.', gap: 'Not recorded: the next stage or a review.' },
     ]
   },
 });

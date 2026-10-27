@@ -152,7 +152,9 @@ async function runConsultation(ctx, note, turns) {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[4]);
+  // By label, not index: inserting a consult type used to shift this silently.
+  // It has always meant Extraction / surgery.
+  click([...$(doc, 'types').children].find((b) => /^Extraction/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -180,9 +182,10 @@ async function testConsentGate() {
   ok('Start is disabled on load', start.disabled);
   // Twelve since 26 October 2026: removable prosthodontics had no type, and
   // dentures existed in this tool only as an alternative inside the implant list.
-  ok('twelve consult types offered, three of them oral surgery', types.children.length === 12, String(types.children.length));
-  ok('and dentures are one of them',
-    [...types.children].some((b) => b.textContent === 'Dentures'),
+  ok('thirteen consult types offered, three of them oral surgery', types.children.length === 13, String(types.children.length));
+  ok('and dentures are two of them: the consult and the construction stages',
+    ['Denture consult', 'Denture stage'].every((l) => [...types.children].some((b) => b.textContent === l)) &&
+    ![...types.children].some((b) => b.textContent === 'Dentures'),
     [...types.children].map((b) => b.textContent).join('|'));
   ok('no consult type preselected',
     ![...types.children].some((b) => b.getAttribute('aria-pressed') === 'true'));
@@ -502,7 +505,9 @@ async function testDiscardAndCancellation() {
 
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[4]);
+  // By label, not index: inserting a consult type used to shift this silently.
+  // It has always meant Extraction / surgery.
+  click([...$(doc, 'types').children].find((b) => /^Extraction/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -847,8 +852,16 @@ async function testPolish() {
   // Screen-only furniture, listed together. Anything added here must be added
   // to that rule too, or it turns up on a printed clinical note.
   ok('controls and screen-only notes are hidden on paper',
-    /#ask-box, #referral-box,\s*\n\s*\.mic-check, #idle-warn, #stats-row, #teeth-strip button, #postop-box \.actions \{ display: none !important; \}/.test(src) &&
+    /#ask-box, #referral-box,\s*\n\s*\.mic-check, #idle-warn, #stats-row, #teeth-strip button, #postop-box \.actions,/.test(src) &&
     /\.storage-note,/.test(src));
+  // "Add a row" / "Add an increment" printed on the paper record until
+  // 27 October 2026 — the LA log's since 27 September, the sedation block's
+  // since 26 October. Asserted inside the print block, not merely present.
+  {
+    const printCss = (src.match(/@media print \{[\s\S]*?\n\}/) || [''])[0];
+    ok('and the add-a-row buttons do not print',
+      /\.add-row \{ display: none !important; \}/.test(printCss), printCss.slice(0, 400));
+  }
 
   // 3. the promise, stated
   ok('the page says nothing is saved', /class="storage-note"/.test(src) && /Nothing is saved\./.test(src));
@@ -5625,13 +5638,25 @@ async function runType(onNote, { type = /Third molar/, dictate = false, turns = 
 // file sit ABOVE these definitions, so a const here is still in its temporal
 // dead zone when they run, and the ReferenceError surfaces inside the page's
 // stubbed fetch as a failed draft rather than as a test error.
+// A dictated line that really says the sedation, so the quotes below can be
+// found in it. The dictation begins 5 s in (runType presses Dictate then), so
+// the S1 turn at 20 s is inside it.
+function SED_TURNS() { return [
+  { speaker: 'S1', start: 1, end: 3, text: 'We will sedate you for this today.' },
+  { speaker: 'S2', start: 4, end: 5, text: 'That is fine with me.' },
+  { speaker: 'S1', start: 20, end: 34,
+    text: 'IV midazolam titrated, two milligrams at nine forty-two and one more at nine forty-six, ' +
+          'sats ninety-seven to ninety-nine throughout, escorted home by a relative.' }
+]; }
+
 function SED_FULL() { return {
+  speakers: { S1: 'clinician', S2: 'patient' },
   technique: 'IV midazolam, titrated',
   agent: 'Midazolam 5 mg in 5 ml',
   cannulaSite: 'Right antecubital fossa',
   increments: [
-    { time: '09:42', dose: '2 mg', response: 'Settled, eyelids heavy', quotes: [] },
-    { time: '09:46', dose: '1 mg', response: 'Verrill’s sign positive', quotes: [] }
+    { time: '09:42', dose: '2 mg', response: 'Settled, eyelids heavy', quotes: ['two milligrams at nine forty-two'] },
+    { time: '09:46', dose: '1 mg', response: 'Verrill’s sign positive', quotes: ['one more at nine forty-six'] }
   ],
   total: '3 mg',
   oxygen: 'None required',
@@ -5641,14 +5666,14 @@ function SED_FULL() { return {
   discharge: 'Criteria met at 10:35',
   escort: 'Escorted home by a relative',
   notes: null,
-  quotes: []
+  quotes: ['IV midazolam titrated']
 }; }
 
 async function testSedationRecord() {
   section('The sedation record: dictated only, and laid out by the template');
 
   let ctx = await runType(() => note27({ sedation: SED_FULL(), sedationDraft: true }),
-    { type: /Sedation/, dictate: true });
+    { type: /Sedation/, dictate: true, turns: SED_TURNS() });
   let { doc, win } = ctx;
   let block = $(doc, 'sedation-block');
   ok('a sedation consult with dictation shows the sedation record', !!block);
@@ -5664,6 +5689,12 @@ async function testSedationRecord() {
     !!block && !/Not recorded:/.test(block.textContent), block && block.textContent.slice(-300));
   ok('and it says nothing is added up or checked',
     !!block && /no dose is added up and no total is checked against the increments/.test(block.textContent));
+  ok('a record whose quotes are in the dictation says every line was found',
+    !!block && /Every line was found in your dictation/.test(block.textContent),
+    block && block.textContent.slice(-400));
+  ok('and nothing about sedation reaches the headline source-check list',
+    ![...$(doc, 'sourcecheck-list').children].some((li) => /^Sedation,/.test(li.textContent)),
+    [...$(doc, 'sourcecheck-list').children].map((li) => li.textContent).join(' | '));
   ok('the no-names rule is on screen where the escort is typed in',
     !!block && /No names, here or anywhere on this page/.test(block.textContent), block && block.textContent.slice(-300));
   ok('the list itself is flagged as awaiting clinical review',
@@ -5697,7 +5728,7 @@ async function testSedationRecord() {
   // An omission must be visible. This is the whole reason the block exists.
   ctx = await runType(() => note27({
     sedation: Object.assign(SED_FULL(), { monitoring: null, recovery: null, increments: [] })
-  }), { type: /Sedation/, dictate: true });
+  }), { type: /Sedation/, dictate: true, turns: SED_TURNS() });
   block = $(ctx.doc, 'sedation-block');
   ok('a record with no monitoring says so, by name',
     !!block && /Not recorded:[^.]*monitoring/.test(block.textContent), block && block.textContent.slice(-300));
@@ -5709,7 +5740,7 @@ async function testSedationRecord() {
     block && block.textContent.slice(-300));
 
   // Offered empty, to fill in by hand, exactly as the LA log is.
-  ctx = await runType(() => note27({}), { type: /Sedation/, dictate: true });
+  ctx = await runType(() => note27({}), { type: /Sedation/, dictate: true, turns: SED_TURNS() });
   block = $(ctx.doc, 'sedation-block');
   ok('a sedation consult with nothing dictated into it is still offered the block',
     !!block && !!block.querySelector('.sed-value[contenteditable="true"]'));
@@ -5730,12 +5761,58 @@ async function testSedationRecord() {
       $(ctx.doc, 'sedation-block').classList.contains('edited'), text.slice(0, 300));
   }
 
+  /* The check that was missing until 27 October 2026: the LA log was verified
+     against the dictation and the sedation record beside it was not, so an
+     invented titration series carried no warning at all. */
+  {
+    // Quotes that are nowhere in the recording: a fabricated record.
+    const bogus = Object.assign(SED_FULL(), { quotes: ['titrated with propofol throughout'] });
+    bogus.increments = bogus.increments.map((r) => Object.assign({}, r, { quotes: ['eight milligrams at ten past eleven'] }));
+    // sources must be present: with none, renderSources reports the check as
+    // unavailable and returns before the LA/sedation tail.
+    const c = await runType(() => note27({ sedation: bogus, sources: {} }), { type: /Sedation/, dictate: true, turns: SED_TURNS() });
+    const b = $(c.doc, 'sedation-block');
+    ok('a record whose quotes are nowhere in the dictation is named as not found',
+      !!b && /The record: not found in your dictation/.test(b.textContent), b && b.textContent.slice(-400));
+    ok('and so is each invented increment, by number',
+      !!b && /Increment 1: not found in your dictation/.test(b.textContent) &&
+      /Increment 2: not found in your dictation/.test(b.textContent), b && b.textContent.slice(-400));
+    ok('it says to check before pasting, and drops the all-clear',
+      !!b && /Check before you paste/.test(b.textContent) &&
+      !/Every line was found/.test(b.textContent));
+    ok('and it reaches the headline source-check list, where a long draft cannot hide it',
+      [...$(c.doc, 'sourcecheck-list').children].some((li) => /^Sedation, the record: not found in your dictation$/.test(li.textContent)) &&
+      [...$(c.doc, 'sourcecheck-list').children].some((li) => /^Sedation, increment 2: not found/.test(li.textContent)),
+      [...$(c.doc, 'sourcecheck-list').children].map((li) => li.textContent).join(' | '));
+
+    // Said to the patient but never dictated: a different and milder failure,
+    // reported differently, exactly as the LA rows are.
+    const spoken = Object.assign(SED_FULL(), { quotes: ['sedate you for this today'] });
+    spoken.increments = [];
+    const c2 = await runType(() => note27({ sedation: spoken }), { type: /Sedation/, dictate: true, turns: SED_TURNS() });
+    ok('a record taken from the conversation rather than the dictation says so',
+      /found only in the conversation, not in your dictation/.test($(c2.doc, 'sedation-block').textContent),
+      $(c2.doc, 'sedation-block').textContent.slice(-400));
+
+    // An edit makes it the clinician's, so the warning goes — as with an LA row.
+    const val = [...c.doc.querySelectorAll('#sedation-block .sed-row')]
+      .find((r) => /^Technique/.test(r.textContent)).querySelector('.sed-value');
+    val.textContent = 'Inhalation sedation, nitrous oxide and oxygen';
+    val.dispatchEvent(new c.win.Event('input', { bubbles: true }));
+    await tick(20);
+    ok('a record the clinician has corrected is theirs: the record warning goes',
+      !/The record: not found in your dictation/.test($(c.doc, 'sedation-block').textContent),
+      $(c.doc, 'sedation-block').textContent.slice(-400));
+    ok('but an increment they did not touch is still flagged',
+      /Increment 1: not found in your dictation/.test($(c.doc, 'sedation-block').textContent));
+  }
+
   // Not a sedation appointment and nothing sedation-shaped dictated: no block.
   ctx = await runType(() => note27({}), { type: /Third molar/, dictate: true });
   ok('a third molar case with no sedation dictated shows no sedation block', !$(ctx.doc, 'sedation-block'));
   // But sedation for oral surgery may well be filed under the surgery, so a
   // record that IS there shows, whatever the consult type is called.
-  ctx = await runType(() => note27({ sedation: SED_FULL() }), { type: /Third molar/, dictate: true });
+  ctx = await runType(() => note27({ sedation: SED_FULL() }), { type: /Third molar/, dictate: true, turns: SED_TURNS() });
   ok('and one that was dictated shows even though the type is not "Sedation"', !!$(ctx.doc, 'sedation-block'));
 }
 
@@ -5823,8 +5900,11 @@ async function testPerTypeDefaultLayout() {
   // Dentures are deliberately not defaulted to the consent layout: the type
   // covers impressions, try-in, fit and adjustment as well as the consultation,
   // and only the first of those is a consent discussion.
-  pick(/^Dentures/); await tick(20);
-  ok('a denture appointment opens chronologically, since most are a stage not a consult',
+  pick(/^Denture consult/); await tick(20);
+  ok('a denture consult opens in the consent record, like any other consultation',
+    on().dataset.template === 'consent', on().dataset.template);
+  pick(/^Denture stage/); await tick(20);
+  ok('but a construction stage opens chronologically \u2014 nothing is being weighed',
     on().dataset.template === 'clinical', on().dataset.template);
 
   // The important half: a choice made by hand is the clinician's and stands.
