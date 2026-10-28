@@ -3208,6 +3208,13 @@ async function testSept27b() {
       /Where a row is in both, mark it\s+"discussed" — the patient was told/.test(sys));
     ok('the reason the field exists is stated, so it is not tidied away later',
       /A plan the patient was never told is not a consent record/.test(sys));
+    // A recall is where a numbered plan is most often written, and the recall
+    // emphasis tells the model its consent fields are often empty — which is
+    // exactly the reasoning that put a costing in informationGiven this
+    // morning. So the lists are exempted from that exemption, in writing.
+    ok('a recall is told the itemised lists are not exempt either',
+      /The same applies to planItems and optionsOffered/.test(pm.buildSystemPrompt('exam-recall', 'standard')) &&
+      /Nothing about this appointment type exempts them/.test(pm.buildSystemPrompt('exam-recall', 'standard')));
     ok('both appear in the output shape',
       /"planItems": \[ \{ "tooth"/.test(sys) && /"optionsOffered": \[ \{ "forWhat"/.test(sys));
 

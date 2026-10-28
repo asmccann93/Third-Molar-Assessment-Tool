@@ -6067,6 +6067,20 @@ async function testItemisedTreatment() {
     !!$(ctx.doc, 'plan-items-block') && !!$(ctx.doc, 'options-block'));
   text = await ctx.copy();
   ok('but empty lists are not copied', !/Proposed treatment\n1\./.test(text) && !/Options offered\n1\./.test(text));
+  // An exam is where a numbered course of treatment is most often written, so
+  // it is offered both lists too (28 October 2026). It opens in SOAP, where the
+  // options land in Assessment and the course in Plan.
+  ctx = await runType(() => note27({ sources: {} }), { type: /^Exam/, dictate: true, turns: ITEM_TURNS() });
+  ok('an exam is offered both lists as well',
+    !!$(ctx.doc, 'plan-items-block') && !!$(ctx.doc, 'options-block'));
+  {
+    const kids = [...$(ctx.doc, 'fields').children];
+    const hAt = (t) => kids.findIndex((e) => e.classList.contains('section-heading') && e.textContent === t);
+    const at = (id) => kids.findIndex((e) => e.id === id);
+    ok('and on SOAP they land in Assessment and Plan respectively',
+      at('options-block') > hAt('Assessment') && at('options-block') < hAt('Plan') && at('plan-items-block') > hAt('Plan'),
+      JSON.stringify({ assess: hAt('Assessment'), opts: at('options-block'), plan: hAt('Plan'), items: at('plan-items-block') }));
+  }
   ctx = await runType(() => note27({ sources: {} }), { type: /^Perio/, dictate: true, turns: ITEM_TURNS() });
   ok('a perio appointment is not offered them', !$(ctx.doc, 'plan-items-block') && !$(ctx.doc, 'options-block'));
   ctx = await runType(NOTE, { type: /^Perio/, dictate: true, turns: ITEM_TURNS() });

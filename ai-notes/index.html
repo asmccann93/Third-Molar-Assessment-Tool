@@ -955,7 +955,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-28.2';
+  var BUILD = '2026-10-28.3';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -4565,7 +4565,9 @@ label.pmpr input { margin-top: 4px; }
   };
   // Where both lists are offered empty, to fill in by hand. Elsewhere they
   // appear only when the recording actually produced rows.
-  var ITEM_TYPES = ['treatment-plan', 'implant-consult', 'denture-consult', 'third-molar'];
+  // exam-recall added 28 October 2026: examining and then setting out the
+  // course of treatment is the commonest place a numbered plan is written.
+  var ITEM_TYPES = ['exam-recall', 'treatment-plan', 'implant-consult', 'denture-consult', 'third-molar'];
 
   function itemRows(note, key) {
     return note && Array.isArray(note[key]) ? note[key].filter(function (r) { return r && typeof r === 'object'; }) : [];
