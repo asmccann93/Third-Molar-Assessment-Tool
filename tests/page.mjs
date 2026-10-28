@@ -3171,6 +3171,8 @@ await testRadiographReport();
 await testSedationRecord();
 await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
+await testItemisedTreatment();
+await testEveryLayoutIsComplete();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
@@ -5934,6 +5936,157 @@ async function testPerTypeDefaultLayout() {
   await tick(40);
   ok('Clear forgets the layout the clinician picked, with everything else',
     on().dataset.template === 'clinical', on().dataset.template);
+}
+
+/**
+ * The treatment itemised (28 October 2026) — "1 Composite, 2 Amalgam".
+ *
+ * Two lists: the options offered, with the discussion; the proposed course,
+ * with the outcome. Every row says whether it was discussed with the patient or
+ * dictated afterwards, and that claim is checked against the recording. A plan
+ * the patient was never told must never read as a consent record.
+ */
+// runType presses Dictate about 5 s in, so every conversation turn ends before
+// that and the dictated one starts well after. A turn that STRADDLES the press
+// and carries no word timings cannot be placed either side of it and is left
+// out of the index by design — quotes inside it would then be unverifiable.
+function ITEM_TURNS() { return [
+  { speaker: 'S1', start: 1, end: 2, text: 'For the upper right six I would suggest a composite.' },
+  { speaker: 'S2', start: 2, end: 3, text: 'Whatever you think is best.' },
+  { speaker: 'S1', start: 3, end: 4, text: 'And the lower left seven really needs an amalgam.' },
+  { speaker: 'S1', start: 20, end: 26, text: 'Also planning a crown on the upper left four at a later visit.' }
+]; }
+
+async function testItemisedTreatment() {
+  section('The treatment itemised: proposed course and options offered');
+  const NOTE = () => note27({
+    sources: {},
+    optionsOffered: [
+      { forWhat: 'UR6', option: 'Composite', notes: 'Recommended', source: 'discussed',
+        quotes: ['I would suggest a composite'] },
+      { forWhat: 'UR6', option: 'Amalgam', notes: null, source: 'discussed',
+        quotes: ['really needs an amalgam'] }
+    ],
+    planItems: [
+      { tooth: 'UR6', treatment: 'Composite', notes: null, source: 'discussed',
+        quotes: ['I would suggest a composite'] },
+      { tooth: 'LL7', treatment: 'Amalgam', notes: null, source: 'discussed',
+        quotes: ['really needs an amalgam'] },
+      { tooth: 'UL4', treatment: 'Crown', notes: 'Later visit', source: 'dictated',
+        quotes: ['planning a crown on the upper left four'] }
+    ],
+    speakers: { S1: 'clinician', S2: 'patient' }
+  });
+  let ctx = await runType(NOTE, { type: /Implant consult/, dictate: true, turns: ITEM_TURNS() });
+  let { doc, win } = ctx;
+
+  const plan = $(doc, 'plan-items-block');
+  const opts = $(doc, 'options-block');
+  ok('a consult shows both lists', !!plan && !!opts);
+  ok('the proposed course is numbered, one row per item',
+    !!plan && plan.querySelectorAll('tbody tr, tr').length === 4 &&
+    [...plan.querySelectorAll('td.item-n')].map((t) => t.textContent).join(',') === '1,2,3',
+    plan && [...plan.querySelectorAll('td.item-n')].map((t) => t.textContent).join(','));
+  ok('with the tooth and the treatment as said',
+    !!plan && /UR6/.test(plan.textContent) && /Composite/.test(plan.textContent) &&
+    /LL7/.test(plan.textContent) && /Amalgam/.test(plan.textContent));
+  ok('each row carries a source the clinician can change',
+    !!plan && [...plan.querySelectorAll('select')].map((s) => s.value).join(',') === 'discussed,discussed,dictated',
+    plan && [...plan.querySelectorAll('select')].map((s) => s.value).join(','));
+  ok('and every row checks out against the recording',
+    !!plan && /Every item was found where it says it was/.test(plan.textContent),
+    plan && plan.textContent.slice(-300));
+
+  // Where they sit. Options are the discussion; the course is the outcome.
+  {
+    const kids = [...$(doc, 'fields').children];
+    const hAt = (t) => kids.findIndex((e) => e.classList.contains('section-heading') && e.textContent === t);
+    const at = (id) => kids.findIndex((e) => e.id === id);
+    ok('the options sit with the discussion, not with the outcome',
+      at('options-block') > hAt('The discussion') && at('options-block') < hAt('The patient'),
+      JSON.stringify({ disc: hAt('The discussion'), opts: at('options-block'), pat: hAt('The patient') }));
+    ok('and the proposed course sits with what happens next',
+      at('plan-items-block') > hAt('Next'), JSON.stringify({ next: hAt('Next'), plan: at('plan-items-block') }));
+  }
+
+  let text = await ctx.copy();
+  ok('the copied note numbers the course as rendered',
+    /Proposed treatment\n1\. Tooth \/ site UR6, Composite\n2\. Tooth \/ site LL7, Amalgam\n3\. Tooth \/ site UL4, Crown, Notes Later visit \(dictated\)/.test(text), text.slice(0, 900));
+  ok('and marks only the dictated item as dictated',
+    (text.match(/\(dictated\)/g) || []).length === 1, text.slice(0, 900));
+  ok('the options are copied too, with what was said about each',
+    /Options offered\n1\. For UR6, Composite, Notes Recommended\n2\. For UR6, Amalgam/.test(text), text.slice(0, 900));
+
+  /* The failure that matters: a row claiming the patient was told, whose words
+     are only in the dictation. Before this check a plan the patient never heard
+     would have read as part of the consent discussion. */
+  {
+    const bad = NOTE();
+    bad.planItems[2].source = 'discussed';          // the crown was dictated, not discussed
+    bad.planItems[1].source = 'dictated';           // the amalgam was discussed, not dictated
+    const c = await runType(() => bad, { type: /Implant consult/, dictate: true, turns: ITEM_TURNS() });
+    const b = $(c.doc, 'plan-items-block');
+    ok('an item claiming it was discussed, whose words are only dictated, is named',
+      /Item 3: marked as discussed with the patient, but its words are only in your dictation/.test(b.textContent),
+      b.textContent.slice(-400));
+    ok('and an item claiming it was dictated, whose words are not in the dictation, is named',
+      /Item 2: marked as dictated, but its words are not in your dictation/.test(b.textContent),
+      b.textContent.slice(-400));
+    ok('both reach the headline source-check list',
+      [...$(c.doc, 'sourcecheck-list').children].some((li) => /^Proposed treatment, item 3: marked as discussed/.test(li.textContent)) &&
+      [...$(c.doc, 'sourcecheck-list').children].some((li) => /^Proposed treatment, item 2: marked as dictated/.test(li.textContent)),
+      [...$(c.doc, 'sourcecheck-list').children].map((li) => li.textContent).join(' | '));
+
+    // Correcting the source clears it, because then it is the clinician's.
+    const sel = [...b.querySelectorAll('select')][2];
+    sel.value = 'dictated';
+    sel.dispatchEvent(new c.win.Event('change', { bubbles: true }));
+    await tick(30);
+    ok('setting the source right clears that item’s warning',
+      !/Item 3: marked as discussed/.test($(c.doc, 'plan-items-block').textContent),
+      $(c.doc, 'plan-items-block').textContent.slice(-400));
+  }
+
+  // A row with no source at all is never shown as discussed.
+  {
+    const noSrc = NOTE();
+    noSrc.planItems = [{ tooth: 'UR6', treatment: 'Composite', notes: null, source: null, quotes: ['I would suggest a composite'] }];
+    const c = await runType(() => noSrc, { type: /Implant consult/, dictate: true, turns: ITEM_TURNS() });
+    const b = $(c.doc, 'plan-items-block');
+    ok('an item with no source says so rather than claiming one',
+      /Item 1: no source came back/.test(b.textContent), b.textContent.slice(-300));
+    ok('and its selector shows Not known, not Discussed',
+      b.querySelector('select').value === '', b.querySelector('select').value);
+    const t = await c.copy();
+    ok('the copied line says the source is not known', /1\. Tooth \/ site UR6, Composite \(source not known\)/.test(t), t.slice(0, 600));
+  }
+
+  // Offered empty on a consult; absent elsewhere unless rows came back.
+  ctx = await runType(() => note27({ sources: {} }), { type: /Treatment plan/, dictate: true, turns: ITEM_TURNS() });
+  ok('a consult with nothing itemised still offers both lists to fill in',
+    !!$(ctx.doc, 'plan-items-block') && !!$(ctx.doc, 'options-block'));
+  text = await ctx.copy();
+  ok('but empty lists are not copied', !/Proposed treatment\n1\./.test(text) && !/Options offered\n1\./.test(text));
+  ctx = await runType(() => note27({ sources: {} }), { type: /^Perio/, dictate: true, turns: ITEM_TURNS() });
+  ok('a perio appointment is not offered them', !$(ctx.doc, 'plan-items-block') && !$(ctx.doc, 'options-block'));
+  ctx = await runType(NOTE, { type: /^Perio/, dictate: true, turns: ITEM_TURNS() });
+  ok('but shows them if the recording produced items', !!$(ctx.doc, 'plan-items-block'));
+}
+
+/**
+ * verifyTemplates() reports a layout that has forgotten a field or a block by
+ * writing to console.error — which a passing test suite would never notice. So
+ * boot the page with the console captured and assert it said nothing.
+ */
+async function testEveryLayoutIsComplete() {
+  section('No layout has forgotten a field or a block');
+  const errs = [];
+  await boot({ hook: (win) => { win.console.error = (...a) => errs.push(a.map(String).join(' ')); } });
+  await tick(40);
+  ok('every template lays out every field and block exactly once, at load',
+    !errs.some((e) => /does not lay out every field and block/.test(e)),
+    errs.join(' | ').slice(0, 400));
+  ok('and the page logs no errors at all on a clean boot', errs.length === 0, errs.join(' | ').slice(0, 400));
 }
 
 async function testPmpr() {

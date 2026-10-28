@@ -3192,6 +3192,100 @@ async function testSept27b() {
     ok('and it is the FIRST gap, not buried under the others', /^Costs discussed is empty/.test(n.gaps[0] || ''));
   }
 
+  /* --- the treatment itemised (28 October 2026) ---
+     Two lists at AM's request: "1 Composite, 2 Amalgam". The one thing that
+     must not slip is the per-row source — a plan the patient was never told
+     must never read as part of the consent discussion. */
+  {
+    const sys = pm.buildSystemPrompt('implant-consult', 'standard');
+    ok('the prompt has the itemised-treatment section', /## THE TREATMENT ITEMISED/.test(sys));
+    ok('it defines both lists and their shapes',
+      /"planItems": the course of treatment proposed/.test(sys) &&
+      /"optionsOffered": the alternatives put to the patient for a SINGLE decision/.test(sys));
+    ok('the source is set from WHERE the words are, not from what the item is',
+      /Set it from WHERE IN THE TRANSCRIPT the row's words are, not from what the item/.test(sys.replace(/\s+/g, ' ')));
+    ok('and a row in both counts as discussed, because the patient was told',
+      /Where a row is in both, mark it\s+"discussed" — the patient was told/.test(sys));
+    ok('the reason the field exists is stated, so it is not tidied away later',
+      /A plan the patient was never told is not a consent record/.test(sys));
+    ok('both appear in the output shape',
+      /"planItems": \[ \{ "tooth"/.test(sys) && /"optionsOffered": \[ \{ "forWhat"/.test(sys));
+
+    const cp = pm.cleanPlanItems, co = pm.cleanOptionItems;
+    for (const none of [undefined, null, false, '', 'none', 'n/a']) {
+      ok(`nothing itemised (${JSON.stringify(none)}) is no rows and no gap`,
+        cp(none).rows.length === 0 && cp(none).gaps.length === 0);
+    }
+    {
+      const r = cp([{ tooth: ' UR6 ', treatment: 'Composite', source: 'DISCUSSED', quotes: 'suggest a composite' },
+                    { tooth: 'LL7', treatment: 'Amalgam', source: 'dictated', notes: null },
+                    { tooth: null, treatment: null, notes: null }]);
+      ok('well-formed rows keep their order, trimmed, with empty rows dropped',
+        r.rows.length === 2 && r.rows[0].tooth === 'UR6' && r.rows[1].treatment === 'Amalgam' && r.gaps.length === 0,
+        JSON.stringify(r));
+      ok('a source is accepted whatever its case', r.rows[0].source === 'discussed' && r.rows[1].source === 'dictated');
+      ok('and its quotes are kept under the usual rules',
+        JSON.stringify(r.rows[0].quotes) === '["suggest a composite"]');
+    }
+    ok('a source that is neither of the two is left null, never guessed',
+      cp([{ treatment: 'Composite', source: 'maybe' }]).rows[0].source === null &&
+      cp([{ treatment: 'Composite', source: 42 }]).rows[0].source === null &&
+      cp([{ treatment: 'Composite' }]).rows[0].source === null);
+    ok('a row that is not an object is a gap, and the rest are kept',
+      cp(['composite first', { treatment: 'Amalgam' }]).rows.length === 1 &&
+      cp(['composite first', { treatment: 'Amalgam' }]).gaps.length === 1);
+    ok('a row with content only under keys it does not know is a gap',
+      cp([{ material: 'composite', surface: 'MOD' }]).gaps.length === 1);
+    ok('more than thirty rows is a gap', cp(Array.from({ length: 31 }, () => ({ treatment: 'x' }))).gaps.length === 1);
+    ok('the options list takes its own columns',
+      co([{ forWhat: 'UR6', option: 'Amalgam', source: 'discussed' }]).rows[0].forWhat === 'UR6' &&
+      co([{ tooth: 'UR6' }]).gaps.length === 1);
+    ok('itemAsText leaves the treatment bare and labels the rest',
+      pm.itemAsText({ tooth: 'UR6', treatment: 'Composite', notes: 'Later' }, pm.PLAN_ITEM_FIELDS, pm.PLAN_ITEM_LABELS) ===
+      'Tooth / site UR6, Composite, Notes Later',
+      pm.itemAsText({ tooth: 'UR6', treatment: 'Composite', notes: 'Later' }, pm.PLAN_ITEM_FIELDS, pm.PLAN_ITEM_LABELS));
+
+    // End to end: a row cannot claim it was dictated when nothing was.
+    const base2 = Object.fromEntries(pm.FIELDS.map(([k]) => [k, 'Recorded.']));
+    const WITH = {
+      ...base2, gaps: [], checklist: {},
+      planItems: [{ tooth: 'UR6', treatment: 'Composite', notes: null, source: 'discussed', quotes: ['suggest a composite'] },
+                  { tooth: 'UL4', treatment: 'Crown', notes: null, source: 'dictated', quotes: ['planning a crown'] }],
+      optionsOffered: [{ forWhat: 'UR6', option: 'Amalgam', notes: null, source: 'discussed', quotes: ['needs an amalgam'] }]
+    };
+    const dturns2 = [{ speaker: 'S1', text: 'I would suggest a composite.', start: 1, end: 3 },
+                     { speaker: 'S1', text: 'Planning a crown on the upper left four.', start: 20, end: 25 }];
+    stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(WITH) }], stop_reason: 'end_turn' } }));
+
+    let r2 = mockRes();
+    await extract(mockReq({ body: { turns: dturns2, consultType: 'implant-consult',
+      features: ['treatment', 'items'] } }), r2);
+    let n2 = r2.body?.note || {};
+    ok('with no dictation, a row claiming to be dictated has its source emptied, not believed',
+      n2.planItems[1].source === null && n2.planItems[0].source === 'discussed',
+      JSON.stringify(n2.planItems));
+    ok('and the clinician is told to mark it themselves',
+      n2.gaps.some((g) => /came back marked as dictated, but nothing was dictated/.test(g)), JSON.stringify(n2.gaps));
+
+    r2 = mockRes();
+    await extract(mockReq({ body: { turns: dturns2, dictationFromS: 10, consultType: 'implant-consult',
+      features: ['treatment', 'items'] } }), r2);
+    n2 = r2.body?.note || {};
+    ok('with dictation, both sources stand', n2.planItems[1].source === 'dictated' && n2.planItems[0].source === 'discussed');
+
+    // An older page: the two sources must NOT be flattened into one field.
+    r2 = mockRes();
+    await extract(mockReq({ body: { turns: dturns2, dictationFromS: 10, consultType: 'implant-consult',
+      features: ['treatment'] } }), r2);
+    n2 = r2.body?.note || {};
+    ok('a page that does not know the lists gets the discussed items in the consent fields',
+      !('planItems' in n2) && /Proposed, itemised:\n1\. Tooth \/ site UR6, Composite/.test(n2.proposed || '') &&
+      /Options offered, itemised:\n1\. For UR6, Amalgam/.test(n2.alternatives || ''), n2.proposed);
+    ok('and the dictated item in the plan, never in the consent fields',
+      /Proposed, itemised \(dictated\):\n1\. Tooth \/ site UL4, Crown/.test(n2.plan || '') &&
+      !/UL4/.test(n2.proposed || ''), n2.plan);
+  }
+
   // --- dentures (26 October 2026; split in two on the 27th) ---
   {
     ok('the single `denture` type is gone, replaced by the two',

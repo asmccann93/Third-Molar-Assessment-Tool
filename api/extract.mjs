@@ -32,7 +32,8 @@ import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS
          buildPostopSystemPrompt, parsePostop, asText, pauseMarker, partMarker, SPEAKER_LABEL,
          cleanQuestions, LA_LOG_FIELDS, PMPR_LINE,
          SEDATION_TEXT_FIELDS, SEDATION_DOSE_FIELDS, SEDATION_LABELS, SEDATION_DRAFT,
-         sedationAny, sedationAsLines, misplacedMoney } from './_prompt.mjs';
+         sedationAny, sedationAsLines, misplacedMoney,
+         PLAN_ITEM_FIELDS, OPTION_ITEM_FIELDS, PLAN_ITEM_LABELS, OPTION_ITEM_LABELS, itemAsText } from './_prompt.mjs';
 import { checklistGaps, checklistIsDraft } from './_checklists.mjs';
 import { sessionStillGood } from './_store.mjs';
 
@@ -377,6 +378,27 @@ export default async function handler(req, res) {
     // written into the plan instead, labelled, so nothing dictated is lost.
     const features = Array.isArray(body?.features) ? body.features : [];
 
+    // The itemised lists (28 October 2026). A row can only claim to have been
+    // dictated if there WAS a dictation. With none, the claim is impossible, so
+    // the source is emptied rather than believed — the page then shows the row
+    // as unplaceable instead of silently presenting it as discussed, which is
+    // the error that matters.
+    {
+      const stray = [];
+      for (const key of ['planItems', 'optionsOffered']) {
+        for (const row of (Array.isArray(note[key]) ? note[key] : [])) {
+          if (row.source === 'dictated' && (!dictationRequested || !dictationLocated)) {
+            row.source = null;
+            stray.push(key);
+          }
+        }
+      }
+      if (stray.length) {
+        note.gaps.push('Items in the treatment list came back marked as dictated, but nothing was dictated in this ' +
+          'recording. They are shown without a source: check each one before you paste, and mark it yourself.');
+      }
+    }
+
     // The sedation record (26 October 2026). A page that does not know the
     // block would drop it silently, so it is folded into the treatment carried
     // out, labelled. This runs BEFORE the treatment fallback below on purpose:
@@ -397,6 +419,29 @@ export default async function handler(req, res) {
       // Clinical content nobody has reviewed yet: the page says so under it,
       // exactly as it does for a first-draft checklist.
       note.sedationDraft = SEDATION_DRAFT;
+    }
+
+    // The itemised lists, for a page that does not know them (28 October 2026).
+    // The rows are NOT flattened into one field: a discussed row goes to the
+    // conversation fields and a dictated row to the plan, because folding both
+    // into one would hand an older page a dictated proposal dressed as part of
+    // the consent discussion. That separation is the point of the lists.
+    if (!features.includes('items')) {
+      const lines = (rows, cols, labels) => rows.map((r, i) => `${i + 1}. ${itemAsText(r, cols, labels)}`).filter((l) => l.length > 3);
+      const plan = Array.isArray(note.planItems) ? note.planItems : [];
+      const opts = Array.isArray(note.optionsOffered) ? note.optionsOffered : [];
+      const said = (rows) => rows.filter((r) => r.source === 'discussed');
+      const dict = (rows) => rows.filter((r) => r.source === 'dictated');
+      const join = (field, head, ls) => {
+        if (!ls.length) return;
+        note[field] = [typeof note[field] === 'string' ? note[field].trim() : '', head, ...ls].filter(Boolean).join('\n');
+      };
+      join('proposed', 'Proposed, itemised:', lines(said(plan), PLAN_ITEM_FIELDS, PLAN_ITEM_LABELS));
+      join('alternatives', 'Options offered, itemised:', lines(said(opts), OPTION_ITEM_FIELDS, OPTION_ITEM_LABELS));
+      join('plan', 'Proposed, itemised (dictated):', lines(dict(plan), PLAN_ITEM_FIELDS, PLAN_ITEM_LABELS));
+      join('plan', 'Options, itemised (dictated):', lines(dict(opts), OPTION_ITEM_FIELDS, OPTION_ITEM_LABELS));
+      delete note.planItems;
+      delete note.optionsOffered;
     }
 
     if (!features.includes('treatment')) {

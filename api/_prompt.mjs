@@ -190,6 +190,33 @@ export const IMPLANT_LOG_FIELDS = ['site', 'system', 'diameter', 'length', 'lot'
    turned into millilitres or milligrams, no dose worked out or checked. */
 export const LA_LOG_FIELDS = ['agent', 'strength', 'amount', 'technique', 'site', 'batch', 'notes'];
 
+/* The proposed treatment, itemised (28 October 2026), at AM's request: a
+ * numbered list rather than a paragraph — "1 Composite, 2 Amalgam".
+ *
+ * TWO lists, because they answer different questions and must not be confused:
+ *
+ *   planItems      the course of treatment proposed, in order. One row per item.
+ *   optionsOffered the alternatives put to the patient for a single decision,
+ *                  itemised. The prose `alternatives` field stays as it is;
+ *                  this is the same discussion in a form that can be read down.
+ *
+ * Every row carries `source`: "discussed" (said to the patient) or "dictated"
+ * (said to the record after they left). This is the one thing that must not
+ * slip. The whole tool rests on not presenting a dictated thought as something
+ * the patient was told, so the row's source is checked against where its quotes
+ * actually fall in the transcript, and a row claiming the wrong one is flagged
+ * rather than quietly believed.
+ *
+ * Nothing here replaces `proposed`, `alternatives` or `plan`. Those remain the
+ * prose record of the discussion; these are the itemised form of it.
+ */
+export const PLAN_ITEM_FIELDS = ['tooth', 'treatment', 'notes'];
+export const OPTION_ITEM_FIELDS = ['forWhat', 'option', 'notes'];
+export const ITEM_SOURCES = ['discussed', 'dictated'];
+
+export const PLAN_ITEM_LABELS = { tooth: 'Tooth / site', treatment: 'Treatment', notes: 'Notes' };
+export const OPTION_ITEM_LABELS = { forWhat: 'For', option: 'Option', notes: 'Notes' };
+
 /* The sedation episode itself (26 October 2026).
  *
  * THIS IS CLINICAL CONTENT, DRAFTED BY THE ASSISTANT AND NOT YET REVIEWED.
@@ -619,6 +646,58 @@ send, a radiograph or scan to arrange, lab work, a prescription to issue, a revi
 - No names or other identifiers.
 - Empty array if none.
 
+## THE TREATMENT ITEMISED
+
+Two lists. They are the same discussion as proposed, alternatives and plan, set
+out so it can be read down rather than through. Fill them from what was said;
+leave both empty arrays where nothing was proposed.
+
+"planItems": the course of treatment proposed, IN THE ORDER GIVEN. One row per
+item of treatment.
+
+  [ { "tooth": string | null, "treatment": string | null, "notes": string | null,
+      "source": "discussed" | "dictated",
+      "quotes": ["<words copied exactly from the transcript>"] } ]
+
+- tooth: the tooth or site, in the notation used. null where the item is not
+  tooth-specific (a denture, a hygienist course).
+- treatment: what is proposed for it, in the words used — "composite", "amalgam",
+  "extraction", "crown", "upper partial denture".
+- notes: anything said about THAT item and nothing else — that it is provisional,
+  that it depends on another item, which visit it falls in.
+- One row per item. Do NOT merge two teeth into one row, and do NOT split one
+  item across rows.
+
+"optionsOffered": the alternatives put to the patient for a SINGLE decision,
+itemised. Use it where more than one course was offered for the same problem.
+
+  [ { "forWhat": string | null, "option": string | null, "notes": string | null,
+      "source": "discussed" | "dictated",
+      "quotes": ["<words copied exactly from the transcript>"] } ]
+
+- forWhat: the tooth, site or problem the choice is about.
+- option: the course offered, including doing nothing where that was offered.
+- notes: what was said about that option — a cost, a drawback, a recommendation.
+- An option the clinician advised against is still an option offered: record it,
+  with what was said about it in notes.
+
+"source", ON EVERY ROW OF BOTH LISTS. This is the field that must not slip:
+
+- "discussed" — it was said to the patient, in the conversation.
+- "dictated" — the clinician said it to the record, after the patient had left.
+
+Set it from WHERE IN THE TRANSCRIPT the row's words are, not from what the item
+is. An item dictated afterwards is marked "dictated" even though it is a
+treatment proposal; an item discussed with the patient is "discussed" even
+though it also appears in the dictation. Where a row is in both, mark it
+"discussed" — the patient was told. Never guess: if you cannot tell, still give
+one, and give the quotes that decided it, because the dentist's page checks the
+quotes against the recording and will show them a row whose source does not hold
+up.
+
+A plan the patient was never told is not a consent record and must never read as
+one. That is the whole reason this field exists.
+
 ## WHICH FIELD
 
 Until 28 October 2026 you were given the field NAMES and nothing else, and a whole
@@ -674,6 +753,8 @@ Every key below must appear, even where it does not apply to this appointment: u
   "implantLog": object[],
   "laLog": [ { "agent": string | null, "strength": string | null, "amount": string | null, "technique": string | null, "site": string | null, "batch": string | null, "notes": string | null, "quotes": string[] } ],
   "teeth": string[],
+  "planItems": [ { "tooth": string | null, "treatment": string | null, "notes": string | null, "source": "discussed" | "dictated", "quotes": string[] } ],
+  "optionsOffered": [ { "forWhat": string | null, "option": string | null, "notes": string | null, "source": "discussed" | "dictated", "quotes": string[] } ],
   "checklist": { "<key>": string | null, ... },
   "speakers": { "S1": "clinician" | "patient" | "other", ... },
   "speakerConfidence": "high" | "medium" | "low",
@@ -1215,6 +1296,62 @@ export function sedationAsLines(rec) {
   return out;
 }
 
+/* The two itemised lists (28 October 2026). One cleaner, because they differ
+   only in their columns. Shaped like cleanLaLog: rows that carry nothing are
+   dropped, a row that came back as something unreadable is counted and
+   reported, and nothing is ever invented to fill a column.
+
+   `source` is kept as given when it is one of the two we know, and left null
+   otherwise — never guessed. A null source is reported by the page as
+   unplaceable rather than shown as discussed, because the error that matters
+   here is a dictated item presented as something the patient was told. */
+function cleanItemList(raw, cols, what) {
+  const gaps = [];
+  if (LA_NONE(raw)) return { rows: [], gaps };
+  const list = (Array.isArray(raw) ? raw : [raw]).filter((r) => !LA_NONE(r));
+  const rows = [];
+  let bad = 0;
+  if (list.length > 30) bad++;
+  for (const row of list.slice(0, 30)) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) { bad++; continue; }
+    const out = {};
+    let any = false, wrong = false;
+    for (const k of cols) {
+      const v = row[k];
+      if (v === undefined || v === null || (typeof v === 'string' && !v.trim())) { out[k] = null; continue; }
+      if (typeof v !== 'string' && typeof v !== 'number') { wrong = true; out[k] = null; continue; }
+      out[k] = String(v).replace(/\s+/g, ' ').trim().slice(0, 300);
+      any = true;
+    }
+    const src = typeof row.source === 'string' ? row.source.trim().toLowerCase() : '';
+    out.source = ITEM_SOURCES.includes(src) ? src : null;
+    const unknown = Object.keys(row).some((k) => k !== 'quotes' && k !== 'source' && !cols.includes(k) && !LA_NONE(row[k]));
+    if (wrong || (!any && unknown)) bad++;
+    if (!any) continue;
+    out.quotes = quoteList(row.quotes);
+    rows.push(out);
+  }
+  if (bad) gaps.push(`Part of the ${what} came back in a form that could not be read. Check it against the recording.`);
+  return { rows, gaps };
+}
+
+export function cleanPlanItems(raw) {
+  return cleanItemList(raw, PLAN_ITEM_FIELDS, 'proposed treatment list');
+}
+
+export function cleanOptionItems(raw) {
+  return cleanItemList(raw, OPTION_ITEM_FIELDS, 'list of options offered');
+}
+
+/* One row as a line, numbered by the caller. Shared by the page's clipboard and
+   the referral, so the three cannot drift apart. */
+export function itemAsText(row, cols, labels) {
+  const cells = cols
+    .filter((k) => typeof row[k] === 'string' && row[k].trim())
+    .map((k) => (k === 'treatment' || k === 'option') ? row[k].trim() : `${labels[k]} ${row[k].trim()}`);
+  return cells.join(', ');
+}
+
 /* Does this record carry anything at all? Used by the page to decide whether to
    show the block on a consult type that is not itself a sedation appointment. */
 export function sedationAny(rec) {
@@ -1294,6 +1431,14 @@ export function parseNote(raw, consultTypeKey) {
     const sed = cleanSedation(parsed.sedation);
     parsed.sedation = sed.record;
     parserGaps.push(...sed.gaps);
+  }
+  {
+    const pi = cleanPlanItems(parsed.planItems);
+    parsed.planItems = pi.rows;
+    parserGaps.push(...pi.gaps);
+    const oi = cleanOptionItems(parsed.optionsOffered);
+    parsed.optionsOffered = oi.rows;
+    parserGaps.push(...oi.gaps);
   }
   parsed.radiographs = cleanRadiographs(parsed.radiographs);
   if (parsed.radiographs && parsed.radiographs.unreadable) {

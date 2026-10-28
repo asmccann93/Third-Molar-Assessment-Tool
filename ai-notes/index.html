@@ -433,6 +433,9 @@ table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72
 table.sed-log td[contenteditable]:not([contenteditable="false"]):empty::before { content: attr(data-placeholder); color: var(--ink-faint); }
 table.sed-log td[contenteditable]:not([contenteditable="false"]) { min-width: 3em; }
 table.sed-log td[contenteditable]:not([contenteditable="false"]):focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+table.item-log td.item-n { color: var(--ink-faint); width: 1.6em; font-variant-numeric: tabular-nums; }
+table.item-log select { font: inherit; font-size: .8rem; padding: 2px 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: inherit; }
+#options-block .add-row, #plan-items-block .add-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
 #sedation-block .add-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
 .sed-group { font-family: var(--mono); font-size: .68rem; letter-spacing: .07em; text-transform: uppercase;
   color: var(--ink-faint); margin: 12px 0 4px; }
@@ -952,7 +955,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-28.1';
+  var BUILD = '2026-10-28.2';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1142,6 +1145,23 @@ label.pmpr input { margin-top: 4px; }
       text: function (note) {
         return (Array.isArray(note.implantLog) && note.implantLog.length) ? implantLogAsText(note.implantLog) : '';
       }
+    },
+    // The treatment itemised (28 October 2026). The options belong with the
+    // discussion — they ARE the discussion — and the proposed course belongs
+    // with the outcome, which is where a reader looks for what is going to
+    // happen. Neither is marked `dictated`: each ROW says where it came from,
+    // so a block-level tag would be wrong on half of them.
+    '@options': {
+      label: 'Options offered',
+      has: function (note) { return itemAny(note, 'optionsOffered') || ITEM_TYPES.indexOf(S.consultType) !== -1; },
+      render: function (note, host) { renderItemList(note, host, ITEM_LISTS.optionsOffered); },
+      text: function (note) { return itemListAsText(note, ITEM_LISTS.optionsOffered); }
+    },
+    '@planitems': {
+      label: 'Proposed treatment',
+      has: function (note) { return itemAny(note, 'planItems') || ITEM_TYPES.indexOf(S.consultType) !== -1; },
+      render: function (note, host) { renderItemList(note, host, ITEM_LISTS.planItems); },
+      text: function (note) { return itemListAsText(note, ITEM_LISTS.planItems); }
     }
   };
 
@@ -1162,24 +1182,24 @@ label.pmpr input { margin-top: 4px; }
       sections: [
         ['Presentation', [['reasonForAttendance', false], ['medicalHistory', false]]],
         ['Findings',     [['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
-        ['Discussion',   [['proposed', false], ['alternatives', false], ['patientFactors', false],
+        ['Discussion',   [['proposed', false], ['alternatives', false], ['@options', false], ['patientFactors', false],
                           ['risks', false], ['benefits', false], ['costs', false], ['patientQuestions', false]]],
         // Chronological inside the section too: sedated, anaesthetised, treated.
         ['Treatment',    [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true]]],
-        ['Outcome',      [['decision', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
+        ['Outcome',      [['decision', false], ['@planitems', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
       ]
     },
     consent: {
       label: 'Consent record',
       hint: 'Montgomery order: what was proposed, what alternatives were offered, what risks were named, what was decided.',
       sections: [
-        ['The discussion', [['proposed', false], ['alternatives', false], ['risks', false],
+        ['The discussion', [['proposed', false], ['alternatives', false], ['@options', false], ['risks', false],
                             ['benefits', false], ['patientFactors', false], ['costs', false]]],
         ['The patient',    [['patientQuestions', false], ['informationGiven', false], ['decision', false]]],
         ['Treatment',      [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true]]],
         ['Context',        [['reasonForAttendance', false], ['medicalHistory', false],
                             ['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
-        ['Next',           [['nextStep', false], ['plan', true]]]
+        ['Next',           [['@planitems', false], ['nextStep', false], ['plan', true]]]
       ]
     },
     soap: {
@@ -1188,9 +1208,9 @@ label.pmpr input { margin-top: 4px; }
       sections: [
         ['Subjective', [['reasonForAttendance', false], ['medicalHistory', false], ['patientQuestions', false], ['patientFactors', false]]],
         ['Objective',  [['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
-        ['Assessment', [['proposed', false], ['alternatives', false], ['risks', false], ['benefits', false]]],
+        ['Assessment', [['proposed', false], ['alternatives', false], ['@options', false], ['risks', false], ['benefits', false]]],
         ['Plan',       [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true],
-                        ['decision', false], ['costs', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
+                        ['decision', false], ['@planitems', false], ['costs', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
       ]
     }
   };
@@ -2652,7 +2672,7 @@ label.pmpr input { margin-top: 4px; }
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment', 'radiographs', 'sedation'],
+        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment', 'radiographs', 'sedation', 'items'],
                                               speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
@@ -4517,6 +4537,240 @@ label.pmpr input { margin-top: 4px; }
     return out.join('\n');
   }
 
+  /* ---- the treatment itemised (28 October 2026) ----
+     Two lists, asked for as "1 Composite, 2 Amalgam": the course of treatment
+     proposed, and the options offered for a single decision. Mirrors
+     PLAN_ITEM_FIELDS / OPTION_ITEM_FIELDS in api/_prompt.mjs — keep in step.
+
+     Every row carries its source: discussed with the patient, or dictated to
+     the record afterwards. That tag is checked against where the row's quotes
+     actually fall in the recording, because a plan the patient was never told
+     must never read as a consent record. A row whose tag does not hold up is
+     named, in the block and in the headline list, exactly as an LA row is. */
+  var ITEM_LISTS = {
+    optionsOffered: {
+      key: 'optionsOffered', id: 'options-block',
+      heading: 'Options offered', copyHead: 'Options offered',
+      cols: [['forWhat', 'For'], ['option', 'Option'], ['notes', 'Notes']],
+      addFirst: 'Add an option', addMore: 'Add another option',
+      empty: 'No options came back from the recording. If you offered more than one course, add them here.'
+    },
+    planItems: {
+      key: 'planItems', id: 'plan-items-block',
+      heading: 'Proposed treatment', copyHead: 'Proposed treatment',
+      cols: [['tooth', 'Tooth / site'], ['treatment', 'Treatment'], ['notes', 'Notes']],
+      addFirst: 'Add a treatment item', addMore: 'Add another item',
+      empty: 'No treatment items came back from the recording. If you proposed a course, add it here.'
+    }
+  };
+  // Where both lists are offered empty, to fill in by hand. Elsewhere they
+  // appear only when the recording actually produced rows.
+  var ITEM_TYPES = ['treatment-plan', 'implant-consult', 'denture-consult', 'third-molar'];
+
+  function itemRows(note, key) {
+    return note && Array.isArray(note[key]) ? note[key].filter(function (r) { return r && typeof r === 'object'; }) : [];
+  }
+
+  function itemAny(note, key) { return itemRows(note, key).length > 0; }
+
+  function itemCells(row, cols) {
+    return cols.map(function (c) {
+      return row && hasText(row[c[0]]) ? String(row[c[0]]).replace(/\s+/g, ' ').trim() : '';
+    }).concat([row && row.source ? String(row.source) : '']).join('\u0001');
+  }
+
+  function itemRowEdited(key, cols, row, i) {
+    var d = S.drafted && Array.isArray(S.drafted[key]) ? S.drafted[key][i] : null;
+    return !d || row.added || itemCells(row, cols) !== itemCells(d, cols);
+  }
+
+  function itemListEdited(key, cols) {
+    var now = itemRows(S.note, key), was = S.drafted && Array.isArray(S.drafted[key]) ? S.drafted[key] : [];
+    return now.length !== was.length || now.some(function (r, i) { return itemRowEdited(key, cols, r, i); });
+  }
+
+  /* Does the row's claimed source hold up against the recording? Reuses the
+     quote machinery the LA log and the sedation record use. A row with no
+     source at all is unplaceable and said to be so — never shown as discussed,
+     which is the failure that would matter. */
+  function itemRowProblem(key, cols, row, i, idx) {
+    if (itemRowEdited(key, cols, row, i)) return null;
+    if (!row.source) return 'no source came back, so it is not known whether this was said to the patient or dictated';
+    var quotes = Array.isArray(row.quotes) ? row.quotes : [];
+    if (!quotes.length) return 'no quote came back for it, so its source could not be checked';
+    if (row.source === 'dictated') {
+      var inDictation = quotes.some(function (q) {
+        var h = findQuote(idx, q, 'only');
+        return h && !h.spokenOnly && !h.dictatedOnly;
+      });
+      return inDictation ? null : 'marked as dictated, but its words are not in your dictation';
+    }
+    // "discussed": the words must be somewhere in the recording, and a hit that
+    // is ONLY in the dictation means it was not said to the patient.
+    var found = null;
+    quotes.some(function (q) { var h = findQuote(idx, q, false); if (h) { found = h; return true; } return false; });
+    if (!found) return 'marked as discussed with the patient, but its words are not in the recording';
+    if (found.dictatedOnly) return 'marked as discussed with the patient, but its words are only in your dictation';
+    return null;
+  }
+
+  function itemProblems(idx) {
+    var out = [];
+    Object.keys(ITEM_LISTS).forEach(function (k) {
+      var spec = ITEM_LISTS[k], cols = spec.cols;
+      itemRows(S.note, k).forEach(function (row, i) {
+        var p = itemRowProblem(k, cols, row, i, idx);
+        if (p) out.push({ what: spec.heading + ', item ' + (i + 1), why: p });
+      });
+    });
+    return out;
+  }
+
+  function renderItemList(note, host, spec) {
+    var cols = spec.cols, key = spec.key;
+    var rows = itemRows(note, key);
+    var offer = ITEM_TYPES.indexOf(S.consultType) !== -1;
+    if (!rows.length && !offer) return;
+
+    var edited = itemListEdited(key, cols);
+    var wrap = document.createElement('div');
+    wrap.className = 'field' + (edited ? ' edited' : '');
+    wrap.id = spec.id;
+    var head = document.createElement('div');
+    head.className = 'field-head';
+    var h3 = document.createElement('h3');
+    h3.textContent = spec.heading;
+    head.appendChild(h3);
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', function () {
+      var t = itemListAsText(S.note, spec);
+      if (t) writeClipboard(spec.copyHead + '\n' + t, copy);
+    });
+    head.appendChild(copy);
+    wrap.appendChild(head);
+
+    var idx = transcriptIndex();
+    var status = document.createElement('p');
+    var refresh = function () {
+      var notes = [];
+      itemRows(S.note, key).forEach(function (r, i) {
+        var p = itemRowProblem(key, cols, r, i, idx);
+        if (p) notes.push('Item ' + (i + 1) + ': ' + p + '.');
+      });
+      status.className = 'bpe-note' + (notes.length ? ' warn' : '');
+      status.textContent = !itemRows(S.note, key).length
+        ? spec.empty
+        : notes.length ? notes.join(' ') + ' Check before you paste.'
+        : 'Each item says whether it was discussed with the patient or dictated afterwards.' +
+          (itemListEdited(key, cols) ? ' Edited by you.' : ' Every item was found where it says it was.');
+      wrap.classList.toggle('edited', itemListEdited(key, cols));
+    };
+
+    if (rows.length) {
+      var table = document.createElement('table');
+      table.className = 'implant-log la-log item-log';
+      var thead = document.createElement('tr');
+      var hn = document.createElement('th');
+      hn.textContent = '#';
+      thead.appendChild(hn);
+      cols.forEach(function (c) { var th = document.createElement('th'); th.textContent = c[1]; thead.appendChild(th); });
+      var hs = document.createElement('th');
+      hs.textContent = 'Source';
+      thead.appendChild(hs);
+      table.appendChild(thead);
+
+      rows.forEach(function (row, i) {
+        var tr = document.createElement('tr');
+        var num = document.createElement('td');
+        num.className = 'item-n';
+        num.textContent = String(i + 1);
+        tr.appendChild(num);
+        cols.forEach(function (c) {
+          var td = document.createElement('td');
+          td.textContent = hasText(row[c[0]]) ? String(row[c[0]]) : '';
+          td.dataset.placeholder = '—';
+          td.setAttribute('contenteditable', EDITABLE);
+          td.setAttribute('role', 'textbox');
+          td.setAttribute('aria-label', spec.heading + ' item ' + (i + 1) + ', ' + c[1].toLowerCase());
+          td.addEventListener('paste', function (e) {
+            e.preventDefault();
+            document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+          });
+          td.addEventListener('input', function () {
+            var v = editableText(td).replace(/\s+/g, ' ').trim();
+            row[c[0]] = v ? v.slice(0, 300) : null;
+            S.edited = true;
+            refresh();
+            resetIdle();
+          });
+          tr.appendChild(td);
+        });
+        // The source is a choice, not free text: it means one of two things and
+        // the clinician must be able to correct it without retyping a word.
+        var sd = document.createElement('td');
+        var sel = document.createElement('select');
+        sel.setAttribute('aria-label', spec.heading + ' item ' + (i + 1) + ', source');
+        [['', 'Not known'], ['discussed', 'Discussed'], ['dictated', 'Dictated']].forEach(function (o) {
+          var op = document.createElement('option');
+          op.value = o[0];
+          op.textContent = o[1];
+          sel.appendChild(op);
+        });
+        sel.value = row.source || '';
+        sel.disabled = EDITABLE === 'false';
+        sel.addEventListener('change', function () {
+          row.source = sel.value || null;
+          S.edited = true;
+          refresh();
+          renderSources();
+          resetIdle();
+        });
+        sd.appendChild(sel);
+        tr.appendChild(sd);
+        table.appendChild(tr);
+      });
+      wrap.appendChild(table);
+    }
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'add-row';
+    add.textContent = rows.length ? spec.addMore : spec.addFirst;
+    add.addEventListener('click', function () {
+      resetIdle();
+      if (!S.note) return;
+      if (!Array.isArray(S.note[key])) S.note[key] = [];
+      var r = { quotes: [], added: true, source: 'discussed' };
+      cols.forEach(function (c) { r[c[0]] = null; });
+      S.note[key].push(r);
+      S.edited = true;
+      render(S.note);
+    });
+    wrap.appendChild(add);
+    wrap.appendChild(status);
+    host.appendChild(wrap);
+    refresh();
+  }
+
+  // Numbered as copied: a row with nothing in it is not copied, and the rest
+  // are numbered by their place in the copy, not in the table.
+  function itemListAsText(note, spec) {
+    var n = 0;
+    return itemRows(note, spec.key).map(function (row) {
+      var cells = spec.cols.map(function (c) {
+        if (!hasText(row[c[0]])) return null;
+        var v = String(row[c[0]]).replace(/\s+/g, ' ').trim();
+        return (c[0] === 'treatment' || c[0] === 'option') ? v : c[1] + ' ' + v;
+      }).filter(Boolean);
+      if (!cells.length) return null;
+      var src = row.source === 'dictated' ? ' (dictated)' : row.source === 'discussed' ? '' : ' (source not known)';
+      return (++n) + '. ' + cells.join(', ') + src;
+    }).filter(Boolean).join('\n');
+  }
+
   // The implant log stays a block of its own: it is a table, not prose, and it
   // belongs at the end of the record rather than inside the discussion.
   function renderImplantLog(note, host) {
@@ -4923,6 +5177,13 @@ label.pmpr input { margin-top: 4px; }
       // block's own note is easy to miss on a long draft.
       sedProblems(laIdx).forEach(function (p) {
         unmatched.push('Sedation, ' + p.what.toLowerCase() + ': ' + p.why);
+        total++;
+      });
+      // The itemised lists (28 October 2026). A row whose source does not hold
+      // up is the one error here that could put a plan the patient never heard
+      // into a consent record, so it goes in the headline list too.
+      itemProblems(laIdx).forEach(function (p) {
+        unmatched.push(p.what + ': ' + p.why);
         total++;
       });
     }
@@ -5411,6 +5672,9 @@ label.pmpr input { margin-top: 4px; }
     });
     if (laEdited()) out.push('laLog');
     if (sedEdited()) out.push('sedation');
+    Object.keys(ITEM_LISTS).forEach(function (k) {
+      if (itemListEdited(k, ITEM_LISTS[k].cols)) out.push(k);
+    });
     return out;
   }
 
