@@ -3174,6 +3174,24 @@ async function testSept27b() {
     ok('nor are tooth numbers, BPE scores, pocket depths or recall intervals',
       mm({ costs: null, examination: '6mm pockets UR6, BPE 4, grade 2 mobility, caries 36.' }).length === 0 &&
       mm({ costs: null, plan: 'Review in 6 months.' }).length === 0);
+    // The itemised lists arrived the same day as this check and it did not look
+    // at them. An item's notes is exactly where a price lands now.
+    ok('a price in a proposed-treatment item is caught',
+      mm({ costs: null, planItems: [{ tooth: 'UR6', treatment: 'Composite', notes: 'Private, \u00a3150' }] })
+        .join() === 'the proposed treatment list',
+      JSON.stringify(mm({ costs: null, planItems: [{ tooth: 'UR6', treatment: 'Composite', notes: 'Private, \u00a3150' }] })));
+    ok('and a price in an option offered',
+      mm({ costs: null, optionsOffered: [{ forWhat: 'UR6', option: 'Crown', notes: '\u00a3650 privately' }] })
+        .join() === 'the options offered');
+    ok('both named when both carry one',
+      mm({ costs: null, planItems: [{ notes: '\u00a3150' }], optionsOffered: [{ notes: '\u00a3650' }] }).length === 2);
+    ok('a filled costs field still silences them',
+      mm({ costs: 'From \u00a3150.', planItems: [{ notes: '\u00a3150' }] }).length === 0);
+    ok('an item list with no money says nothing',
+      mm({ costs: null, planItems: [{ tooth: 'UR6', treatment: 'Composite' }] }).length === 0);
+    ok('and a malformed row does not throw',
+      mm({ costs: null, planItems: ['x', null, 7] }).length === 0 &&
+      mm({ costs: null, planItems: 'nope' }).length === 0);
     ok('a note with no money at all says nothing', mm({ costs: null, informationGiven: 'Leaflet given.' }).length === 0);
     ok('and a malformed note does not throw', mm(null).length === 0 && mm('x').length === 0 && mm({}).length === 0);
 

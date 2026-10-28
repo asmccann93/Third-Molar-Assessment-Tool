@@ -6067,6 +6067,24 @@ async function testItemisedTreatment() {
     !!$(ctx.doc, 'plan-items-block') && !!$(ctx.doc, 'options-block'));
   text = await ctx.copy();
   ok('but empty lists are not copied', !/Proposed treatment\n1\./.test(text) && !/Options offered\n1\./.test(text));
+  // A row the clinician types is not a row the patient was told about until
+  // they say so. Defaulting it to "discussed" would manufacture a consent
+  // record out of a convenience.
+  {
+    click($(ctx.doc, 'plan-items-block').querySelector('.add-row'));
+    await tick(40);
+    const b = $(ctx.doc, 'plan-items-block');
+    ok('a hand-added row starts with no source, not "discussed"',
+      b.querySelector('select').value === '', b.querySelector('select').value);
+    const cell = b.querySelector('td[contenteditable="true"]');
+    cell.textContent = 'UR6';
+    cell.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+    await tick(20);
+    const t2 = await ctx.copy();
+    ok('and it is copied saying the source is not known',
+      /Tooth \/ site UR6 \(source not known\)/.test(t2), t2.slice(0, 500));
+  }
+
   // An exam is where a numbered course of treatment is most often written, so
   // it is offered both lists too (28 October 2026). It opens in SOAP, where the
   // options land in Assessment and the course in Plan.

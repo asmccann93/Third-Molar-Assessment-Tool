@@ -895,6 +895,19 @@ export function misplacedMoney(note) {
     const v = note[key];
     if (typeof v === 'string' && MONEY.test(v)) out.push(label);
   }
+  // The itemised lists too (28 October 2026, second pass). They arrived the
+  // same day as this check and it did not look at them — and an item's notes is
+  // exactly where a price lands now: "Composite, £150", "Crown, £650
+  // privately". The hole was opened by the feature that made it likely.
+  for (const [key, cols, label] of [
+    ['planItems', PLAN_ITEM_FIELDS, 'the proposed treatment list'],
+    ['optionsOffered', OPTION_ITEM_FIELDS, 'the options offered']
+  ]) {
+    const rows = Array.isArray(note[key]) ? note[key] : [];
+    const hit = rows.some((r) => r && typeof r === 'object' &&
+      cols.some((c) => typeof r[c] === 'string' && MONEY.test(r[c])));
+    if (hit) out.push(label);
+  }
   return out;
 }
 
