@@ -32,7 +32,7 @@ import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS
          buildPostopSystemPrompt, parsePostop, asText, pauseMarker, partMarker, SPEAKER_LABEL,
          cleanQuestions, LA_LOG_FIELDS, PMPR_LINE,
          SEDATION_TEXT_FIELDS, SEDATION_DOSE_FIELDS, SEDATION_LABELS, SEDATION_DRAFT,
-         sedationAny, sedationAsLines } from './_prompt.mjs';
+         sedationAny, sedationAsLines, misplacedMoney } from './_prompt.mjs';
 import { checklistGaps, checklistIsDraft } from './_checklists.mjs';
 import { sessionStillGood } from './_store.mjs';
 
@@ -426,6 +426,21 @@ export default async function handler(req, res) {
         if (lines.length) note.radiographicFindings = lines.join('\n');
       }
       delete note.radiographs;
+    }
+
+    // Money under the wrong heading (28 October 2026). Raised whatever the
+    // consult type says about costs applying — a note that quotes prices while
+    // reporting no cost discussion is wrong on every kind of appointment.
+    // Unshifted, not pushed: it is about a Montgomery field and belongs where
+    // the clinician will see it first.
+    {
+      const where = misplacedMoney(note);
+      if (where.length) {
+        note.gaps.unshift(
+          `Costs discussed is empty, but figures that look like prices appear in ${where.join(', ')}. ` +
+          'Check whether the cost discussion belongs in the costs field before you paste.'
+        );
+      }
     }
 
     // Last, once every gap is in the list: a question must answer one of them.

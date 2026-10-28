@@ -1915,11 +1915,17 @@ async function testSweep2() {
 
   // --- 8. a recall's inapplicable fields are all named in its prompt ---
   {
+    // Reworded on 28 October 2026 — the old text ordered the model to leave
+    // these null, and it obeyed, putting a whole costing in informationGiven.
+    // The guarantee is unchanged: every inapplicable field is still named in
+    // the clause that exempts it from a gap.
     const sp = pm.buildSystemPrompt('exam-recall', 'standard');
-    const at = sp.indexOf('There is usually NO consent');
-    const emphasis = sp.slice(at, sp.indexOf('The other fields still apply', at));
+    const at = sp.indexOf('A recall often contains no consent discussion');
+    const emphasis = sp.slice(at, sp.indexOf('Those fields are NOT switched off', at));
     const missing = pm.notApplicableFields('exam-recall').filter((f) => !emphasis.includes(f));
     ok('exam/recall: every field that does not apply is named among "do NOT add gaps"', at > -1 && missing.length === 0, missing.join(', '));
+    ok('and the exemption is conditional on it not having happened, not absolute',
+      /WHERE THAT IS SO, leave those fields/.test(emphasis), emphasis.slice(0, 200));
   }
 
   // --- 9. an item that does not apply is "Not applicable: <reason>", not a gap ---
@@ -3118,6 +3124,74 @@ async function testSept27b() {
                      unexpectedDrafts: types.filter((t) => !NEW.includes(t) && cl.checklistIsDraft(t)) }));
   ok('an unknown type is not a draft', !cl.checklistIsDraft('nope') && !cl.checklistIsDraft('__proto__') && !cl.checklistIsDraft(undefined));
 
+  /* --- money under the wrong heading (28 October 2026) ---
+     A live recall came back with the whole denture-and-implant costing inside
+     informationGiven and costs null, so the note read "Costs discussed: not
+     captured" directly above four quoted prices. The recall prompt had told the
+     model to leave costs null; that is fixed, but a blank Montgomery field with
+     its content under the wrong heading is too serious to rest on wording. */
+  {
+    const SCREENSHOT = 'Private denture options discussed: start at £750, tend to be smaller with less palatal ' +
+      'coverage and look more natural. Implants discussed: £3,000 per implant. For future tooth loss: two ' +
+      'implants with four teeth would cost about £7,000, or implant-retained denture £7,000-£8,000.';
+
+    ok('the recall prompt no longer orders the consent fields left null',
+      !/Leave those fields \(proposed, alternatives, risks, benefits, costs, patientFactors, decision\) null/
+        .test(pm.buildSystemPrompt('exam-recall', 'standard')));
+    ok('it says instead that they are not switched off, and must be filled if it happened',
+      /Those fields are NOT switched off for a recall/.test(pm.buildSystemPrompt('exam-recall', 'standard')) &&
+      /a price or an estimate given/.test(pm.buildSystemPrompt('exam-recall', 'standard')));
+    ok('and names the exact failure, so it cannot be reintroduced as a tidy-up',
+      /saying costs were not discussed while quoting prices/.test(pm.buildSystemPrompt('exam-recall', 'standard')));
+
+    const anySys = pm.buildSystemPrompt('third-molar', 'standard');
+    ok('every consult type now gets the field-routing rules',
+      /## WHICH FIELD/.test(anySys));
+    ok('money is defined as belonging only in costs',
+      /"costs": ANYTHING said about money/.test(anySys) && /Money NEVER goes in another field instead/.test(anySys));
+    ok('and informationGiven is defined as what was handed over, not the discussion',
+      /what the patient was given or pointed to, NOT the substance of/.test(anySys.replace(/\s+/g, ' ')));
+
+    // The backstop itself.
+    const mm = pm.misplacedMoney;
+    ok('a note quoting prices with costs empty is reported, naming where they are',
+      mm({ costs: null, informationGiven: SCREENSHOT }).length === 1 &&
+      /Information given/.test(mm({ costs: null, informationGiven: SCREENSHOT })[0]),
+      JSON.stringify(mm({ costs: null, informationGiven: SCREENSHOT })));
+    ok('a filled costs field says nothing, however much money is elsewhere',
+      mm({ costs: 'From £750.', informationGiven: SCREENSHOT }).length === 0);
+    ok('a whitespace-only costs field still counts as empty',
+      mm({ costs: '   ', informationGiven: SCREENSHOT }).length === 1);
+    ok('an amount spoken in words is caught too',
+      mm({ costs: null, informationGiven: 'About seven hundred pounds privately.' }).length === 1);
+    ok('it looks in the dictated fields as well',
+      mm({ costs: null, plan: 'Private denture, £750.' }).length === 1);
+    // The false positives that would put a wrong line at the top of the list.
+    ok('a weight in pounds on a sedation note is NOT money',
+      mm({ costs: null, medicalHistory: 'Weighs about 180 pounds.' }).length === 0);
+    ok('nor is a molar band, an NHS band being England-only and this practice Scottish',
+      mm({ costs: null, treatmentToday: 'Molar band 2 fitted.' }).length === 0);
+    ok('nor are tooth numbers, BPE scores, pocket depths or recall intervals',
+      mm({ costs: null, examination: '6mm pockets UR6, BPE 4, grade 2 mobility, caries 36.' }).length === 0 &&
+      mm({ costs: null, plan: 'Review in 6 months.' }).length === 0);
+    ok('a note with no money at all says nothing', mm({ costs: null, informationGiven: 'Leaflet given.' }).length === 0);
+    ok('and a malformed note does not throw', mm(null).length === 0 && mm('x').length === 0 && mm({}).length === 0);
+
+    // End to end, and at the head of the list where it will be seen.
+    const base = Object.fromEntries(pm.FIELDS.map(([k]) => [k, 'Recorded.']));
+    stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text',
+      text: JSON.stringify({ ...base, costs: null, informationGiven: SCREENSHOT, gaps: [], checklist: {} }) }],
+      stop_reason: 'end_turn' } }));
+    const r = mockRes();
+    await extract(mockReq({ body: { turns: [{ speaker: 'S1', text: 'Options and prices.', start: 1 }],
+      consultType: 'exam-recall' } }), r);
+    const n = r.body?.note || {};
+    ok('end to end, the recall raises it even though costs "does not apply" there',
+      /Costs discussed is empty, but figures that look like prices appear in Information given/.test(n.gaps[0] || ''),
+      JSON.stringify(n.gaps));
+    ok('and it is the FIRST gap, not buried under the others', /^Costs discussed is empty/.test(n.gaps[0] || ''));
+  }
+
   // --- dentures (26 October 2026; split in two on the 27th) ---
   {
     ok('the single `denture` type is gone, replaced by the two',
@@ -3161,9 +3235,15 @@ async function testSept27b() {
       ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'patientFactors', 'decision']
         .every((f) => pm.notApplicableFields('denture-stage').includes(f)),
       JSON.stringify(pm.notApplicableFields('denture-stage')));
-    const dsSys = pm.buildSystemPrompt('denture-stage', 'standard');
+    const dsSys = pm.buildSystemPrompt('denture-stage', 'standard').replace(/\s+/g, ' ');
     ok('and the prompt says an empty consent field is the normal shape of the visit',
-      /must not be reported as something missing/.test(dsSys.replace(/\s+/g, ' ')));
+      /usually empty at a visit like this, and that is the normal shape/.test(dsSys), 'missing');
+    // Reworded on 28 October 2026 alongside the recall: the old text told the
+    // model not to treat a cost remark as a consent discussion, which risked
+    // the same loss — a price quoted at a reline going nowhere.
+    ok('but a price quoted at a stage still goes in costs, not nowhere',
+      /if a price was quoted, an option weighed or a decision taken, put it in its own field/.test(dsSys) &&
+      /never in informationGiven, and never left out because this is only a stage/.test(dsSys), 'missing');
 
     // THE REGRESSION. A five-minute ease produced 29 lines to dismiss under the
     // single type: 19 consent items plus 10 blank-field gaps. A safety list that

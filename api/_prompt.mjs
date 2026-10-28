@@ -66,7 +66,8 @@ export const CONSULT_TYPES = {
     // every such recall at parseNote, deterministically.
     notApplicable: ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'patientFactors', 'decision'],
     emphasis:
-      'There is usually NO consent discussion in a recall: no procedure proposed, no alternatives weighed, no risks or benefits named, no costs discussed, so no patient-specific factors making a risk material, and no decision taken. Leave those fields (proposed, alternatives, risks, benefits, costs, patientFactors, decision) null and do NOT add gaps for them — they do not apply to this kind of appointment. If a treatment WAS proposed and discussed, fill them normally. ' +
+      'A recall often contains no consent discussion: nothing proposed, no alternatives weighed, no risks or benefits named, nothing said about cost, no decision taken. WHERE THAT IS SO, leave those fields (proposed, alternatives, risks, benefits, costs, patientFactors, decision) null and do NOT add gaps for them — they do not apply to this kind of appointment. ' +
+      'Those fields are NOT switched off for a recall. If any of it did happen — a treatment proposed, options weighed, a price or an estimate given, a decision taken or deferred — fill that field from what was said, exactly as on any other appointment. An empty field here means it did not happen; it NEVER means it happened and belongs somewhere else. Never move a cost, an option or a decision into another field (informationGiven above all) because the appointment is a recall: that produces a note saying costs were not discussed while quoting prices a line below, which is a false record. ' +
       'The other fields still apply to a recall — reason for attendance, medical history, the patient\'s own questions, information given and next step: if one of those is empty, leave it null AND add a gaps entry for it, as usual. ' +
       'Routine examination. Expect findings, oral hygiene advice, lifestyle advice ' +
       '(smoking, alcohol, diet), radiographic justification, and a recall interval.',
@@ -109,10 +110,11 @@ export const CONSULT_TYPES = {
       'tissues under the denture, where it was rubbing and what was eased or adjusted, ' +
       'what the patient said about comfort, fit, eating, speech or appearance, and the ' +
       'next stage. Capture the shade, tooth position, material or impression material ' +
-      'only as stated. Do NOT treat a remark made in passing about a risk or a cost as a ' +
-      'consent discussion: if the fields about what was proposed, the alternatives, the ' +
-      'risks or the decision are empty, that is the normal shape of this appointment and ' +
-      'must not be reported as something missing.',
+      'only as stated. The consent fields are usually empty at a visit like this, and ' +
+      'that is the normal shape of the appointment, not something missing. But if a ' +
+      'price was quoted, an option weighed or a decision taken, put it in its own field ' +
+      '(costs, proposed, alternatives, decision) exactly as on any other appointment — ' +
+      'never in informationGiven, and never left out because this is only a stage.',
   },
   perio: {
     label: 'Perio',
@@ -617,6 +619,35 @@ send, a radiograph or scan to arrange, lab work, a prescription to issue, a revi
 - No names or other identifiers.
 - Empty array if none.
 
+## WHICH FIELD
+
+Until 28 October 2026 you were given the field NAMES and nothing else, and a whole
+discussion of denture options and their prices — £750, £3,000 an implant, £7,000 —
+went into informationGiven while costs came back null. The note then read "costs:
+not captured" a line above four quoted prices. That is a false record of a consent
+discussion. These boundaries are therefore not advisory:
+
+- "costs": ANYTHING said about money. A price, a fee, an estimate, a range, a
+  deposit, whether it is NHS or private, an NHS band, that something is free, that
+  a remake would be chargeable. If a figure of money was spoken, it belongs here.
+  Money NEVER goes in another field instead.
+- "informationGiven": what the patient was given or pointed to, NOT the substance of
+  the discussion — a leaflet, a written estimate or treatment plan, a link, a
+  printout, the output of a tool, written or spoken aftercare instructions to take
+  away. If you are about to write an account of the options and what they cost in
+  here, it belongs in proposed, alternatives and costs instead.
+- "proposed": the treatment the clinician put forward. "alternatives": the other
+  courses offered, including doing nothing and the shortened arch.
+- "decision": what was settled — accepted, declined, deferred — and whether time to
+  think it over was offered. A patient saying they will think about it IS a decision
+  to record, not an absence of one.
+- "benefits": what the treatment is expected to achieve for this patient, and the
+  realistic limits of that.
+
+A field may be filled while the one beside it is null; that is normal. What is never
+right is the same content appearing under the wrong heading because the right field
+seemed not to apply to this kind of appointment.
+
 ## OUTPUT
 
 Return a single JSON object and nothing else. No markdown fences, no explanation.
@@ -743,6 +774,47 @@ export function buildUserMessage(transcript, pauses, speakerRoles, { note = true
  * Defensive: a malformed response must fail loudly, never silently
  * produce a note with missing fields.
  * ------------------------------------------------------------------ */
+
+/* Money mentioned somewhere other than the costs field (28 October 2026).
+ *
+ * A live recall came back with a whole denture-and-implant costing — £750,
+ * £3,000 an implant, £7,000 — inside informationGiven, and "costs" null, so the
+ * note read "Costs discussed: not captured" directly above four prices. The
+ * cause was the recall prompt telling the model to leave costs null; the prompt
+ * is fixed, but a blank Montgomery field with the content sitting under the
+ * wrong heading is too serious to leave resting on prompt wording alone.
+ *
+ * This never MOVES anything — moving content between clinical fields on a
+ * pattern match is exactly the kind of guess this tool refuses to make. It
+ * raises a gap so the clinician looks. It runs for every consult type,
+ * including those where costs is "not applicable": that is where it bites.
+ */
+/* Deliberately narrow. It must not fire on the figures a dental note is full of:
+   tooth numbers, mobility grades, BPE scores, recall intervals, probing depths.
+   So: a currency symbol against a digit, or an amount against the word pounds.
+   "band 1/2/3" is NOT matched — those are the England and Wales NHS bands, this
+   practice is in Scotland, and a molar band would match it.
+
+   Nor is a figure against the word "pounds": a sedation record carries a weight,
+   and "weighs about 180 pounds" would have put a false gap at the TOP of the
+   list on sedation notes — which is precisely the kind of wrong line that
+   teaches a clinician to stop reading the list. "seven hundred pounds" is
+   matched, because no weight is written that way. A price in digits is written
+   with the symbol in practice: £750, not 750 pounds. */
+const MONEY = /£\s?\d|\bGBP\s?\d|\b\d[\d,.]*\s*quid\b|\b(?:hundred|thousand)\s+pounds\b/i;
+
+export function misplacedMoney(note) {
+  if (!note || typeof note !== 'object') return [];
+  const costs = note.costs;
+  if (typeof costs === 'string' && costs.trim()) return [];   // the field is filled: nothing to say
+  const out = [];
+  for (const [key, label] of [...FIELDS, ...DICTATED_FIELDS]) {
+    if (key === 'costs') continue;
+    const v = note[key];
+    if (typeof v === 'string' && MONEY.test(v)) out.push(label);
+  }
+  return out;
+}
 
 // Consent fields that do not apply to this kind of appointment. Empty for every
 // type that involves a procedure, which is the safe default: a blank there is a
