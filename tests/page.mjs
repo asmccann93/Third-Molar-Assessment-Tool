@@ -148,7 +148,7 @@ const click = (el) => el.dispatchEvent(new el.ownerDocument.defaultView.MouseEve
 
 // Consent, pick a type, record, stop, and let the stubbed API return a draft.
 // Everything goes through the page's real controls and real code path.
-async function runConsultation(ctx, note, turns) {
+async function runConsultation(ctx, note, turns, opts) {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
@@ -159,8 +159,46 @@ async function runConsultation(ctx, note, turns) {
   click($(doc, 'start'));
   await tick(60);
   click($(doc, 'stop'));
-  await tick(150);
+  await settle(doc, (opts && opts.until) || null, (opts && opts.what) || null);
   return { doc, win };
+}
+
+/* Wait for the page to REACH an outcome, not for a fixed number of
+   milliseconds (29 October 2026). This used to be `await tick(150)` covering
+   stop -> encode -> upload -> transcribe -> extract -> render. Under load that
+   overran and every assertion after it read a half-rendered page.
+
+   The visible failures were the mild half: an assertion looking for something
+   that had not arrived yet. The half that matters is the twenty-odd assertions
+   that check something is ABSENT — no transcript left in the DOM, the draft not
+   shown, nothing labelled dictated — because those pass for free on a page that
+   never got there. A test that cannot fail is not a test. Same lesson as
+   ctx.copy(): wait for the event, and throw if it never comes. */
+/* Wait for a stated condition, and throw naming it if it never comes
+   (29 October 2026). Every `await tick(300)` standing between a click and the
+   assertions about its result is a guess about how long a loaded machine takes.
+   Measured on this 2-core container under load, the fixed sleeps in the
+   record-more tests broke 6 runs in 10. The sleeps that remain are the ones
+   waiting for something that must NOT happen, where the clock is the point. */
+async function waitFor(pred, what, budget = 6000) {
+  for (let waited = 0; waited < budget; waited += 10) {
+    if (pred()) { await tick(20); return; }
+    await tick(10);
+  }
+  throw new Error('never reached ' + what + ' within ' + budget +
+    'ms — the assertions after this point would have read a half-rendered page.');
+}
+
+async function settle(doc, until, what, budget = 6000) {
+  const done = until || (() => !$(doc, 'draft').classList.contains('hidden') ||
+                               !$(doc, 'error').classList.contains('hidden'));
+  for (let waited = 0; waited < budget; waited += 10) {
+    if (done()) { await tick(20); return; }   // a breath for the render that follows
+    await tick(10);
+  }
+  throw new Error('the consultation never reached ' + (what || 'a draft or an error') +
+    ' within ' + budget + 'ms — so every assertion after this point would have been ' +
+    'reading a half-rendered page.');
 }
 
 const DEFAULT_TURNS = [
@@ -345,7 +383,14 @@ async function testAbandonment() {
   });
   const { doc, calls } = ctx;
 
-  await runConsultation(ctx, null, DEFAULT_TURNS);
+  /* This consultation reaches no draft and no error on purpose — the server
+     hands back a job that never finishes, which is the whole point of the
+     test. Its outcome is the page starting to poll for that job, so that is
+     what we wait for rather than a fixed sleep. */
+  await runConsultation(ctx, null, DEFAULT_TURNS, {
+    until: () => calls.some((c) => c.method === 'GET' && c.url.includes('/api/transcribe')),
+    what: 'the point of polling the pending job'
+  });
   ok('a pending job keeps the working view up', !$(doc, 'working').classList.contains('hidden'));
 
   const before = calls.length;
@@ -422,7 +467,7 @@ async function testLockAndCopy() {
   const { doc, win, calls } = ctx;
 
   click($(doc, 'copy-all'));
-  await tick(40);
+  await waitFor(() => !!copied, 'the copy reaching the clipboard');
   const text = copied;
   ok('copied text includes filled fields', text.includes('Reason text.') && text.includes('Proposed text.'));
   ok('copied text omits empty fields', !text.includes('Relevant medical history'));
@@ -3183,6 +3228,7 @@ await testEveryLayoutIsComplete();
 await testInjectionInEveryBlock();
 await testNoDictationStillHasSomewhereToWrite();
 await testEveryBlockCanBeFilledByHand();
+await testPrintCarriesOnlyWhatTheCopyDoes();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
@@ -4747,7 +4793,8 @@ async function testRecordMore() {
   ok('it records without clearing anything', !$(doc, 'recording').classList.contains('hidden') &&
     /Recording 2 for this consultation/.test($(doc, 'recording-h').textContent) && decision() === 'Proceed.');
   click($(doc, 'stop'));
-  await tick(300);
+  await waitFor(() => extractBodies.length >= 2 && !$(doc, 'draft').classList.contains('hidden'),
+    'the redraft from both recordings');
   const b2 = extractBodies[1];
   ok('the note is redrafted from both recordings, each whole and in order',
     b2 && Array.isArray(b2.parts) && b2.parts.length === 2 && b2.parts[0].turns[0].text === A[0].text && b2.parts[1].turns[0].text === B[0].text,
@@ -4759,7 +4806,7 @@ async function testRecordMore() {
 
   // Everything made from the transcript uses every recording.
   click($(doc, 'make-summary'));
-  await tick(100);
+  await waitFor(() => extractBodies[extractBodies.length - 1].kind === 'summary', 'the summary request');
   const sb = extractBodies[extractBodies.length - 1];
   ok('the summary is asked for from every recording', sb.kind === 'summary' && sb.parts && sb.parts.length === 2);
 
@@ -4768,7 +4815,8 @@ async function testRecordMore() {
   await tick(80);
   const before = transcripts;
   click($(doc, 'discard'));
-  await tick(60);
+  await waitFor(() => !$(doc, 'draft').classList.contains('hidden') &&
+    $(doc, 'recording').classList.contains('hidden'), 'the note again after discarding');
   ok('discarding an extra recording goes back to the note, unchanged', !$(doc, 'draft').classList.contains('hidden') && decision() === 'Coronectomy.');
   ok('and sends nothing', transcripts === before);
   await tick(200);   // the old recorder's last pages land and must be dropped
@@ -4779,18 +4827,19 @@ async function testRecordMore() {
   click($(doc, 'add-part'));
   await tick(80);
   click($(doc, 'stop'));
-  await tick(300);
+  await waitFor(() => !$(doc, 'error').classList.contains('hidden'), 'the failed-transcription error');
   ok('a failed transcription goes back to the note, which is unchanged',
     !$(doc, 'draft').classList.contains('hidden') && decision() === 'Coronectomy.' && !$(doc, 'error').classList.contains('hidden'));
   ok('and offers to try again or drop only the extra recording',
     $(doc, 'retry').textContent === 'Try transcribing again' && $(doc, 'discard-transcript').textContent === 'Discard the extra recording',
     `${$(doc, 'retry').textContent} / ${$(doc, 'discard-transcript').textContent}`);
   click($(doc, 'discard-transcript'));
-  await tick(40);
+  await waitFor(() => $(doc, 'error').classList.contains('hidden'), 'the error cleared');
   ok('dropping it keeps the note and the consultation', decision() === 'Coronectomy.' && $(doc, 'error').classList.contains('hidden') && $(doc, 'consent').checked);
   click($(doc, 'copy-all'));   // nothing should throw
+  const beforeLen = extractBodies.length;
   click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'full'));
-  await tick(200);
+  await waitFor(() => extractBodies.length > beforeLen, 'the redraft at full length');
   const lb = extractBodies[extractBodies.length - 1];
   ok('and the dropped recording is not sent with the next redraft', lb.parts && lb.parts.length === 2, JSON.stringify(lb.parts && lb.parts.length));
 
@@ -4799,20 +4848,23 @@ async function testRecordMore() {
   click($(doc, 'add-part'));
   await tick(80);
   click($(doc, 'stop'));
-  await tick(300);
+  await waitFor(() => /Could not add the extra recording/.test($(doc, 'error-title').textContent),
+    'the failed-redraft error');
   ok('a failed redraft keeps the note on screen and says the recording is held',
     decision() === 'Coronectomy.' && /Could not add the extra recording/.test($(doc, 'error-title').textContent) &&
     /held in memory/.test($(doc, 'error-body').textContent), $(doc, 'error-body').textContent);
   ok('and no fourth recording is offered while it is not in the note', $(doc, 'add-part').classList.contains('hidden'));
+  const beforeRetry = extractBodies.length;
   click($(doc, 'retry'));
-  await tick(300);
+  await waitFor(() => extractBodies.length > beforeRetry && $(doc, 'error').classList.contains('hidden'),
+    'the successful retry');
   const rb = extractBodies[extractBodies.length - 1];
   ok('Try again redrafts from all three', rb.parts && rb.parts.length === 3 && $(doc, 'error').classList.contains('hidden'));
   ok('and three is the limit', $(doc, 'add-part').classList.contains('hidden'));
 
   // A new patient starts from one recording again.
   click($(doc, 'clear'));
-  await tick(20);
+  await waitFor(() => !$(doc, 'setup').classList.contains('hidden'), 'the setup view for the next patient');
   transcripts = 0;
   await toDraft(ctx);
   const nb = extractBodies[extractBodies.length - 1];
@@ -5507,12 +5559,15 @@ async function testTreatmentToday() {
   // discussion and the outcome, so the clinical layout is selected explicitly
   // rather than relied on as a default.
   click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'clinical'));
-  await tick(30);
+  await waitFor(() => headings().includes('Treatment') && !!fieldWrap(doc, 'treatmentToday'),
+    'the clinical layout rendered');
   ok('the treatment has its own section, between the discussion and the outcome',
     /Discussion\|Treatment\|Outcome/.test(headings().join('|')), headings().join('|'));
   const tw = fieldWrap(doc, 'treatmentToday');
   ok('and is marked as dictated', !!tw && !!tw.querySelector('.dictated-tag'));
   tw.querySelector('.src-toggle').click();
+  await waitFor(() => !!tw.querySelector('.src-list') && !!tw.querySelector('.src-list').textContent.trim(),
+    'the source list opened');
   const srcText = tw.querySelector('.src-list').textContent;
   ok('a sentence found in the dictation counts', /“Surgical removal of the lower left eight”/.test(srcText));
   ok('a sentence found only in the conversation does not, and says why',
@@ -6368,6 +6423,94 @@ async function testEveryBlockCanBeFilledByHand() {
   ok('a restorative visit is offered no implant log and no sedation record',
     !$(ctx.doc, 'implant-block') && !$(ctx.doc, 'sedation-offer') && !$(ctx.doc, 'sedation-block'));
   ok('but is still offered the LA, which it does need', !!$(ctx.doc, 'la-block'));
+}
+
+/**
+ * What the Copy omits, the print omits (29 October 2026).
+ *
+ * Offering the blocks on more appointment types made this bite routinely: an
+ * un-dictated extraction printed "Nothing was dictated, so no local anaesthetic
+ * was taken from the recording. If you gave one, add it here." onto a patient's
+ * clinical record. Every .bpe-note is screen guidance and noteAsText() includes
+ * none of them, so the paper should not either.
+ */
+async function testPrintCarriesOnlyWhatTheCopyDoes() {
+  section('The printed record carries only what the copy does');
+  const printCss = (html.match(/@media print \{[\s\S]*?\n\}/) || [''])[0];
+  ok('the guidance lines are hidden on paper', /\.bpe-note,/.test(printCss), printCss.slice(0, 500));
+  ok('and so is a block that has nothing to copy', /\.print-none \{ display: none !important; \}/.test(printCss));
+
+  // An extraction with nothing dictated: the LA block is on screen to be filled
+  // in, and marked so it does not reach the paper empty.
+  let ctx = await runType(() => note27({ sources: {} }), { type: /^Extraction/, dictate: false });
+  let la = $(ctx.doc, 'la-block');
+  ok('an empty LA block is on screen', !!la);
+  ok('but marked as not for the paper', la.classList.contains('print-none'));
+  let text = await ctx.copy();
+  ok('matching the copy, which leaves it out', !/Local anaesthetic given/.test(text), text.slice(0, 300));
+
+  // Fill it in and the mark goes: now it IS record.
+  click(la.querySelector('.add-row'));
+  await tick(40);
+  la = $(ctx.doc, 'la-block');
+  const cell = la.querySelector('td[contenteditable="true"]');
+  cell.textContent = 'Articaine';
+  cell.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  await tick(30);
+  ok('once filled in, the block is for the paper again',
+    !$(ctx.doc, 'la-block').classList.contains('print-none'));
+  text = await ctx.copy();
+  ok('and the copy carries it too', /Local anaesthetic given/.test(text), text.slice(0, 400));
+
+  // The sedation offer is a button and nothing else: never record.
+  ctx = await runType(() => note27({ sources: {} }), { type: /Third molar/, dictate: false });
+  ok('the sedation offer never reaches the paper',
+    $(ctx.doc, 'sedation-offer').classList.contains('print-none'));
+  // An implant surgery with nothing placed, likewise.
+  ctx = await runType(() => note27({ sources: {} }), { type: /Implant surgery/, dictate: false });
+  ok('nor does an empty implant log', $(ctx.doc, 'implant-block').classList.contains('print-none'));
+  // ...and an itemised list nobody filled in.
+  ctx = await runType(() => note27({ sources: {} }), { type: /Implant consult/, dictate: false });
+  ok('nor do the empty itemised lists',
+    $(ctx.doc, 'plan-items-block').classList.contains('print-none') &&
+    $(ctx.doc, 'options-block').classList.contains('print-none'));
+
+  /* And a section heading left standing over nothing goes with it. Hiding the
+     blocks created this: on an extraction with no dictation the Treatment
+     section holds only the sedation offer and an empty LA table, so the paper
+     would otherwise get the word "Treatment" and nothing under it. */
+  ctx = await runType(() => note27({ sources: {} }), { type: /^Extraction/, dictate: false });
+  const headOf = (title) => [...$(ctx.doc, 'fields').children]
+    .find((e) => e.classList.contains('section-heading') && e.textContent === title);
+  const kept = (title) => {
+    const kids = [...$(ctx.doc, 'fields').children];
+    const at = kids.indexOf(headOf(title));
+    const out = [];
+    for (let i = at + 1; i < kids.length; i++) {
+      if (kids[i].classList.contains('section-heading')) break;
+      out.push(kids[i]);
+    }
+    return out;
+  };
+  const treat = headOf('Treatment');
+  ok('the Treatment section is on screen, holding only empty blocks', !!treat &&
+    kept('Treatment').length > 0 && kept('Treatment').every((e) => e.classList.contains('print-none')),
+    kept('Treatment').map((e) => e.id + ':' + e.className).join(' | '));
+  ok('so its heading is kept off the paper too', treat.classList.contains('print-none'));
+  const disc = headOf('Discussion');
+  ok('while a section with content keeps its heading',
+    !!disc && !disc.classList.contains('print-none'));
+
+  // Fill the LA block and the heading comes back with it.
+  la = $(ctx.doc, 'la-block');
+  click(la.querySelector('.add-row'));
+  await tick(40);
+  const c2 = $(ctx.doc, 'la-block').querySelector('td[contenteditable="true"]');
+  c2.textContent = 'Lidocaine 2% with adrenaline';
+  c2.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  await tick(30);
+  ok('once something is recorded under it, the heading prints again',
+    !headOf('Treatment').classList.contains('print-none'));
 }
 
 async function testPmpr() {

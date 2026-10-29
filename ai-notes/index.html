@@ -136,6 +136,17 @@ button:disabled { opacity: .45; cursor: default; }
      printing on the paper note — the LA log's since 27 September, the sedation
      block's since 26 October. */
   .add-row { display: none !important; }
+  /* Screen guidance, never record. Every .bpe-note is a line telling the
+     clinician what to do or where something came from — "add it here", "check
+     before you paste", "Taken as dictated" — and noteAsText() includes none of
+     them. The rule this now follows: WHAT THE COPY OMITS, THE PRINT OMITS. An
+     un-dictated extraction was otherwise printing "Nothing was dictated, so no
+     local anaesthetic was taken from the recording. If you gave one, add it
+     here." onto a patient's clinical record. */
+  .bpe-note,
+  /* A block offered but never filled contributes nothing to the copy, so it
+     contributes nothing to the paper either. Set by each block's refresh(). */
+  .print-none { display: none !important; }
   /* The source selector is a control on screen and a word on paper. Printed as
      a dropdown it reads like an unanswered question on a clinical record. */
   table.item-log select {
@@ -961,7 +972,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-29.3';
+  var BUILD = '2026-10-29.4';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -3315,6 +3326,8 @@ label.pmpr input { margin-top: 4px; }
       });
     });
 
+    markPrintSections();
+
     // The four clinical blocks are rendered by the layout above, in their
     // section. What is left here is not note content: "Covered elsewhere" is an
     // addendum about the discussion, the sources list is a checking aid, and
@@ -3326,6 +3339,32 @@ label.pmpr input { margin-top: 4px; }
     updateAddPart();
     // The consent text is built from these fields: kept in step, as an edit does.
     if (!$('consent-box').classList.contains('hidden')) $('consent-text').textContent = consentFormText(S.note);
+  }
+
+  /* A section heading whose whole group is kept off the paper must go with it
+     (29 October 2026). Hiding the empty blocks created this: an extraction
+     where Dictate was never pressed has a Treatment section holding only the
+     sedation offer and an empty LA table, both now print-none, and the paper
+     was left with the word "Treatment" and nothing under it.
+
+     Recomputed from the DOM rather than decided at render time, because a block
+     stops being empty the moment the clinician types in it — the toggle in each
+     block's refresh() calls this straight after its own. */
+  function markPrintSections() {
+    var host = $('fields');
+    if (!host) return;
+    var heading = null, kept = false;
+    var close = function () {
+      if (heading) heading.classList.toggle('print-none', !kept);
+    };
+    Array.prototype.forEach.call(host.children, function (el) {
+      if (el.classList.contains('section-heading')) { close(); heading = el; kept = false; return; }
+      // An empty consent field is content: it prints "Not captured", which is a
+      // claim about the record and belongs on the paper. Only a block that
+      // took itself off the paper does not count.
+      if (!el.classList.contains('print-none')) kept = true;
+    });
+    close();
   }
 
   /* ---- answering a gap (27 September 2026) ----
@@ -4164,6 +4203,8 @@ label.pmpr input { margin-top: 4px; }
         if (pr) notes.push('Row ' + (i + 1) + ': ' + pr + '.');
       });
       status.className = 'bpe-note' + (notes.length ? ' warn' : '');
+      wrap.classList.toggle('print-none', !laLogAsText(S.note));
+      markPrintSections();
       status.textContent = !laRows(S.note).length
         ? (noteDictation()
             ? 'No local anaesthetic came back from your dictation. If you gave one, add it here.'
@@ -4388,7 +4429,7 @@ label.pmpr input { margin-top: 4px; }
     // button re-rendering itself and the form could never be opened.
     if (!sedRecord(note) && secondary) {
       var ask = document.createElement('div');
-      ask.className = 'field';
+      ask.className = 'field print-none';
       ask.id = 'sedation-offer';
       var ah = document.createElement('div');
       ah.className = 'field-head';
@@ -4456,6 +4497,8 @@ label.pmpr input { margin-top: 4px; }
         : '';
       check.style.display = problems.length ? '' : 'none';
 
+      wrap.classList.toggle('print-none', !sedationAsText(S.note));
+      markPrintSections();
       var missing = SED_TEXT.filter(function (k) {
         return k !== 'notes' && k !== 'reversal' && k !== 'cannulaSite' && !hasText(rec[k]);
       });
@@ -4743,6 +4786,8 @@ label.pmpr input { margin-top: 4px; }
         var p = itemRowProblem(key, cols, r, i, idx);
         if (p) notes.push('Item ' + (i + 1) + ': ' + p + '.');
       });
+      wrap.classList.toggle('print-none', !itemListAsText(S.note, spec));
+      markPrintSections();
       status.className = 'bpe-note' + (notes.length ? ' warn' : '');
       status.textContent = !itemRows(S.note, key).length
         ? spec.empty
@@ -4927,6 +4972,8 @@ label.pmpr input { margin-top: 4px; }
     var status = document.createElement('p');
     var refresh = function () {
       status.className = 'bpe-note';
+      wrap.classList.toggle('print-none', !implantLogAsText(implantRows(S.note)));
+      markPrintSections();
       status.textContent = !implantRows(S.note).length
         ? (noteDictation()
             ? 'No implants came back from your dictation. If you placed any, add them here.'
