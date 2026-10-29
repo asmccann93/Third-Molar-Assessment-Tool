@@ -893,7 +893,10 @@ export function misplacedMoney(note) {
   for (const [key, label] of [...FIELDS, ...DICTATED_FIELDS]) {
     if (key === 'costs') continue;
     const v = note[key];
-    if (typeof v === 'string' && MONEY.test(v)) out.push(label);
+    // The short label. The full one carries its own explanatory tail after an
+    // em-dash ("Information given — leaflet, link, tool output, verbal
+    // aftercare") and reads as gibberish inside a comma-separated sentence.
+    if (typeof v === 'string' && MONEY.test(v)) out.push(label.split(' — ')[0]);
   }
   // The itemised lists too (28 October 2026, second pass). They arrived the
   // same day as this check and it did not look at them — and an item's notes is

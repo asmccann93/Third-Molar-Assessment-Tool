@@ -3154,6 +3154,9 @@ async function testSept27b() {
 
     // The backstop itself.
     const mm = pm.misplacedMoney;
+    ok('the field is named by its short label, so the gap reads as a sentence',
+      mm({ costs: null, informationGiven: SCREENSHOT }).join() === 'Information given',
+      JSON.stringify(mm({ costs: null, informationGiven: SCREENSHOT })));
     ok('a note quoting prices with costs empty is reported, naming where they are',
       mm({ costs: null, informationGiven: SCREENSHOT }).length === 1 &&
       /Information given/.test(mm({ costs: null, informationGiven: SCREENSHOT })[0]),

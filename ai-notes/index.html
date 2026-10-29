@@ -961,7 +961,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-28.4';
+  var BUILD = '2026-10-29.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -4728,7 +4728,11 @@ label.pmpr input { margin-top: 4px; }
           sel.appendChild(op);
         });
         sel.value = row.source || '';
-        sel.disabled = EDITABLE === 'false';
+        // No disabled state here on purpose. EDITABLE is a browser capability
+        // probe — it is only ever 'plaintext-only' or 'true', never 'false' —
+        // so `sel.disabled = EDITABLE === 'false'` was permanently false and
+        // read like a guard that could never fire. There is no locked-but-
+        // visible draft either: Lock calls wipe(), which destroys the note.
         sel.addEventListener('change', function () {
           row.source = sel.value || null;
           S.edited = true;
