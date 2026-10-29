@@ -3173,6 +3173,7 @@ await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
 await testItemisedTreatment();
 await testEveryLayoutIsComplete();
+await testInjectionInEveryBlock();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
@@ -5621,9 +5622,21 @@ async function runType(onNote, { type = /Third molar/, dictate = false, turns = 
   offset += 5000;
   click($(doc, 'stop')); await tick(300);
   for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
-  let copied = '';
-  win.navigator.clipboard.writeText = async (t) => { copied = t; };
-  ctx.copy = async () => { click($(doc, 'copy-all')); await tick(20); return copied; };
+  /* Wait for the clipboard to actually receive a NEW write, rather than
+     sleeping 20 ms and returning whatever was there. Under load the write had
+     not always landed, so copy() returned '' or the PREVIOUS copy — and twenty
+     assertions in this file are of the form "X is not in the copy", every one
+     of which passes against an empty string. A flaky helper here produces false
+     PASSES, which is the one thing a suite guarding this tool must not do. */
+  let copied = '', writes = 0;
+  win.navigator.clipboard.writeText = async (t) => { copied = t; writes++; };
+  ctx.copy = async () => {
+    const before = writes;
+    click($(doc, 'copy-all'));
+    for (let i = 0; i < 60 && writes === before; i++) await tick(10);
+    if (writes === before) throw new Error('copy-all never reached the clipboard: the draft had not rendered');
+    return copied;
+  };
   return ctx;
 }
 
@@ -6121,6 +6134,84 @@ async function testEveryLayoutIsComplete() {
   ok('and the page logs no errors at all on a clean boot', errs.length === 0, errs.join(' | ').slice(0, 400));
 }
 
+/**
+ * The same property as testInjection — model output is rendered as text, never
+ * as markup — but for the STRUCTURED blocks, which that test has never covered.
+ * It was written when the note was twelve prose fields and a gap list. Since
+ * then the BPE chart, LA log, implant log, to-do list, sedation record and the
+ * two itemised lists have all arrived with rendering paths of their own, and
+ * every one of them puts model text into the DOM.
+ *
+ * Every block is fed hostile content at once, so one pass covers the lot and a
+ * new block added without a textContent write will show up here.
+ */
+async function testInjectionInEveryBlock() {
+  section('Model output is text, not markup — in the structured blocks too');
+  const X1 = '<img src=x onerror="window.__PWN1=1">';
+  const X2 = '<script>window.__PWN2=1<\/script>';
+  const X3 = '"><svg onload="window.__PWN3=1">';
+  const X4 = '</pre></td><b>bold</b>';
+  const hostile = note27({
+    sources: {}, speakers: { S1: 'clinician', S2: 'patient' },
+    teeth: [X1],
+    bpe: { UR: '2', UA: '1', UL: '2', LR: '3*', LA: '2', LL: '2', quotes: [X1] },
+    laLog: [{ agent: X1, strength: X2, amount: X3, technique: X4, site: X1, batch: X2, notes: X3, quotes: [X1] }],
+    implantLog: [{ site: X1, system: X2, diameter: X3, length: X4, lot: X1, torque: X2, isq: X3, graft: X4, notes: X1 }],
+    actions: [{ text: X1, quotes: [] }, { text: X2, quotes: [] }],
+    notSaid: [X3],
+    sedation: {
+      technique: X1, agent: X2, cannulaSite: X3, total: X4, oxygen: X1, monitoring: X2,
+      reversal: X3, recovery: X4, discharge: X1, escort: X2, notes: X3, quotes: [X1],
+      increments: [{ time: X1, dose: X2, response: X3, quotes: [X4] }]
+    },
+    planItems: [{ tooth: X1, treatment: X2, notes: X3, source: X4, quotes: [X1] }],
+    optionsOffered: [{ forWhat: X2, option: X3, notes: X4, source: 'discussed', quotes: [X2] }]
+  });
+  const ctx = await runType(() => hostile, { type: /Implant consult/, dictate: true });
+  const { doc, win } = ctx;
+
+  ok('nothing executed anywhere in the draft',
+    !win.__PWN1 && !win.__PWN2 && !win.__PWN3,
+    JSON.stringify({ a: !!win.__PWN1, b: !!win.__PWN2, c: !!win.__PWN3 }));
+  for (const tag of ['img', 'script', 'iframe', 'svg', 'b']) {
+    ok(`no <${tag}> element created from model text`, doc.querySelectorAll('#fields ' + tag).length === 0,
+      doc.querySelectorAll('#fields ' + tag).length + ' found');
+  }
+  ok('nor in the to-do list, gap lists or source check',
+    ['todo', 'gaps-list', 'notsaid-list', 'sourcecheck-list'].every((id) =>
+      !$(doc, id) || !$(doc, id).querySelector('img, script, iframe, svg, b')));
+
+  // Each block rendered, and shows the markup as the literal characters.
+  const blocks = { 'plan-items-block': 'proposed treatment', 'options-block': 'options offered',
+                   'sedation-block': 'sedation record', 'la-block': 'local anaesthetic', 'bpe-block': 'BPE chart' };
+  for (const [id, what] of Object.entries(blocks)) {
+    const el = $(doc, id);
+    ok(`the ${what} rendered and shows the markup as text`,
+      !!el && !el.querySelector('img, script, iframe, svg, b'),
+      el ? 'markup found' : 'block absent');
+  }
+  ok('the literal angle brackets are visible in the proposed treatment',
+    /<img src=x onerror=/.test($(doc, 'plan-items-block').textContent),
+    $(doc, 'plan-items-block').textContent.slice(0, 160));
+
+  // An unknown source string must not become a selectable state, and must not
+  // be shown as "Discussed" — the row is unplaceable and says so.
+  ok('markup in the source field is not accepted as a source',
+    $(doc, 'plan-items-block').querySelector('select').value === '',
+    $(doc, 'plan-items-block').querySelector('select').value);
+
+  // The clipboard is plain text by definition, so the property worth pinning is
+  // that the characters reach it INTACT — what is pasted into the PMS is what
+  // the model actually wrote, not a version the DOM has swallowed or altered.
+  const text = await ctx.copy();
+  ok('the markup characters survive into the copied note, unaltered',
+    text.indexOf(X1) > -1 && text.indexOf(X3) > -1,
+    JSON.stringify({ x1: text.indexOf(X1), x3: text.indexOf(X3) }));
+  ok('and the itemised rows are in it, numbered, with the bad source called out',
+    /Proposed treatment\n1\. Tooth \/ site <img src=x/.test(text) && /\(source not known\)/.test(text),
+    text.slice(0, 400));
+}
+
 async function testPmpr() {
   section('PMPR: ticked by the clinician on an exam or perio, into the treatment section');
   const bodies = [];
@@ -6153,8 +6244,15 @@ async function testPmpr() {
   click($(doc, 'pmpr-block').querySelector('.copy'));
   await tick(10);
   ok('the tick has its own Copy', one === 'Full mouth professional mechanical plaque removal (PMPR) carried out.', one);
-  win.navigator.clipboard.writeText = async (t) => { ctx.last = t; };
-  ctx.copy = async () => { click($(doc, 'copy-all')); await tick(20); return ctx.last; };
+  let writes2 = 0;
+  win.navigator.clipboard.writeText = async (t) => { ctx.last = t; writes2++; };
+  ctx.copy = async () => {
+    const before = writes2;
+    click($(doc, 'copy-all'));
+    for (let i = 0; i < 60 && writes2 === before; i++) await tick(10);
+    if (writes2 === before) throw new Error('copy-all never reached the clipboard: the draft had not rendered');
+    return ctx.last;
+  };
   win.confirm = () => true;
   click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
   await tick(200);
