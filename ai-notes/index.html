@@ -961,7 +961,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-29.1';
+  var BUILD = '2026-10-29.2';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1129,7 +1129,7 @@ label.pmpr input { margin-top: 4px; }
       label: 'Local anaesthetic given',
       dictated: true,
       has: function (note) {
-        return laRows(note).length > 0 || (noteDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1);
+        return laRows(note).length > 0 || TREATMENT_TYPES.indexOf(S.consultType) !== -1;
       },
       render: function (note, host) { renderLaLog(note, host); },
       text: function (note) { return laLogAsText(note); }
@@ -1138,7 +1138,7 @@ label.pmpr input { margin-top: 4px; }
       label: 'Sedation given',
       dictated: true,
       has: function (note) {
-        return sedAny(note) || (noteDictation() && SEDATION_TYPES.indexOf(S.consultType) !== -1);
+        return sedAny(note) || SEDATION_TYPES.indexOf(S.consultType) !== -1;
       },
       render: function (note, host) { renderSedation(note, host); },
       text: function (note) { return sedationAsText(note); }
@@ -3150,6 +3150,14 @@ label.pmpr input { margin-top: 4px; }
         // Dictated fields appear when there is something in them, and also
         // whenever Dictate was pressed — otherwise a field the model left
         // empty could not be filled in by hand, unlike every other field here.
+        // Still gated on a dictation, deliberately. An empty treatmentToday
+        // renders with .is-gap — "Not captured" — which claims something is
+        // MISSING from the record. On an extraction where Dictate was simply
+        // never pressed nothing is missing, and a false "not captured" on every
+        // such appointment is the noise that teaches a clinician to stop
+        // reading. The LA block below is offered without a dictation because it
+        // renders as a table with an Add button: an affordance, not an
+        // accusation.
         if (k[0] === 'treatmentToday') return hasText(note[k[0]]) || (noteDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1);
         // The radiograph report: offered empty on an exam, to fill in by hand.
         if (k[0] === 'radiographicFindings') return hasText(note[k[0]]) || xrayAny(note.radiographs) || noteDictation() || S.consultType === 'exam-recall';
@@ -4093,9 +4101,16 @@ label.pmpr input { margin-top: 4px; }
 
   function renderLaLog(note, host) {
     var rows = laRows(note);
-    // Offered empty, to fill in by hand, where treatment is done on the day
-    // and something was dictated; otherwise only when there is a row.
-    var offer = noteDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1;
+    /* Offered empty wherever treatment is done on the day, dictation or not
+       (29 October 2026). It used to require noteDictation(), so an extraction
+       where the clinician had not pressed Dictate showed no LA section at all
+       and there was nowhere to record the anaesthetic by hand.
+
+       The dictation-only rule is about what the MODEL may fill — it must never
+       build an LA record out of the conversation, and extract.mjs still strips
+       one that arrives without dictation. It was never about whether the
+       clinician may type their own. */
+    var offer = TREATMENT_TYPES.indexOf(S.consultType) !== -1;
     if (!rows.length && !offer) return;
     // No section heading of its own: the layout's section heading is already on
     // screen above this block. See BLOCKS.
@@ -4107,15 +4122,24 @@ label.pmpr input { margin-top: 4px; }
     var h3 = document.createElement('h3');
     h3.textContent = 'Local anaesthetic given';
     head.appendChild(h3);
-    var dtag = document.createElement('span');
-    dtag.className = 'dictated-tag';
-    dtag.textContent = 'Dictated';
-    head.appendChild(dtag);
+    // The tag claims where the content came from, so it is only shown when
+    // there WAS a dictation. A block filled in by hand on an appointment with
+    // no dictation is not dictated, and must not say it is. (The copied text
+    // has always been conditional in the same way; the tag was not.)
+    if (noteDictation()) {
+      var dtag = document.createElement('span');
+      dtag.className = 'dictated-tag';
+      dtag.textContent = 'Dictated';
+      head.appendChild(dtag);
+    }
     var copy = document.createElement('button');
     copy.type = 'button';
     copy.className = 'copy';
     copy.textContent = 'Copy';
-    copy.addEventListener('click', function () { var t = laLogAsText(S.note); if (t) writeClipboard('Local anaesthetic (dictated)\n' + t, copy); });
+    copy.addEventListener('click', function () {
+      var t = laLogAsText(S.note);
+      if (t) writeClipboard('Local anaesthetic' + (noteDictation() ? ' (dictated)' : '') + '\n' + t, copy);
+    });
     head.appendChild(copy);
     wrap.appendChild(head);
 
@@ -4129,7 +4153,9 @@ label.pmpr input { margin-top: 4px; }
       });
       status.className = 'bpe-note' + (notes.length ? ' warn' : '');
       status.textContent = !laRows(S.note).length
-        ? 'No local anaesthetic came back from your dictation. If you gave one, add it here.'
+        ? (noteDictation()
+            ? 'No local anaesthetic came back from your dictation. If you gave one, add it here.'
+            : 'Nothing was dictated, so no local anaesthetic was taken from the recording. If you gave one, add it here.')
         : notes.length ? notes.join(' ') + ' Check before you paste.'
         : 'Taken as dictated: nothing is converted or calculated.' + (laEdited() ? ' Edited by you.' : ' Every row was found in your dictation.');
       wrap.classList.toggle('edited', laEdited());
@@ -4338,7 +4364,9 @@ label.pmpr input { margin-top: 4px; }
   }
 
   function renderSedation(note, host) {
-    var offer = noteDictation() && SEDATION_TYPES.indexOf(S.consultType) !== -1;
+    // Offered without a dictation too, for the same reason as the LA log: the
+    // dictation-only rule governs the model, not the clinician's own typing.
+    var offer = SEDATION_TYPES.indexOf(S.consultType) !== -1;
     if (!sedAny(note) && !offer) return;
     // No section heading of its own; the layout provides it. See BLOCKS.
     var wrap = document.createElement('div');
@@ -4349,17 +4377,21 @@ label.pmpr input { margin-top: 4px; }
     var h3 = document.createElement('h3');
     h3.textContent = 'Sedation given';
     head.appendChild(h3);
-    var dtag = document.createElement('span');
-    dtag.className = 'dictated-tag';
-    dtag.textContent = 'Dictated';
-    head.appendChild(dtag);
+    // Conditional for the same reason as the LA log: a record typed in by hand
+    // on an appointment with no dictation is not a dictated record.
+    if (noteDictation()) {
+      var dtag = document.createElement('span');
+      dtag.className = 'dictated-tag';
+      dtag.textContent = 'Dictated';
+      head.appendChild(dtag);
+    }
     var copy = document.createElement('button');
     copy.type = 'button';
     copy.className = 'copy';
     copy.textContent = 'Copy';
     copy.addEventListener('click', function () {
       var t = sedationAsText(S.note);
-      if (t) writeClipboard('Sedation given (dictated)\n' + t, copy);
+      if (t) writeClipboard('Sedation given' + (noteDictation() ? ' (dictated)' : '') + '\n' + t, copy);
     });
     head.appendChild(copy);
     wrap.appendChild(head);

@@ -287,12 +287,18 @@ async function testWipe() {
   ok('transcript was sent for drafting', calls.some((c) => c.url.includes('/api/extract')));
   // Twelve consent fields plus the section headings they sit under. Dictated
   // fields are absent because this consultation had no dictation.
+  // Counted by [data-key], which only the FIELD renderer sets: a structured
+  // block is not a consent field, and counting every .field made this quietly
+  // depend on how many blocks happen to be on screen.
   ok('all twelve consent fields render',
-    [...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length === 12,
-    String([...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length));
+    [...$(doc, 'fields').querySelectorAll('.field[data-key]')].length === 12,
+    String([...$(doc, 'fields').querySelectorAll('.field[data-key]')].length));
+  // Treatment is present from 29 October 2026 even with no dictation: it holds
+  // the empty LA table, which an extraction must always offer. Findings is
+  // still absent, which is what this assertion is about.
   ok('under chronological section headings, Findings omitted when nothing was dictated',
     [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent)
-      .join('|') === 'Presentation|Discussion|Outcome',
+      .join('|') === 'Presentation|Discussion|Treatment|Outcome',
     [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent).join('|'));
   ok('gap list is populated', $(doc, 'gaps-list').children.length >= 1);
   ok('patient words survive verbatim', $(doc, 'fields').textContent.includes('Will I be numb forever?'));
@@ -619,7 +625,8 @@ async function testDraftRetry() {
     calls.filter((c) => c.url.includes('/api/transcribe') && c.method === 'POST').length === 1);
   ok('the draft now renders', !$(doc, 'draft').classList.contains('hidden'));
   ok('and the error is cleared', $(doc, 'error').classList.contains('hidden'));
-  ok('twelve fields present', [...$(doc, 'fields').children].filter((el) => el.classList.contains('field')).length === 12);
+  ok('twelve fields present', [...$(doc, 'fields').querySelectorAll('.field[data-key]')].length === 12,
+    String([...$(doc, 'fields').querySelectorAll('.field[data-key]')].length));
 
   // The held transcript must still be destroyed by every normal route.
   const ctx2 = await boot({
@@ -3174,6 +3181,7 @@ await testPerTypeDefaultLayout();
 await testItemisedTreatment();
 await testEveryLayoutIsComplete();
 await testInjectionInEveryBlock();
+await testNoDictationStillHasSomewhereToWrite();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
@@ -5581,7 +5589,9 @@ async function testTreatmentToday() {
   await tick(20);
   ok('a row added by hand is copied', /LA 1: Agent Lidocaine 2% with adrenaline/.test(copied2) && !/not found/.test($(doc, 'la-block').textContent), copied2.slice(-200));
   ({ doc } = await run({ dictate: false }));
-  ok('without dictation it does not appear', !fieldWrap(doc, 'treatmentToday'));
+  ok('without dictation the treatment field does not appear', !fieldWrap(doc, 'treatmentToday'));
+  ok('but the LA block is offered, empty, so one can be entered by hand',
+    !!$(doc, 'la-block') && !!$(doc, 'la-block').querySelector('.add-row'));
   // Without dictation the page drops them even if a draft carries them.
   note = note27({ treatmentToday: 'Removed 38.', laLog: [{ agent: 'Articaine', quotes: [] }] });
   let w3;
@@ -5590,8 +5600,14 @@ async function testTreatmentToday() {
   w3.navigator.clipboard.writeText = async (t) => { copied3 = t; };
   click($(doc, 'copy-all'));
   await tick(20);
+  // The LA block is OFFERED on an extraction from 29 October 2026, so it is on
+  // screen — but empty. The guarantee is unchanged and is the one that matters:
+  // a treatment or an LA the model returned without a dictation reaches neither
+  // the screen nor the paste.
   ok('with no dictation, a treatment or LA that came back is neither shown nor copied',
-    !fieldWrap(doc, 'treatmentToday') && !$(doc, 'la-block') && !/Removed 38|Articaine/.test(copied3), copied3.slice(-200));
+    !fieldWrap(doc, 'treatmentToday') &&
+    $(doc, 'la-block').querySelectorAll('td[contenteditable]').length === 0 &&
+    !/Removed 38|Articaine/.test(copied3), copied3.slice(-200));
   note = note27({ examination: 'Partially erupted 38.' });
   ({ doc } = await run({ type: /Exam/ }));
   ok('nor on an exam, even with dictation', !fieldWrap(doc, 'treatmentToday'));
@@ -6210,6 +6226,69 @@ async function testInjectionInEveryBlock() {
   ok('and the itemised rows are in it, numbered, with the bad source called out',
     /Proposed treatment\n1\. Tooth \/ site <img src=x/.test(text) && /\(source not known\)/.test(text),
     text.slice(0, 400));
+}
+
+/**
+ * An extraction where Dictate was never pressed (29 October 2026).
+ *
+ * Reported from the chair: "the extraction appointment type does not have a
+ * section for inputting local anaesthetic". It did not. The LA block, the
+ * sedation block and the treatment-carried-out field were all gated on
+ * noteDictation(), so with no dictation there was nowhere to record the
+ * anaesthetic, the sedation or the procedure itself.
+ *
+ * The dictation-only rule governs what the MODEL may fill — extract.mjs still
+ * strips an LA record that arrives without one. It was never about whether the
+ * clinician may type their own.
+ */
+async function testNoDictationStillHasSomewhereToWrite() {
+  section('An extraction with no dictation can still record the LA and the treatment');
+  const ctx = await runType(() => note27({ sources: {} }), { type: /^Extraction/, dictate: false });
+  const { doc, win } = ctx;
+
+  ok('the LA block is offered even though nothing was dictated', !!$(doc, 'la-block'));
+  ok('with a way to add a row by hand', !!$(doc, 'la-block').querySelector('.add-row'));
+  ok('and it says why none came from the recording, without claiming a dictation',
+    /Nothing was dictated, so no local anaesthetic was taken from the recording/.test($(doc, 'la-block').textContent),
+    $(doc, 'la-block').textContent.slice(0, 200));
+  // treatmentToday stays gated on a dictation on purpose: empty, it renders as
+  // a gap saying "Not captured", which would claim something is missing from
+  // every extraction where Dictate was simply not pressed.
+  ok('the treatment field is NOT forced on, so nothing falsely reads as missing',
+    !fieldWrap(doc, 'treatmentToday'), 'present');
+
+  // Nothing may claim to be dictated when nothing was.
+  ok('the LA block carries no Dictated tag',
+    !$(doc, 'la-block').querySelector('.dictated-tag'));
+  ok('and no field anywhere in the draft is tagged dictated',
+    doc.querySelectorAll('#fields .dictated-tag').length === 0,
+    String(doc.querySelectorAll('#fields .dictated-tag').length));
+
+  // Typed in by hand, it reaches the record — and is not called dictated.
+  click($(doc, 'la-block').querySelector('.add-row'));
+  await tick(40);
+  const cells = [...$(doc, 'la-block').querySelectorAll('td[contenteditable="true"]')];
+  cells[0].textContent = 'Articaine';
+  cells[0].dispatchEvent(new win.Event('input', { bubbles: true }));
+  cells[2].textContent = 'Two cartridges';
+  cells[2].dispatchEvent(new win.Event('input', { bubbles: true }));
+  await tick(30);
+  const text = await ctx.copy();
+  ok('a hand-entered LA is in the copied note',
+    /LA 1: Agent Articaine, Amount Two cartridges/.test(text), text.slice(0, 500));
+  ok('and the copy does not call it dictated',
+    /Local anaesthetic given\n/.test(text) && !/Local anaesthetic given \(dictated\)/.test(text),
+    text.slice(0, 500));
+
+  // With a dictation it still reads as dictated, as it always has.
+  const c2 = await runType(() => note27({
+    sources: {},
+    laLog: [{ agent: 'Articaine', strength: '4%', amount: 'Two cartridges', technique: null, site: null, batch: null, notes: null, quotes: [] }]
+  }), { type: /^Extraction/, dictate: true });
+  ok('a dictated LA is still tagged Dictated on screen',
+    !!$(c2.doc, 'la-block').querySelector('.dictated-tag'));
+  const t2 = await c2.copy();
+  ok('and still marked dictated in the copy', /Local anaesthetic given \(dictated\)/.test(t2), t2.slice(0, 500));
 }
 
 async function testPmpr() {
