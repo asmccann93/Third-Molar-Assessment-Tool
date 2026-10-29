@@ -972,7 +972,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-29.4';
+  var BUILD = '2026-10-29.5';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1191,6 +1191,17 @@ label.pmpr input { margin-top: 4px; }
       has: function (note) { return itemAny(note, 'planItems') || ITEM_TYPES.indexOf(S.consultType) !== -1; },
       render: function (note, host) { renderItemList(note, host, ITEM_LISTS.planItems); },
       text: function (note) { return itemListAsText(note, ITEM_LISTS.planItems); }
+    },
+    /* The diagnosis itemised (29 October 2026). It sits with the findings it
+       follows from, and ahead of the treatment proposed for it, so the record
+       reads: this is what was found, this is what it is, this is what is
+       proposed. Not marked `dictated` for the same reason the other two are
+       not — each ROW says where it came from. */
+    '@diagnoses': {
+      label: 'Diagnosis',
+      has: function () { return true; },
+      render: function (note, host) { renderItemList(note, host, ITEM_LISTS.diagnoses); },
+      text: function (note) { return itemListAsText(note, ITEM_LISTS.diagnoses); }
     }
   };
 
@@ -1210,7 +1221,7 @@ label.pmpr input { margin-top: 4px; }
       hint: 'Chronological. What brought them in, what was found, what was discussed, what was decided.',
       sections: [
         ['Presentation', [['reasonForAttendance', false], ['medicalHistory', false]]],
-        ['Findings',     [['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
+        ['Findings',     [['examination', true], ['radiographicFindings', true], ['@bpe', false], ['@diagnoses', false]]],
         ['Discussion',   [['proposed', false], ['alternatives', false], ['@options', false], ['patientFactors', false],
                           ['risks', false], ['benefits', false], ['costs', false], ['patientQuestions', false]]],
         // Chronological inside the section too: sedated, anaesthetised, treated.
@@ -1227,7 +1238,8 @@ label.pmpr input { margin-top: 4px; }
         ['The patient',    [['patientQuestions', false], ['informationGiven', false], ['decision', false]]],
         ['Treatment',      [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true]]],
         ['Context',        [['reasonForAttendance', false], ['medicalHistory', false],
-                            ['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
+                            ['examination', true], ['radiographicFindings', true], ['@bpe', false],
+                            ['@diagnoses', false]]],
         ['Next',           [['@planitems', false], ['nextStep', false], ['plan', true]]]
       ]
     },
@@ -1237,7 +1249,10 @@ label.pmpr input { margin-top: 4px; }
       sections: [
         ['Subjective', [['reasonForAttendance', false], ['medicalHistory', false], ['patientQuestions', false], ['patientFactors', false]]],
         ['Objective',  [['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
-        ['Assessment', [['proposed', false], ['alternatives', false], ['@options', false], ['risks', false], ['benefits', false]]],
+        // The diagnosis leads the Assessment because in SOAP that is what an
+        // assessment is; what is proposed for it follows.
+        ['Assessment', [['@diagnoses', false], ['proposed', false], ['alternatives', false], ['@options', false],
+                        ['risks', false], ['benefits', false]]],
         ['Plan',       [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true],
                         ['decision', false], ['@planitems', false], ['costs', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
       ]
@@ -2701,7 +2716,7 @@ label.pmpr input { margin-top: 4px; }
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment', 'radiographs', 'sedation', 'items'],
+        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment', 'radiographs', 'sedation', 'items', 'diagnoses'],
                                               speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
@@ -4671,11 +4686,29 @@ label.pmpr input { margin-top: 4px; }
      actually fall in the recording, because a plan the patient was never told
      must never read as a consent record. A row whose tag does not hold up is
      named, in the block and in the headline list, exactly as an LA row is. */
+  /* `main` names the column copied WITHOUT its label: "1. Tooth / site 11,
+     distal buccal caries" rather than "... Diagnosis distal buccal caries".
+     It used to be a name test inside itemListAsText — `c[0] === 'treatment' ||
+     c[0] === 'option'` — which would have quietly labelled the diagnosis
+     column and every list added after it. The spec says which column it is. */
   var ITEM_LISTS = {
+    diagnoses: {
+      key: 'diagnoses', id: 'diagnoses-block',
+      heading: 'Diagnosis', copyHead: 'Diagnosis',
+      cols: [['tooth', 'Tooth / site'], ['diagnosis', 'Diagnosis'], ['notes', 'Notes']],
+      main: 'diagnosis',
+      addFirst: 'Add a diagnosis', addMore: 'Add another diagnosis',
+      // Offered on every consult type (29 October 2026): there is no
+      // appointment where a diagnosis cannot be recorded, and an emergency or
+      // an extraction is where one is most likely to be said and not written.
+      always: true,
+      empty: 'No diagnosis came back from the recording. Add what you found here.'
+    },
     optionsOffered: {
       key: 'optionsOffered', id: 'options-block',
       heading: 'Options offered', copyHead: 'Options offered',
       cols: [['forWhat', 'For'], ['option', 'Option'], ['notes', 'Notes']],
+      main: 'option',
       addFirst: 'Add an option', addMore: 'Add another option',
       empty: 'No options came back from the recording. If you offered more than one course, add them here.'
     },
@@ -4683,6 +4716,7 @@ label.pmpr input { margin-top: 4px; }
       key: 'planItems', id: 'plan-items-block',
       heading: 'Proposed treatment', copyHead: 'Proposed treatment',
       cols: [['tooth', 'Tooth / site'], ['treatment', 'Treatment'], ['notes', 'Notes']],
+      main: 'treatment',
       addFirst: 'Add a treatment item', addMore: 'Add another item',
       empty: 'No treatment items came back from the recording. If you proposed a course, add it here.'
     }
@@ -4755,7 +4789,7 @@ label.pmpr input { margin-top: 4px; }
   function renderItemList(note, host, spec) {
     var cols = spec.cols, key = spec.key;
     var rows = itemRows(note, key);
-    var offer = ITEM_TYPES.indexOf(S.consultType) !== -1;
+    var offer = spec.always || ITEM_TYPES.indexOf(S.consultType) !== -1;
     if (!rows.length && !offer) return;
 
     var edited = itemListEdited(key, cols);
@@ -4899,7 +4933,7 @@ label.pmpr input { margin-top: 4px; }
       var cells = spec.cols.map(function (c) {
         if (!hasText(row[c[0]])) return null;
         var v = String(row[c[0]]).replace(/\s+/g, ' ').trim();
-        return (c[0] === 'treatment' || c[0] === 'option') ? v : c[1] + ' ' + v;
+        return c[0] === spec.main ? v : c[1] + ' ' + v;
       }).filter(Boolean);
       if (!cells.length) return null;
       var src = row.source === 'dictated' ? ' (dictated)' : row.source === 'discussed' ? '' : ' (source not known)';

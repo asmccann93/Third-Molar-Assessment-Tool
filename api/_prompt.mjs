@@ -69,6 +69,7 @@ export const CONSULT_TYPES = {
       'A recall often contains no consent discussion: nothing proposed, no alternatives weighed, no risks or benefits named, nothing said about cost, no decision taken. WHERE THAT IS SO, leave those fields (proposed, alternatives, risks, benefits, costs, patientFactors, decision) null and do NOT add gaps for them — they do not apply to this kind of appointment. ' +
       'Those fields are NOT switched off for a recall. If any of it did happen — a treatment proposed, options weighed, a price or an estimate given, a decision taken or deferred — fill that field from what was said, exactly as on any other appointment. An empty field here means it did not happen; it NEVER means it happened and belongs somewhere else. Never move a cost, an option or a decision into another field (informationGiven above all) because the appointment is a recall: that produces a note saying costs were not discussed while quoting prices a line below, which is a false record. ' +
       'The same applies to planItems and optionsOffered. Examining and then setting out the course of treatment is ordinary at a recall, so fill both lists whenever treatment was proposed or options were weighed. Nothing about this appointment type exempts them. ' +
+      'The diagnosis list is the same in one direction only: a recall is where findings are most often charted tooth by tooth, so record every diagnosis the clinician actually stated. It does NOT loosen the rule against inferring one. An examination that found nothing wrong yields an empty diagnoses array, and a filling proposed without a stated reason yields no diagnosis row for that tooth. ' +
       'The other fields still apply to a recall — reason for attendance, medical history, the patient\'s own questions, information given and next step: if one of those is empty, leave it null AND add a gaps entry for it, as usual. ' +
       'Routine examination. Expect findings, oral hygiene advice, lifestyle advice ' +
       '(smoking, alcohol, diet), radiographic justification, and a recall interval.',
@@ -196,6 +197,9 @@ export const LA_LOG_FIELDS = ['agent', 'strength', 'amount', 'technique', 'site'
  *
  * TWO lists, because they answer different questions and must not be confused:
  *
+ *   diagnoses      what was found, itemised — one row per tooth or site.
+ *                  "11 distal buccal caries", "27 grossly carious". The
+ *                  conclusion the treatment follows from.
  *   planItems      the course of treatment proposed, in order. One row per item.
  *   optionsOffered the alternatives put to the patient for a single decision,
  *                  itemised. The prose `alternatives` field stays as it is;
@@ -211,12 +215,18 @@ export const LA_LOG_FIELDS = ['agent', 'strength', 'amount', 'technique', 'site'
  * Nothing here replaces `proposed`, `alternatives` or `plan`. Those remain the
  * prose record of the discussion; these are the itemised form of it.
  */
+export const DIAG_ITEM_FIELDS = ['tooth', 'diagnosis', 'notes'];
 export const PLAN_ITEM_FIELDS = ['tooth', 'treatment', 'notes'];
 export const OPTION_ITEM_FIELDS = ['forWhat', 'option', 'notes'];
 export const ITEM_SOURCES = ['discussed', 'dictated'];
 
-export const PLAN_ITEM_LABELS = { tooth: 'Tooth / site', treatment: 'Treatment', notes: 'Notes' };
-export const OPTION_ITEM_LABELS = { forWhat: 'For', option: 'Option', notes: 'Notes' };
+/* null means "copy this column without its label": the diagnosis, the
+   treatment and the option are the substance of their row and read as a
+   label-free phrase. itemAsText reads these, so a new list declares its own
+   bare column here instead of relying on a name test inside the formatter. */
+export const DIAG_ITEM_LABELS = { tooth: 'Tooth / site', diagnosis: null, notes: 'Notes' };
+export const PLAN_ITEM_LABELS = { tooth: 'Tooth / site', treatment: null, notes: 'Notes' };
+export const OPTION_ITEM_LABELS = { forWhat: 'For', option: null, notes: 'Notes' };
 
 /* The sedation episode itself (26 October 2026).
  *
@@ -647,6 +657,42 @@ send, a radiograph or scan to arrange, lab work, a prescription to issue, a revi
 - No names or other identifiers.
 - Empty array if none.
 
+## THE DIAGNOSIS ITEMISED
+
+"diagnoses": what was found, itemised, one row per tooth or site, in the order
+given. This is the conclusion the treatment follows from, and it is read down a
+page: "1. 11 distal buccal caries, 2. 27 grossly carious, 3. 34 buccal abrasion".
+
+  [ { "tooth": string | null, "diagnosis": string | null, "notes": string | null,
+      "source": "discussed" | "dictated",
+      "quotes": ["<words copied exactly from the transcript>"] } ]
+
+- tooth: the tooth or site, in the notation used. null where the finding is not
+  tooth-specific — generalised gingivitis, an edentulous ridge, a mucosal site.
+- diagnosis: what it is, in the words used. "distal buccal caries", "grossly
+  carious", "buccal abrasion", "irreversible pulpitis", "failed restoration",
+  "retained root". Keep the surface or aspect where it was given; it is part of
+  the diagnosis, not a separate column.
+- notes: anything said about THAT tooth and nothing else.
+- One row per tooth or site. Do NOT merge two teeth into one row.
+
+NEVER INFER A DIAGNOSIS. This list may contain only what was actually said.
+
+- Do not derive a diagnosis from a treatment. "Composite on eleven" is a
+  treatment. If nothing was said about what is wrong with 11, there is NO ROW
+  for 11 — not "caries", not "likely caries", not a row with diagnosis null.
+- Do not derive one from a symptom the patient reported, or from a radiograph
+  description. "It's been aching" is a symptom and belongs in the subjective
+  account; "widening of the PDL at the apex" is a radiographic finding. Neither
+  becomes "irreversible pulpitis" or "periapical periodontitis" here unless the
+  clinician said so.
+- Do not restate the examination prose as rows. Only a stated diagnosis.
+- An empty array is the correct and expected answer for most appointments.
+
+A diagnosis is a clinical judgement and the dentist's alone. Everything else in
+this note is a record of what was said; this list is the one most likely to
+tempt you into supplying the conclusion yourself. Do not.
+
 ## THE TREATMENT ITEMISED
 
 Two lists. They are the same discussion as proposed, alternatives and plan, set
@@ -682,7 +728,8 @@ itemised. Use it where more than one course was offered for the same problem.
 - An option the clinician advised against is still an option offered: record it,
   with what was said about it in notes.
 
-"source", ON EVERY ROW OF BOTH LISTS. This is the field that must not slip:
+"source", ON EVERY ROW OF ALL THREE LISTS (the diagnosis list included).
+This is the field that must not slip:
 
 - "discussed" — it was said to the patient, in the conversation.
 - "dictated" — the clinician said it to the record, after the patient had left.
@@ -723,6 +770,10 @@ discussion. These boundaries are therefore not advisory:
   to record, not an absence of one.
 - "benefits": what the treatment is expected to achieve for this patient, and the
   realistic limits of that.
+- "diagnoses" against "examination": the examination is what was SEEN or
+  measured, in prose. The diagnosis list is what the clinician CONCLUDED it is,
+  itemised per tooth. A finding stated without a conclusion stays in the
+  examination only. Never write the same content into both.
 
 A field may be filled while the one beside it is null; that is normal. What is never
 right is the same content appearing under the wrong heading because the right field
@@ -754,6 +805,7 @@ Every key below must appear, even where it does not apply to this appointment: u
   "implantLog": object[],
   "laLog": [ { "agent": string | null, "strength": string | null, "amount": string | null, "technique": string | null, "site": string | null, "batch": string | null, "notes": string | null, "quotes": string[] } ],
   "teeth": string[],
+  "diagnoses": [ { "tooth": string | null, "diagnosis": string | null, "notes": string | null, "source": "discussed" | "dictated", "quotes": string[] } ],
   "planItems": [ { "tooth": string | null, "treatment": string | null, "notes": string | null, "source": "discussed" | "dictated", "quotes": string[] } ],
   "optionsOffered": [ { "forWhat": string | null, "option": string | null, "notes": string | null, "source": "discussed" | "dictated", "quotes": string[] } ],
   "checklist": { "<key>": string | null, ... },
@@ -903,6 +955,7 @@ export function misplacedMoney(note) {
   // exactly where a price lands now: "Composite, £150", "Crown, £650
   // privately". The hole was opened by the feature that made it likely.
   for (const [key, cols, label] of [
+    ['diagnoses', DIAG_ITEM_FIELDS, 'the diagnosis list'],
     ['planItems', PLAN_ITEM_FIELDS, 'the proposed treatment list'],
     ['optionsOffered', OPTION_ITEM_FIELDS, 'the options offered']
   ]) {
@@ -1352,6 +1405,10 @@ function cleanItemList(raw, cols, what) {
   return { rows, gaps };
 }
 
+export function cleanDiagnoses(raw) {
+  return cleanItemList(raw, DIAG_ITEM_FIELDS, 'diagnosis list');
+}
+
 export function cleanPlanItems(raw) {
   return cleanItemList(raw, PLAN_ITEM_FIELDS, 'proposed treatment list');
 }
@@ -1363,9 +1420,13 @@ export function cleanOptionItems(raw) {
 /* One row as a line, numbered by the caller. Shared by the page's clipboard and
    the referral, so the three cannot drift apart. */
 export function itemAsText(row, cols, labels) {
+  /* The column copied without its label — "11 distal buccal caries", not
+     "Diagnosis distal buccal caries". Named by the caller via labels[k] ===
+     null, so adding a list cannot silently label its main column. A name test
+     here used to decide it, and knew only 'treatment' and 'option'. */
   const cells = cols
     .filter((k) => typeof row[k] === 'string' && row[k].trim())
-    .map((k) => (k === 'treatment' || k === 'option') ? row[k].trim() : `${labels[k]} ${row[k].trim()}`);
+    .map((k) => (labels[k] == null ? row[k].trim() : `${labels[k]} ${row[k].trim()}`));
   return cells.join(', ');
 }
 
@@ -1450,6 +1511,9 @@ export function parseNote(raw, consultTypeKey) {
     parserGaps.push(...sed.gaps);
   }
   {
+    const dg = cleanDiagnoses(parsed.diagnoses);
+    parsed.diagnoses = dg.rows;
+    parserGaps.push(...dg.gaps);
     const pi = cleanPlanItems(parsed.planItems);
     parsed.planItems = pi.rows;
     parserGaps.push(...pi.gaps);

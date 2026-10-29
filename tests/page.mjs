@@ -331,13 +331,20 @@ async function testWipe() {
   ok('all twelve consent fields render',
     [...$(doc, 'fields').querySelectorAll('.field[data-key]')].length === 12,
     String([...$(doc, 'fields').querySelectorAll('.field[data-key]')].length));
-  // Treatment is present from 29 October 2026 even with no dictation: it holds
-  // the empty LA table, which an extraction must always offer. Findings is
-  // still absent, which is what this assertion is about.
-  ok('under chronological section headings, Findings omitted when nothing was dictated',
-    [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent)
-      .join('|') === 'Presentation|Discussion|Treatment|Outcome',
-    [...$(doc, 'fields').children].filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent).join('|'));
+  /* Both Treatment and Findings are present with no dictation at all, each for
+     the same reason: it holds a table that must always be offered somewhere.
+     Treatment has the empty LA log (29 October 2026), Findings the empty
+     diagnosis list (29 October 2026) — a diagnosis can be recorded at any
+     appointment, so there is no appointment with nowhere to put one. Neither
+     is an accusation that something is missing: the dictated PROSE fields are
+     still absent, which the count above asserts, and an empty table prints
+     nothing, which testPrintCarriesOnlyWhatTheCopyDoes asserts. */
+  const headNames = () => [...$(doc, 'fields').children]
+    .filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent);
+  ok('under chronological section headings, every section that holds a table is offered',
+    headNames().join('|') === 'Presentation|Findings|Discussion|Treatment|Outcome', headNames().join('|'));
+  ok('and Findings holds the diagnosis list and no dictated prose field',
+    !!$(doc, 'diagnoses-block') && !fieldWrap(doc, 'examination') && !fieldWrap(doc, 'radiographicFindings'));
   ok('gap list is populated', $(doc, 'gaps-list').children.length >= 1);
   ok('patient words survive verbatim', $(doc, 'fields').textContent.includes('Will I be numb forever?'));
   ok('Montgomery fields are marked',
@@ -3223,6 +3230,7 @@ await testRadiographReport();
 await testSedationRecord();
 await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
+await testDiagnosisItemised();
 await testItemisedTreatment();
 await testEveryLayoutIsComplete();
 await testInjectionInEveryBlock();
@@ -6041,6 +6049,108 @@ function ITEM_TURNS() { return [
   { speaker: 'S1', start: 3, end: 4, text: 'And the lower left seven really needs an amalgam.' },
   { speaker: 'S1', start: 20, end: 26, text: 'Also planning a crown on the upper left four at a later visit.' }
 ]; }
+
+/* The diagnosis itemised (29 October 2026).
+
+   Built on the clinician's choice of the LOOSER source rule: a row may be
+   drafted from the patient-facing conversation as well as from the dictation.
+   That makes one assertion below the point of the whole test — a row marked
+   "discussed" whose words turn up only in the dictation must be flagged, not
+   believed. Without it, "you've got a bit of decay there" becomes a charted
+   diagnosis that the record claims the patient was told. */
+function DIAG_TURNS() { return [
+  { speaker: 'S1', start: 1, end: 3, text: 'The upper right one has distal buccal caries.' },
+  { speaker: 'S2', start: 3, end: 4, text: 'Is that the one that has been aching?' },
+  { speaker: 'S1', start: 20, end: 27, text: 'Twenty seven is grossly carious and thirty four has buccal abrasion.' }
+]; }
+
+async function testDiagnosisItemised() {
+  section('The diagnosis itemised: what was found, per tooth');
+  const NOTE = () => note27({
+    sources: {},
+    diagnoses: [
+      { tooth: '11', diagnosis: 'Distal buccal caries', notes: null, source: 'discussed',
+        quotes: ['distal buccal caries'] },
+      // Quotes must be at least MIN_QUOTE_WORDS long or they are refused as
+      // unverifiable, which is why these are phrases and not the bare finding.
+      { tooth: '27', diagnosis: 'Grossly carious', notes: null, source: 'dictated',
+        quotes: ['twenty seven is grossly carious'] },
+      // Said only after the patient left, but marked as discussed with them.
+      { tooth: '34', diagnosis: 'Buccal abrasion', notes: null, source: 'discussed',
+        quotes: ['thirty four has buccal abrasion'] }
+    ],
+    speakers: { S1: 'clinician', S2: 'patient' }
+  });
+  let ctx = await runType(NOTE, { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  let { doc, win } = ctx;
+
+  const dx = () => $(doc, 'diagnoses-block');
+  ok('an exam shows the diagnosis list', !!dx());
+  ok('numbered, one row per tooth',
+    [...dx().querySelectorAll('td.item-n')].map((t) => t.textContent).join(',') === '1,2,3',
+    [...dx().querySelectorAll('td.item-n')].map((t) => t.textContent).join(','));
+  ok('with the tooth and the diagnosis as said',
+    /11/.test(dx().textContent) && /Distal buccal caries/.test(dx().textContent) &&
+    /27/.test(dx().textContent) && /Grossly carious/.test(dx().textContent));
+  ok('each row carries a source the clinician can change',
+    [...dx().querySelectorAll('select')].map((sl) => sl.value).join(',') === 'discussed,dictated,discussed',
+    [...dx().querySelectorAll('select')].map((sl) => sl.value).join(','));
+
+  // THE one that matters under the looser source rule.
+  ok('a diagnosis claimed as discussed but found only in the dictation is flagged',
+    /Item 3: marked as discussed with the patient, but its words are only in your dictation/.test(dx().textContent),
+    dx().textContent.slice(-400));
+  ok('and the rows that do check out are not flagged',
+    !/Item 1:/.test(dx().textContent) && !/Item 2:/.test(dx().textContent), dx().textContent.slice(-400));
+  ok('the same row is named in the headline check list',
+    [...$(doc, 'sourcecheck-list').children].some((li) => /Diagnosis, item 3/.test(li.textContent)),
+    [...$(doc, 'sourcecheck-list').children].map((li) => li.textContent.slice(0, 60)).join(' | '));
+
+  let text = await ctx.copy();
+  ok('the copy numbers the diagnosis and leaves it unlabelled',
+    /Diagnosis\n1\. Tooth \/ site 11, Distal buccal caries\n2\. Tooth \/ site 27, Grossly carious \(dictated\)\n3\. Tooth \/ site 34, Buccal abrasion/.test(text),
+    text.slice(0, 900));
+
+  // In SOAP the diagnosis IS the assessment, so it leads that section.
+  click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap'));
+  await waitFor(() => !!$(doc, 'diagnoses-block'), 'the SOAP layout rendered');
+  {
+    const kids = [...$(doc, 'fields').children];
+    const at = kids.findIndex((e) => e.classList.contains('section-heading') && e.textContent === 'Assessment');
+    ok('in SOAP it leads the Assessment', at !== -1 && kids[at + 1] && kids[at + 1].id === 'diagnoses-block',
+      kids.slice(at, at + 3).map((e) => e.id || e.textContent).join(' | '));
+  }
+
+  // Offered on EVERY consult type, which is what was asked for: there is no
+  // appointment at which a diagnosis cannot be recorded.
+  const types = [...$(ctx.doc, 'types').children].map((b) => b.textContent);
+  const missing = [];
+  for (const label of types) {
+    const c = await runType(() => note27({ sources: {} }),
+      { type: new RegExp('^' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), dictate: false });
+    // Wait for the draft to have rendered before looking for the block. Read
+    // straight after runType this raced the render and reported a type as
+    // missing the list when the page simply had not drawn it yet.
+    await waitFor(() => !$(c.doc, 'draft').classList.contains('hidden') &&
+      $(c.doc, 'fields').children.length > 0, 'the draft for ' + label);
+    if (!$(c.doc, 'diagnoses-block')) missing.push(label);
+  }
+  ok('every consult type offers somewhere to record a diagnosis, dictation or not',
+    missing.length === 0 && types.length === 13, 'missing: ' + missing.join(', ') + ' of ' + types.length);
+
+  // A row typed by hand claims nothing about where it came from.
+  ctx = await runType(() => note27({ sources: {} }), { type: /Emergency/, dictate: false });
+  click($(ctx.doc, 'diagnoses-block').querySelector('.add-row'));
+  await waitFor(() => !!$(ctx.doc, 'diagnoses-block').querySelector('select'), 'the hand-added row');
+  ok('a hand-added diagnosis claims no source until the clinician picks one',
+    $(ctx.doc, 'diagnoses-block').querySelector('select').value === '');
+  const cell = $(ctx.doc, 'diagnoses-block').querySelector('td[contenteditable="true"]');
+  cell.textContent = 'LR8';
+  cell.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  await waitFor(() => !$(ctx.doc, 'diagnoses-block').classList.contains('print-none'), 'the filled row reaching the paper');
+  ok('and once typed in, the block is for the paper',
+    !$(ctx.doc, 'diagnoses-block').classList.contains('print-none'));
+}
 
 async function testItemisedTreatment() {
   section('The treatment itemised: proposed course and options offered');

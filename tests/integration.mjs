@@ -3312,6 +3312,78 @@ async function testSept27b() {
     ok('and the dictated item in the plan, never in the consent fields',
       /Proposed, itemised \(dictated\):\n1\. Tooth \/ site UL4, Crown/.test(n2.plan || '') &&
       !/UL4/.test(n2.proposed || ''), n2.plan);
+
+    /* ---- the diagnosis itemised (29 October 2026) ---- */
+    section('The diagnosis itemised: what was found, per tooth');
+    ok('the schema asks for it', /"diagnoses": \[ \{ "tooth"/.test(sys));
+    ok('and the prompt forbids inferring one', /NEVER INFER A DIAGNOSIS/.test(sys) &&
+      /If nothing was said about what is wrong with 11, there is NO ROW/.test(sys));
+    ok('it says a diagnosis must not be derived from the treatment or the symptom',
+      /Do not derive a diagnosis from a treatment/.test(sys) &&
+      /Do not derive one from a symptom the patient reported/.test(sys));
+    ok('and that an empty list is the expected answer',
+      /An empty array is the correct and expected answer for most appointments/.test(sys));
+    ok('the source rule covers all three lists, not two',
+      /ON EVERY ROW OF ALL THREE LISTS/.test(sys) && !/ON EVERY ROW OF BOTH LISTS/.test(sys));
+    ok('and the diagnosis is kept apart from the examination',
+      /"diagnoses" against "examination"/.test(sys) && /Never write the same content into both/.test(sys));
+
+    const cd = pm.cleanDiagnoses;
+    ok('a diagnosis row takes its own columns',
+      cd([{ tooth: '11', diagnosis: 'Distal buccal caries', source: 'discussed' }]).rows[0].diagnosis === 'Distal buccal caries' &&
+      cd([{ treatment: 'Composite' }]).gaps.length === 1);
+    ok('a tooth-less finding is kept, since not every diagnosis is tooth-specific',
+      cd([{ tooth: null, diagnosis: 'Generalised gingivitis', source: 'discussed' }]).rows.length === 1);
+    ok('and its source is never guessed either',
+      cd([{ diagnosis: 'Caries', source: 'probably' }]).rows[0].source === null);
+    ok('itemAsText leaves the diagnosis bare and labels the tooth',
+      pm.itemAsText({ tooth: '11', diagnosis: 'Distal buccal caries', notes: null }, pm.DIAG_ITEM_FIELDS, pm.DIAG_ITEM_LABELS) ===
+      'Tooth / site 11, Distal buccal caries',
+      pm.itemAsText({ tooth: '11', diagnosis: 'Distal buccal caries', notes: null }, pm.DIAG_ITEM_FIELDS, pm.DIAG_ITEM_LABELS));
+    ok('a price in the diagnosis list is reported as misplaced money',
+      pm.misplacedMoney({ diagnoses: [{ tooth: '27', diagnosis: 'Grossly carious', notes: 'extraction £95' }] })
+        .includes('the diagnosis list'),
+      JSON.stringify(pm.misplacedMoney({ diagnoses: [{ tooth: '27', diagnosis: 'Grossly carious', notes: 'extraction £95' }] })));
+
+    // End to end, including the claim that must not stand.
+    const DX = {
+      ...base2, gaps: [], checklist: {},
+      diagnoses: [
+        { tooth: '11', diagnosis: 'Distal buccal caries', notes: null, source: 'discussed', quotes: ['distal buccal caries'] },
+        { tooth: '27', diagnosis: 'Grossly carious', notes: null, source: 'dictated', quotes: ['twenty seven is grossly carious'] }
+      ]
+    };
+    const dxTurns = [{ speaker: 'S1', text: 'The upper right one has distal buccal caries.', start: 1, end: 3 },
+                     { speaker: 'S1', text: 'Twenty seven is grossly carious.', start: 20, end: 25 }];
+    stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(DX) }], stop_reason: 'end_turn' } }));
+
+    let r3 = mockRes();
+    await extract(mockReq({ body: { turns: dxTurns, consultType: 'exam-recall',
+      features: ['treatment', 'items', 'diagnoses'] } }), r3);
+    let n3 = r3.body?.note || {};
+    ok('with no dictation, a diagnosis claiming to be dictated has its source emptied',
+      n3.diagnoses[1].source === null && n3.diagnoses[0].source === 'discussed', JSON.stringify(n3.diagnoses));
+    ok('and the clinician is told it was the diagnosis list',
+      n3.gaps.some((g) => /Rows in the diagnosis list came back marked as dictated/.test(g)), JSON.stringify(n3.gaps));
+
+    r3 = mockRes();
+    await extract(mockReq({ body: { turns: dxTurns, dictationFromS: 10, consultType: 'exam-recall',
+      features: ['treatment', 'items', 'diagnoses'] } }), r3);
+    n3 = r3.body?.note || {};
+    ok('with dictation, both sources stand', n3.diagnoses[1].source === 'dictated' && n3.diagnoses[0].source === 'discussed');
+
+    // An older page gets them beside the findings, each group saying its source.
+    r3 = mockRes();
+    await extract(mockReq({ body: { turns: dxTurns, dictationFromS: 10, consultType: 'exam-recall',
+      features: ['treatment', 'items'] } }), r3);
+    n3 = r3.body?.note || {};
+    ok('a page that does not know the list gets the diagnoses in the examination',
+      !('diagnoses' in n3) &&
+      /Diagnosis, itemised \(discussed with the patient\):\n1\. Tooth \/ site 11, Distal buccal caries/.test(n3.examination || ''),
+      n3.examination);
+    ok('with the dictated ones labelled separately, so neither is shown as the other',
+      /Diagnosis, itemised \(dictated\):\n1\. Tooth \/ site 27, Grossly carious/.test(n3.examination || ''),
+      n3.examination);
   }
 
   // --- dentures (26 October 2026; split in two on the 27th) ---

@@ -33,7 +33,8 @@ import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS
          cleanQuestions, LA_LOG_FIELDS, PMPR_LINE,
          SEDATION_TEXT_FIELDS, SEDATION_DOSE_FIELDS, SEDATION_LABELS, SEDATION_DRAFT,
          sedationAny, sedationAsLines, misplacedMoney,
-         PLAN_ITEM_FIELDS, OPTION_ITEM_FIELDS, PLAN_ITEM_LABELS, OPTION_ITEM_LABELS, itemAsText } from './_prompt.mjs';
+         PLAN_ITEM_FIELDS, OPTION_ITEM_FIELDS, PLAN_ITEM_LABELS, OPTION_ITEM_LABELS,
+         DIAG_ITEM_FIELDS, DIAG_ITEM_LABELS, itemAsText } from './_prompt.mjs';
 import { checklistGaps, checklistIsDraft } from './_checklists.mjs';
 import { sessionStillGood } from './_store.mjs';
 
@@ -385,7 +386,7 @@ export default async function handler(req, res) {
     // the error that matters.
     {
       const stray = [];
-      for (const key of ['planItems', 'optionsOffered']) {
+      for (const key of ['diagnoses', 'planItems', 'optionsOffered']) {
         for (const row of (Array.isArray(note[key]) ? note[key] : [])) {
           if (row.source === 'dictated' && (!dictationRequested || !dictationLocated)) {
             row.source = null;
@@ -394,7 +395,10 @@ export default async function handler(req, res) {
         }
       }
       if (stray.length) {
-        note.gaps.push('Items in the treatment list came back marked as dictated, but nothing was dictated in this ' +
+        const where = stray.includes('diagnoses')
+          ? (stray.some((k) => k !== 'diagnoses') ? 'the diagnosis and treatment lists' : 'the diagnosis list')
+          : 'the treatment list';
+        note.gaps.push(`Rows in ${where} came back marked as dictated, but nothing was dictated in this ` +
           'recording. They are shown without a source: check each one before you paste, and mark it yourself.');
       }
     }
@@ -426,6 +430,28 @@ export default async function handler(req, res) {
     // conversation fields and a dictated row to the plan, because folding both
     // into one would hand an older page a dictated proposal dressed as part of
     // the consent discussion. That separation is the point of the lists.
+    /* A page that does not know the diagnosis list (29 October 2026). Its rows
+       go into the examination, which is the findings field they belong beside,
+       each group saying which source it came from. The examination carries a
+       "Dictated" tag on such a page, which is why the discussed rows are
+       labelled in the text itself rather than merged in silently: an older page
+       must not show something said to the patient as having been dictated. */
+    if (!features.includes('diagnoses')) {
+      const rows = Array.isArray(note.diagnoses) ? note.diagnoses : [];
+      const lines = (rs) => rs.map((r, i) => `${i + 1}. ${itemAsText(r, DIAG_ITEM_FIELDS, DIAG_ITEM_LABELS)}`)
+        .filter((l) => l.length > 3);
+      const add = (head, ls) => {
+        if (!ls.length) return;
+        note.examination = [
+          typeof note.examination === 'string' ? note.examination.trim() : '', head, ...ls
+        ].filter(Boolean).join('\n');
+      };
+      add('Diagnosis, itemised (discussed with the patient):', lines(rows.filter((r) => r.source === 'discussed')));
+      add('Diagnosis, itemised (dictated):', lines(rows.filter((r) => r.source === 'dictated')));
+      add('Diagnosis, itemised (source not known):', lines(rows.filter((r) => r.source !== 'discussed' && r.source !== 'dictated')));
+      delete note.diagnoses;
+    }
+
     if (!features.includes('items')) {
       const lines = (rows, cols, labels) => rows.map((r, i) => `${i + 1}. ${itemAsText(r, cols, labels)}`).filter((l) => l.length > 3);
       const plan = Array.isArray(note.planItems) ? note.planItems : [];
