@@ -3182,6 +3182,7 @@ await testItemisedTreatment();
 await testEveryLayoutIsComplete();
 await testInjectionInEveryBlock();
 await testNoDictationStillHasSomewhereToWrite();
+await testEveryBlockCanBeFilledByHand();
 
 console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
 process.exit(fail ? 1 : 0);
@@ -6289,6 +6290,84 @@ async function testNoDictationStillHasSomewhereToWrite() {
     !!$(c2.doc, 'la-block').querySelector('.dictated-tag'));
   const t2 = await c2.copy();
   ok('and still marked dictated in the copy', /Local anaesthetic given \(dictated\)/.test(t2), t2.slice(0, 500));
+}
+
+/**
+ * The same defect the LA block had, found on the other blocks (29 Oct 2026).
+ *
+ * The implant log was never offered empty, so an implant surgery with nothing
+ * dictated had nowhere to record what was placed — and, alone among the blocks,
+ * its rows were plain cells with no contenteditable, so a misheard LOT NUMBER
+ * could not be corrected. That is the traceability chain.
+ *
+ * And the sedation block was offered only on the 'sedation' consult type, while
+ * the practice takes referrals for IV sedation FOR ORAL SURGERY — those cases
+ * are filed under the surgery.
+ */
+async function testEveryBlockCanBeFilledByHand() {
+  section('Every block can be filled in by hand, on the types that need it');
+
+  // --- the implant log ---
+  let ctx = await runType(() => note27({ sources: {} }), { type: /Implant surgery/, dictate: false });
+  let b = $(ctx.doc, 'implant-block');
+  ok('an implant surgery offers the implant log even with nothing dictated', !!b);
+  ok('with a way to add one', !!b && !!b.querySelector('.add-row'));
+  ok('and it says why none came from the recording',
+    /Nothing was dictated, so no implant log was taken from the recording/.test(b.textContent),
+    b.textContent.slice(0, 200));
+  ok('it claims no dictation it did not have', !b.querySelector('.dictated-tag'));
+
+  click(b.querySelector('.add-row'));
+  await tick(40);
+  b = $(ctx.doc, 'implant-block');
+  const cells = [...b.querySelectorAll('td[contenteditable="true"]')];
+  ok('the row it adds is editable, unlike the old read-only table', cells.length === 9, String(cells.length));
+  cells[0].textContent = 'LL6';
+  cells[0].dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  cells[4].textContent = 'LOT-99231';
+  cells[4].dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  await tick(30);
+  let text = await ctx.copy();
+  ok('a hand-entered implant, lot number and all, is in the copied note',
+    /Implant 1: Site LL6, Lot LOT-99231/.test(text), text.slice(0, 500));
+  ok('and is not called dictated', !/Implants placed \(dictated\)/.test(text));
+
+  // The lot number must be correctable on a DICTATED log — the old table
+  // rendered plain cells, so a misheard lot was permanent.
+  ctx = await runType(() => note27({
+    sources: {},
+    implantLog: [{ site: 'LL6', system: 'Straumann BLT', diameter: '4.1', length: '10', lot: 'WRONG', torque: '35', isq: '72', graft: null, notes: null }]
+  }), { type: /Implant surgery/, dictate: true });
+  const lot = [...$(ctx.doc, 'implant-block').querySelectorAll('td[contenteditable="true"]')]
+    .find((td) => td.textContent === 'WRONG');
+  ok('a dictated lot number can be corrected', !!lot);
+  lot.textContent = 'LOT-44102';
+  lot.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  await tick(30);
+  text = await ctx.copy();
+  ok('and the correction is what gets pasted, as text',
+    /Lot LOT-44102/.test(text) && !/WRONG/.test(text) && !$(ctx.doc, 'implant-block').querySelector('b'),
+    text.slice(0, 400));
+  ok('the block marks itself edited', $(ctx.doc, 'implant-block').classList.contains('edited'));
+
+  // --- sedation on a surgical case ---
+  ctx = await runType(() => note27({ sources: {} }), { type: /Third molar/, dictate: false });
+  ok('a third molar case offers a sedation record', !!$(ctx.doc, 'sedation-offer'));
+  ok('as one button, not an eleven-field form nobody asked for',
+    !$(ctx.doc, 'sedation-block') &&
+    /Add a sedation record/.test($(ctx.doc, 'sedation-offer').textContent));
+  text = await ctx.copy();
+  ok('and an unused offer puts nothing in the note', !/Sedation given/.test(text));
+  click($(ctx.doc, 'sedation-offer').querySelector('.add-row'));
+  await tick(60);
+  ok('pressing it opens the full record', !!$(ctx.doc, 'sedation-block') && !$(ctx.doc, 'sedation-offer'));
+  ok('which is editable', !!$(ctx.doc, 'sedation-block').querySelector('.sed-value[contenteditable="true"]'));
+
+  // A plain restorative visit is offered neither.
+  ctx = await runType(() => note27({ sources: {} }), { type: /Restorative/, dictate: false });
+  ok('a restorative visit is offered no implant log and no sedation record',
+    !$(ctx.doc, 'implant-block') && !$(ctx.doc, 'sedation-offer') && !$(ctx.doc, 'sedation-block'));
+  ok('but is still offered the LA, which it does need', !!$(ctx.doc, 'la-block'));
 }
 
 async function testPmpr() {
