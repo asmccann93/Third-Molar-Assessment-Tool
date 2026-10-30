@@ -6366,9 +6366,50 @@ async function testReviewAidsHoldUp() {
     { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
   let { doc } = ctx;
   const rec = $(doc, 'recorded');
-  ok('and the transcript sits inside the draft, so those rules cover it',
-    rec.parentNode === $(doc, 'draft'), rec.parentNode && (rec.parentNode.id || rec.parentNode.className));
+  /* It sat inside #draft until 30 October 2026, which covered it by accident
+     and hid it on a failed draft. Out here it needs a rule that names it. */
+  ok('the transcript is named in the patient-sheet rules, not covered by accident',
+    /body\.print-summary #recorded/.test(printCss) && /body\.print-postop #recorded/.test(printCss),
+    printCss.slice(0, 600));
+  ok('and it is a sibling of the draft, so hiding the draft does not hide it',
+    rec.parentNode === $(doc, 'draft').parentNode && !rec.closest('#draft'),
+    rec.parentNode && (rec.parentNode.id || rec.parentNode.className));
   ok('as does the next-to-check control', !!$(doc, 'check-nav-row').closest('#draft'));
+
+  /* The reason for the move: a failed draft is where reading the recording
+     matters most, and the panel was hidden with the draft. */
+  {
+    const c = await boot({ onFetch: async (e) => {
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') {
+        return json200({ status: 'done', turns: [
+          { speaker: 'S1', start: 1, end: 3, text: 'Recurrent pericoronitis lower left eight.' }] });
+      }
+      if (e.url.includes('/api/extract')) return { ok: false, status: 502, json: async () => ({ error: 'extraction_failed' }) };
+      return null;
+    } });
+    await runConsultation(c, null, DEFAULT_TURNS);
+    ok('a failed draft still shows the error', !$(c.doc, 'error').classList.contains('hidden'));
+    ok('and the recording can still be read, which is the decision being made',
+      !$(c.doc, 'recorded').classList.contains('hidden'));
+    click($(c.doc, 'recorded-toggle'));
+    await waitFor(() => !$(c.doc, 'recorded-list').classList.contains('hidden'), 'the transcript on a failed draft');
+    ok('with the words in it', /pericoronitis/.test($(c.doc, 'recorded-list').textContent),
+      $(c.doc, 'recorded-list').textContent.slice(0, 160));
+    // And discarding it takes the words out of the DOM, as it always did.
+    c.win.confirm = () => true;
+    click($(c.doc, 'discard-transcript'));
+    await waitFor(() => $(c.doc, 'error').classList.contains('hidden'), 'the discard');
+    ok('discarding the transcript clears the panel with it',
+      !c.doc.body.textContent.includes('pericoronitis') &&
+      $(c.doc, 'recorded').classList.contains('hidden'));
+  }
+
+  /* And the check no longer sends him to his memory when the words are there. */
+  ok('a field with no sources points at the recording, not at memory',
+    !/No sources came back for this field\. Read it against what you remember/.test(html) &&
+    /Read it against What was recorded, on this page\./.test(html), '');
+  ok('but says memory when there is in fact nothing recorded to read',
+    /recordedTurns\(\)\.length[\s\S]{0,160}Read it against what you remember/.test(html));
 
   // 2. The count must follow a correction, not wait for the next full render.
   const count = () => $(doc, 'check-count').textContent;

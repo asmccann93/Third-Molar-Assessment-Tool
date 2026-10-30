@@ -168,6 +168,11 @@ button:disabled { opacity: .45; cursor: default; }
      only that document reaches the paper. Ctrl+P on its own still prints the
      record as above; handing the patient a post-op sheet used to hand them the
      whole clinical note with it. */
+  /* #recorded moved out of #draft on 30 October 2026, so the rule above no
+     longer reaches it. Named here: the transcript is the patient's own words
+     and must never appear on a sheet handed to them. */
+  body.print-summary #recorded,
+  body.print-postop #recorded,
   body.print-summary .wrap > :not(#draft),
   body.print-postop .wrap > :not(#draft),
   body.print-summary #draft > :not(#derived),
@@ -770,6 +775,33 @@ label.pmpr input { margin-top: 4px; }
     </div>
   </div>
 
+    <!-- What was actually recorded (30 October 2026).
+
+         The source check could say a sentence was not found in the recording,
+         and the only remedy it could offer was "read it against what you
+         remember" — which is the thing this tool exists to replace. The words
+         were in memory all along and already drive every check; they just could
+         not be looked at. Nothing is stored by showing them: no request, no
+         write, no new data leaving the page. It is destroyed with everything
+         else, it is never copied into the note, and it never prints.
+
+         Moved out of the draft section on 30 October 2026. Inside it, the card
+         was hidden whenever the draft was — including on a FAILED draft, which
+         is the one moment reading the recording matters most: the clinician is
+         choosing between trying again and discarding the transcript, and could
+         not see what had been captured. Out here it is kept off the two
+         patient-facing sheets by a rule that names it, rather than by where it
+         happened to sit. -->
+    <div class="card hidden print-none" id="recorded">
+      <div class="field-head">
+        <h2 id="recorded-title">What was recorded</h2>
+        <button type="button" class="copy" id="recorded-toggle" aria-expanded="false"
+                aria-controls="recorded-list">Show</button>
+      </div>
+      <p class="timer-note" id="recorded-lead" style="margin:0;text-align:left"></p>
+      <ol id="recorded-list" class="hidden"></ol>
+    </div>
+
   <!-- ============ SETUP ============ -->
   <section id="setup" tabindex="-1" aria-labelledby="setup-h">
 
@@ -900,25 +932,6 @@ label.pmpr input { margin-top: 4px; }
       <ul id="sourcecheck-list"></ul>
     </div>
 
-    <!-- What was actually recorded (30 October 2026).
-
-         The source check could say a sentence was not found in the recording,
-         and the only remedy it could offer was "read it against what you
-         remember" — which is the thing this tool exists to replace. The words
-         were in memory all along and already drive every check; they just could
-         not be looked at. Nothing is stored by showing them: no request, no
-         write, no new data leaving the page. It is destroyed with everything
-         else, it is never copied into the note, and it never prints. -->
-    <div class="card hidden print-none" id="recorded">
-      <div class="field-head">
-        <h2 id="recorded-title">What was recorded</h2>
-        <button type="button" class="copy" id="recorded-toggle" aria-expanded="false"
-                aria-controls="recorded-list">Show</button>
-      </div>
-      <p class="timer-note" id="recorded-lead" style="margin:0;text-align:left"></p>
-      <ol id="recorded-list" class="hidden"></ol>
-    </div>
-
     <div class="card">
       <div class="draft-head">
         <h2 id="draft-heading">Draft note</h2>
@@ -1042,7 +1055,7 @@ label.pmpr input { margin-top: 4px; }
         For example after a radiograph. The note is redrafted from all the recordings together.
       </p>
       <p class="timer-note" style="margin:14px 0 0">
-        This is a draft. Read it against what you remember, then paste it into the record.
+        This is a draft. Read it against what was recorded, then paste it into the record.
         Nothing here is saved — closing the tab destroys it.
       </p>
     </div>
@@ -1073,7 +1086,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-30.3';
+  var BUILD = '2026-10-30.4';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1643,6 +1656,10 @@ label.pmpr input { margin-top: 4px; }
     $('error-body').textContent = body;
     $('error-actions').classList.toggle('hidden', !retryable);
     $('error').classList.remove('hidden');
+    /* A failed draft still holds the transcript, and the clinician is about to
+       choose between trying again and discarding it. Rendered here as well as
+       in render(), which needs a draft to run at all. */
+    if (typeof renderRecorded === 'function') renderRecorded();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   function clearError() {
@@ -5909,6 +5926,23 @@ label.pmpr input { margin-top: 4px; }
     return div;
   }
 
+  /* Where to look when the check cannot vouch for something (30 October 2026).
+
+     Three messages here told the clinician to "read it against what you
+     remember" — and they existed BECAUSE the recording could not be read. It
+     can be, since this morning, so the tool was sending him to his memory
+     while the words sat in a panel on the same page. That was the exact
+     message the panel was built to retire.
+
+     Still conditional: with no turns held there is nothing to read, and the
+     old sentence is then the true one. Named rather than pointed at, because
+     the panel is above the note on a failed draft and below it on a good one. */
+  function checkAgainst() {
+    return recordedTurns().length
+      ? 'Read it against What was recorded, on this page.'
+      : 'Read it against what you remember.';
+  }
+
   function renderSources() {
     var box = $('sourcecheck'), list = $('sourcecheck-list');
     list.textContent = '';
@@ -5920,7 +5954,7 @@ label.pmpr input { margin-top: 4px; }
       box.classList.remove('hidden');
       box.classList.add('clear');
       $('sourcecheck-title').textContent = 'Source check not available for this draft';
-      $('sourcecheck-lead').textContent = 'The draft came back without its sources, so its sentences could not be matched to the recording. Read it against what you remember.';
+      $('sourcecheck-lead').textContent = 'The draft came back without its sources, so its sentences could not be matched to the recording. ' + checkAgainst();
       return;
     }
     var idx = transcriptIndex();
@@ -5938,7 +5972,7 @@ label.pmpr input { margin-top: 4px; }
         none.className = 'src';
         var p = document.createElement('p');
         p.className = 'src-note';
-        p.textContent = 'No sources came back for this field. Read it against what you remember.';
+        p.textContent = 'No sources came back for this field. ' + checkAgainst();
         none.appendChild(p);
         wrap.appendChild(none);
         return;
@@ -6010,7 +6044,9 @@ label.pmpr input { margin-top: 4px; }
       box.classList.add('clear');
       $('sourcecheck-title').textContent = 'Source check incomplete';
       $('sourcecheck-lead').textContent = (total ? 'Every sentence that could be checked matched the recording.' : 'Nothing could be checked.') + notChecked +
-        ' Read ' + (unchecked.length === 1 ? 'it' : 'them') + ' against what you remember.';
+        ' ' + (recordedTurns().length
+          ? 'Read ' + (unchecked.length === 1 ? 'it' : 'them') + ' against What was recorded, on this page.'
+          : 'Read ' + (unchecked.length === 1 ? 'it' : 'them') + ' against what you remember.');
     } else {
       box.classList.add('clear');
       $('sourcecheck-title').textContent = 'Every sentence matched to the recording';
