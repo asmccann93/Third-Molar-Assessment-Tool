@@ -918,8 +918,10 @@ async function testPolish() {
   // since 26 October. Asserted inside the print block, not merely present.
   {
     const printCss = (src.match(/@media print \{[\s\S]*?\n\}/) || [''])[0];
-    ok('and the add-a-row buttons do not print',
-      /\.add-row \{ display: none !important; \}/.test(printCss), printCss.slice(0, 400));
+    // Joined by the diagnosis list's Order by tooth on 30 October 2026: both
+    // are controls, and neither belongs on a clinical record.
+    ok('and the add-a-row and ordering buttons do not print',
+      /\.add-row, \.order-row \{ display: none !important; \}/.test(printCss), printCss.slice(0, 400));
   }
 
   // 3. the promise, stated
@@ -3231,6 +3233,7 @@ await testSedationRecord();
 await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
 await testReviewAids();
+await testReviewAidsHoldUp();
 await testDiagnosisItemised();
 await testItemisedTreatment();
 await testEveryLayoutIsComplete();
@@ -6185,6 +6188,117 @@ async function testReviewAids() {
   // A single row has no order to put right, so nothing is offered.
   ctx = await runType(NOTE, { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
   ok('with one row there is nothing to order', !$(ctx.doc, 'order-teeth'));
+}
+
+/* What the eighth sweep found in the five above, all of it mine from the same
+   day. Each is small; each would have been believed. */
+async function testReviewAidsHoldUp() {
+  section('The review aids under their own rules');
+
+  // 1. The transcript must not reach a sheet handed to the patient. True by
+  // where the card sits, and that is exactly why it needs an assertion: the
+  // card could be moved and nothing would say so.
+  const printCss = (html.match(/@media print \{[\s\S]*?\n\}/) || [''])[0];
+  ok('the patient sheets hide everything in the draft but the patient box',
+    /body\.print-summary #draft > :not\(#derived\)/.test(printCss) &&
+    /body\.print-postop #draft > :not\(#derived\)/.test(printCss), printCss.slice(0, 400));
+  let ctx = await runType(() => note27({ sources: {}, speakers: { S1: 'clinician', S2: 'patient' } }),
+    { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  let { doc } = ctx;
+  const rec = $(doc, 'recorded');
+  ok('and the transcript sits inside the draft, so those rules cover it',
+    rec.parentNode === $(doc, 'draft'), rec.parentNode && (rec.parentNode.id || rec.parentNode.className));
+  ok('as does the next-to-check control', !!$(doc, 'check-nav-row').closest('#draft'));
+
+  // 2. The count must follow a correction, not wait for the next full render.
+  const count = () => $(doc, 'check-count').textContent;
+  const gapField = [...$(doc, 'fields').querySelectorAll('.field.is-gap')][0];
+  ok('there is a gap to fill and the control counts it', !!gapField && /thing/.test(count()), count());
+  const before = parseInt(count(), 10);
+  const pre = gapField.querySelector('pre[contenteditable]');
+  pre.textContent = 'Filled in by hand.';
+  pre.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  await tick(30);
+  ok('filling it in removes it from the count as you type',
+    parseInt(count(), 10) === before - 1 || $(doc, 'check-nav-row').classList.contains('hidden'),
+    before + ' -> ' + count());
+  ok('and the field is no longer one of the stops', !gapField.classList.contains('is-gap'));
+
+  // 3. The ordering note must not outlive the rows it described.
+  const OUT = () => note27({
+    sources: {},
+    diagnoses: [
+      { tooth: '34', diagnosis: 'Buccal abrasion', notes: null, source: 'dictated', quotes: ['x'] },
+      { tooth: '11', diagnosis: 'Distal buccal caries', notes: null, source: 'dictated', quotes: ['x'] }
+    ],
+    speakers: { S1: 'clinician' }
+  });
+  ctx = await runType(OUT, { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  doc = ctx.doc;
+  click($(doc, 'order-teeth'));
+  await waitFor(() => /Ordered by tooth/.test($(doc, 'diagnoses-block').textContent), 'the ordering note');
+  ctx.win.confirm = () => true;
+  click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'brief'));
+  await waitFor(() => !/Ordered by tooth/.test($(doc, 'diagnoses-block').textContent), 'the redraft');
+  ok('a redraft clears the claim that the list was ordered by tooth',
+    !/Ordered by tooth/.test($(doc, 'diagnoses-block').textContent),
+    $(doc, 'diagnoses-block').textContent.slice(0, 200));
+
+  /* 3b. And ordering must not switch the source check off. The check is
+     index-based against the drafted copy, so a reorder alone used to make
+     every row read as hand-edited — and a row that reads as edited is never
+     checked. The row below claims the patient was told something that was
+     only ever dictated, and must still say so after the list is reordered. */
+  const FLAGGED = () => note27({
+    sources: {},
+    diagnoses: [
+      { tooth: '34', diagnosis: 'Buccal abrasion', notes: null, source: 'discussed',
+        quotes: ['thirty four has buccal abrasion'] },
+      { tooth: '11', diagnosis: 'Distal buccal caries', notes: null, source: 'discussed',
+        quotes: ['distal buccal caries'] }
+    ],
+    speakers: { S1: 'clinician', S2: 'patient' }
+  });
+  ctx = await runType(FLAGGED, { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  doc = ctx.doc;
+  const flagText = () => $(doc, 'diagnoses-block').textContent;
+  ok('a row claiming the patient was told is flagged before ordering',
+    /marked as discussed with the patient, but its words are only in your dictation/.test(flagText()),
+    flagText().slice(-300));
+  click($(doc, 'order-teeth'));
+  await waitFor(() => /Ordered by tooth/.test(flagText()), 'the ordered list');
+  ok('and is STILL flagged after it, the check not having been switched off',
+    /marked as discussed with the patient, but its words are only in your dictation/.test(flagText()),
+    flagText().slice(-400));
+  ok('and ordering is not reported as editing the rows', !/Edited by you/.test(flagText()), flagText().slice(-200));
+
+  // 4. The quote is shown only where the words are what failed.
+  ctx = await runType(() => note27({
+    sources: {},
+    laLog: [{ drug: 'Lidocaine 2% with adrenaline', site: 'ID block', volume: '2.2ml',
+              batch: 'ZZ999', quotes: ['lidocaine two percent with adrenaline'] }],
+    speakers: { S1: 'clinician' }
+  }), { type: /^Extraction/, dictate: true, turns: [
+    { speaker: 'S1', start: 20, end: 26, text: 'Gave lidocaine two percent with adrenaline as an ID block.' }
+  ] });
+  const la = $(ctx.doc, 'la-block');
+  ok('a batch number found nowhere is still named',
+    /batch ZZ999 not found in your dictation/.test(la.textContent), la.textContent.slice(-300));
+  ok('but no quote is offered beside it, the words not being what failed',
+    !/Checked:/.test(la.textContent), la.textContent.slice(-300));
+
+  // 5. One class means Add, so nothing reaching for it gets the sort button.
+  ctx = await runType(OUT, { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  const dxb = $(ctx.doc, 'diagnoses-block');
+  ok('the diagnosis block has exactly one Add button',
+    dxb.querySelectorAll('.add-row').length === 1 &&
+    /Add another diagnosis/.test(dxb.querySelector('.add-row').textContent),
+    String(dxb.querySelectorAll('.add-row').length) + ': ' + dxb.querySelector('.add-row').textContent);
+  ok('and the sort button is not one of them', dxb.querySelector('.order-row') === $(ctx.doc, 'order-teeth'));
+  ok('every Add button in every block is styled by one rule, not per block id',
+    /\n\.add-row, \.order-row \{ min-height/.test(html) && !/#[a-z-]+-block \.add-row/.test(html));
+  ok('and the sort button is kept off the paper like the Add buttons',
+    /\.add-row, \.order-row \{ display: none !important; \}/.test(printCss));
 }
 
 async function testDiagnosisItemised() {

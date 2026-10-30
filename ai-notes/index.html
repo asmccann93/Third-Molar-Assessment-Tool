@@ -135,7 +135,7 @@ button:disabled { opacity: .45; cursor: default; }
   /* "Add a row" / "Add an increment" are controls, not record. They were
      printing on the paper note — the LA log's since 27 September, the sedation
      block's since 26 October. */
-  .add-row { display: none !important; }
+  .add-row, .order-row { display: none !important; }
   /* Screen guidance, never record. Every .bpe-note is a line telling the
      clinician what to do or where something came from — "add it here", "check
      before you paste", "Taken as dictated" — and noteAsText() includes none of
@@ -443,7 +443,6 @@ table.implant-log th, table.implant-log td { text-align: left; padding: 5px 6px;
 table.la-log td[contenteditable]:not([contenteditable="false"]):empty::before { content: attr(data-placeholder); color: var(--ink-faint); }
 table.la-log td[contenteditable]:not([contenteditable="false"]) { min-width: 3em; }
 table.la-log td[contenteditable]:not([contenteditable="false"]):focus { outline: 2px solid var(--accent); outline-offset: -2px; }
-#la-block .add-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
 table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
 /* The sedation record. The same editable-cell behaviour as the LA log, which is
    why .sed-log is given the la-log rules too, plus a label/value list for the
@@ -453,8 +452,15 @@ table.sed-log td[contenteditable]:not([contenteditable="false"]) { min-width: 3e
 table.sed-log td[contenteditable]:not([contenteditable="false"]):focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 table.item-log td.item-n { color: var(--ink-faint); width: 1.6em; font-variant-numeric: tabular-nums; }
 table.item-log select { font: inherit; font-size: .8rem; padding: 2px 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: inherit; }
-#options-block .add-row, #plan-items-block .add-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
-#sedation-block .add-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
+/* Every Add button in every block, and the diagnosis list's Order by tooth
+   (30 October 2026). This was four id-scoped copies of one declaration —
+   #la-block, #options-block, #plan-items-block, #sedation-block — so a block
+   added later was styled only if someone remembered to add a fifth. Nobody
+   did: the implant log, rewritten to this pattern on 29 October, the diagnosis
+   list added the same day, and the sedation offer all rendered a full-size
+   default button next to the compact ones. One rule, keyed on the class that
+   means what it does. */
+.add-row, .order-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
 .sed-group { font-family: var(--mono); font-size: .68rem; letter-spacing: .07em; text-transform: uppercase;
   color: var(--ink-faint); margin: 12px 0 4px; }
 .sed-group:first-of-type { margin-top: 4px; }
@@ -628,7 +634,7 @@ label.pmpr input { margin-top: 4px; }
 .field.block-stub .field-head h3 { flex: none; }
 .field.block-stub .field-head .copy { display: none; }
 .field.block-stub > p.bpe-note { margin: 0; flex: 1 1 12ch; order: 5; }
-.field.block-stub .add-row { margin: 0; order: 9; flex: none; }
+.field.block-stub .add-row, .field.block-stub .order-row { margin: 0; order: 9; flex: none; }
 
 /* The row the next-to-check control has just moved to. */
 .check-flash { animation: checkflash 1.4s ease-out 1; }
@@ -1038,7 +1044,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-30.1';
+  var BUILD = '2026-10-30.2';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -2815,6 +2821,13 @@ label.pmpr input { margin-top: 4px; }
       // memory only, destroyed with the rest; it exists so the session line can
       // say how much of the draft needed changing.
       try { S.drafted = JSON.parse(JSON.stringify(data.note)); } catch (e) { S.drafted = null; }
+      /* A fresh draft arrives in the order things were SAID in, so a note
+         saying the list was ordered by tooth is no longer true of it. Cleared
+         here rather than in clearConsultation alone: a redraft (a change of
+         length, a retry, an extra recording) replaces the rows without
+         starting a new consultation, and the claim would have outlived the
+         rows it described. */
+      S.orderNote = '';
     } catch (err) {
       if (!live()) return false;
       S.busy = false;
@@ -3385,6 +3398,14 @@ label.pmpr input { margin-top: 4px; }
           wrap.classList.toggle('edited', true);
           wrap.classList.toggle('is-gap', text === '');
           pre.classList.toggle('is-empty', text === '');
+          /* Filling a gap removes it from the things to check, so the count
+             must follow the typing (30 October 2026, same day as the control).
+             renderCheckNav ran only in render(), and typing into a field does
+             not re-render — so the commonest correction of all left the
+             counter claiming work that was already done. A counter that nags
+             about finished work is one you stop believing, and the next thing
+             you stop believing is the one that was right. */
+          renderCheckNav();
           // The consent text is built from these fields. Left as it was, the box
           // showed the pre-edit risks while Copy took the edited ones: what was
           // read and what was pasted into the consent form were not the same.
@@ -3555,14 +3576,28 @@ label.pmpr input { margin-top: 4px; }
   function orderDiagnosesByTooth() {
     var rows = itemRows(S.note, 'diagnoses');
     if (rows.length < 2) return 0;
+    /* The drafted copy is permuted with it, and that is not housekeeping.
+       itemRowEdited compares a row against S.drafted[key][i] BY INDEX, and
+       itemRowProblem returns null the moment a row reads as edited — on the
+       principle that a row the clinician has changed is theirs, not the
+       model's. Reordering alone therefore made almost every row differ from
+       the row it was being compared against, so this button would have
+       switched the source check off for the whole list: the guarantee that a
+       row claiming the patient was told must be found in the conversation,
+       disabled by a convenience added the next day. Ordering is not an edit to
+       any row, and after this neither side believes it is. */
+    var drafted = S.drafted && Array.isArray(S.drafted.diagnoses) ? S.drafted.diagnoses : null;
+    var aligned = !!drafted && drafted.length === rows.length;
     var placed = [], unplaced = [];
     rows.forEach(function (r, i) {
       var rank = toothRank(r.tooth);
-      (rank === null ? unplaced : placed).push({ r: r, rank: rank, i: i });
+      (rank === null ? unplaced : placed).push({ r: r, d: aligned ? drafted[i] : null, rank: rank, i: i });
     });
     // Stable: equal ranks keep the order they were said in.
     placed.sort(function (a, b) { return a.rank - b.rank || a.i - b.i; });
-    S.note.diagnoses = placed.concat(unplaced).map(function (x) { return x.r; });
+    var all = placed.concat(unplaced);
+    S.note.diagnoses = all.map(function (x) { return x.r; });
+    if (aligned) S.drafted.diagnoses = all.map(function (x) { return x.d; });
     S.edited = true;
     return unplaced.length;
   }
@@ -4439,12 +4474,13 @@ label.pmpr input { margin-top: 4px; }
       var notes = [];
       laRows(S.note).forEach(function (r, i) {
         var pr = laRowProblem(r, i, idx);
-        if (pr) notes.push('Row ' + (i + 1) + ': ' + pr + '.' + quoteTail(r));
+        if (pr) notes.push('Row ' + (i + 1) + ': ' + pr + '.' + quoteTail(r, pr));
       });
       status.className = 'bpe-note' + (notes.length ? ' warn' : '');
       var laFilled = laLogAsText(S.note);
       wrap.classList.toggle('print-none', !laFilled);
       wrap.classList.toggle('block-stub', !laFilled);
+      renderCheckNav();
       markPrintSections();
       status.textContent = !laRows(S.note).length
         ? (noteDictation()
@@ -4742,6 +4778,7 @@ label.pmpr input { margin-top: 4px; }
       wrap.classList.toggle('print-none', !sedFilled);
       wrap.classList.toggle('block-stub', !sedFilled);
       markPrintSections();
+      renderCheckNav();
       var missing = SED_TEXT.filter(function (k) {
         return k !== 'notes' && k !== 'reversal' && k !== 'cannulaSite' && !hasText(rec[k]);
       });
@@ -5006,7 +5043,13 @@ label.pmpr input { margin-top: 4px; }
      in the dictation without showing which words it tried, so the clinician had
      to open the source list to find out what it had read. Shown inline instead
      (30 October 2026). Trimmed, because a quote is one phrase, not a paragraph. */
-  function quoteTail(row) {
+  function quoteTail(row, problem) {
+    /* Only where the words are what failed. Two of these messages are about
+       something else — a batch number that appears nowhere, or a row that came
+       back with no source at all — and appending "Checked: ..." to those put a
+       phrase that was found perfectly well next to a failure it had nothing to
+       do with, which reads as if that phrase were the problem. */
+    if (typeof problem === 'string' && (/^batch /.test(problem) || /^no source came back/.test(problem))) return '';
     var q = (Array.isArray(row && row.quotes) ? row.quotes : []).filter(hasText)[0];
     if (!q) return '';
     var t = String(q).replace(/\s+/g, ' ').trim();
@@ -5058,12 +5101,13 @@ label.pmpr input { margin-top: 4px; }
       var notes = [];
       itemRows(S.note, key).forEach(function (r, i) {
         var p = itemRowProblem(key, cols, r, i, idx);
-        if (p) notes.push('Item ' + (i + 1) + ': ' + p + '.' + quoteTail(r));
+        if (p) notes.push('Item ' + (i + 1) + ': ' + p + '.' + quoteTail(r, p));
       });
       var filled = itemListAsText(S.note, spec);
       wrap.classList.toggle('print-none', !filled);
       wrap.classList.toggle('block-stub', !filled);
       markPrintSections();
+      renderCheckNav();
       status.className = 'bpe-note' + (notes.length ? ' warn' : '');
       status.textContent = (spec.key === 'diagnoses' && S.orderNote ? S.orderNote + ' ' : '') +
         (!itemRows(S.note, key).length
@@ -5151,7 +5195,11 @@ label.pmpr input { margin-top: 4px; }
     if (spec.key === 'diagnoses' && rows.length > 1) {
       var sort = document.createElement('button');
       sort.type = 'button';
-      sort.className = 'add-row';
+      /* Its own class, not 'add-row' (30 October 2026). Sharing it left two
+         buttons answering to .add-row in this block, the sort one FIRST, so
+         anything reaching for "the Add button" by class got the sort instead.
+         Hidden on paper by the rule below, exactly as .add-row is. */
+      sort.className = 'order-row';
       sort.id = 'order-teeth';
       sort.textContent = 'Order by tooth';
       sort.addEventListener('click', function () {
@@ -5275,6 +5323,7 @@ label.pmpr input { margin-top: 4px; }
       wrap.classList.toggle('print-none', !impFilled);
       wrap.classList.toggle('block-stub', !impFilled);
       markPrintSections();
+      renderCheckNav();
       status.textContent = !implantRows(S.note).length
         ? (noteDictation()
             ? 'No implants came back from your dictation. If you placed any, add them here.'
