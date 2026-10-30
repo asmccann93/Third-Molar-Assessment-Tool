@@ -3230,6 +3230,7 @@ await testRadiographReport();
 await testSedationRecord();
 await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
+await testReviewAids();
 await testDiagnosisItemised();
 await testItemisedTreatment();
 await testEveryLayoutIsComplete();
@@ -6063,6 +6064,128 @@ function DIAG_TURNS() { return [
   { speaker: 'S2', start: 3, end: 4, text: 'Is that the one that has been aching?' },
   { speaker: 'S1', start: 20, end: 27, text: 'Twenty seven is grossly carious and thirty four has buccal abrasion.' }
 ]; }
+
+/* The five quality-of-life changes of 30 October 2026. Each is small; the
+   reason each is here is not. */
+async function testReviewAids() {
+  section('Reading the recording, walking the checks, and ordering by tooth');
+
+  // ---- 1. the transcript can be read ----
+  const NOTE = () => note27({
+    sources: {},
+    diagnoses: [
+      { tooth: '34', diagnosis: 'Buccal abrasion', notes: null, source: 'discussed',
+        quotes: ['thirty four has buccal abrasion'] }
+    ],
+    speakers: { S1: 'clinician', S2: 'patient' }
+  });
+  let ctx = await runType(NOTE, { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  let { doc, win } = ctx;
+
+  ok('the recording can be read back', !$(doc, 'recorded').classList.contains('hidden'));
+  ok('but not until asked for', $(doc, 'recorded-list').classList.contains('hidden') &&
+    $(doc, 'recorded-toggle').getAttribute('aria-expanded') === 'false');
+  click($(doc, 'recorded-toggle'));
+  await waitFor(() => !$(doc, 'recorded-list').classList.contains('hidden'), 'the transcript opened');
+  const seen = $(doc, 'recorded-list').textContent;
+  ok('it carries the words, named by who said them',
+    /Clinician:/.test(seen) && /Patient:/.test(seen) &&
+    /distal buccal caries/.test(seen) && /Is that the one that has been aching/.test(seen), seen.slice(0, 300));
+  ok('and marks what fell after the Dictate press', /dictated/.test(seen) &&
+    $(doc, 'recorded-list').querySelectorAll('li.dict').length === 1,
+    String($(doc, 'recorded-list').querySelectorAll('li.dict').length));
+  ok('it says plainly that none of it is kept',
+    /nothing here is saved, copied into the note or printed/i.test($(doc, 'recorded-lead').textContent),
+    $(doc, 'recorded-lead').textContent);
+  let text = await ctx.copy();
+  ok('and none of it reaches the copy',
+    !/Is that the one that has been aching/.test(text) && !/What was recorded/.test(text), text.slice(0, 200));
+  ok('nor the paper: the panel is marked screen-only',
+    $(doc, 'recorded').classList.contains('print-none'));
+
+  // ---- 2. an offered-but-empty block is one line, not four ----
+  ctx = await runType(() => note27({ sources: {} }), { type: /^Extraction/, dictate: false });
+  const la = $(ctx.doc, 'la-block');
+  ok('an empty LA block is compacted', la.classList.contains('block-stub'));
+  ok('but keeps its heading, its reason and its Add button',
+    /Local anaesthetic given/.test(la.textContent) &&
+    /Nothing was dictated, so no local anaesthetic/.test(la.textContent) &&
+    !!la.querySelector('.add-row'), la.textContent.slice(0, 160));
+  ok('and the empty diagnosis list is compacted the same way',
+    $(ctx.doc, 'diagnoses-block').classList.contains('block-stub'));
+  ok('the sedation question too, being nothing but an affordance',
+    $(ctx.doc, 'sedation-offer').classList.contains('block-stub'));
+  click(la.querySelector('.add-row'));
+  await waitFor(() => !!$(ctx.doc, 'la-block').querySelector('td[contenteditable="true"]'), 'the first LA row');
+  const c = $(ctx.doc, 'la-block').querySelector('td[contenteditable="true"]');
+  c.textContent = 'Articaine';
+  c.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  await waitFor(() => !$(ctx.doc, 'la-block').classList.contains('block-stub'), 'the block opening out');
+  ok('once it holds something it opens out again',
+    !$(ctx.doc, 'la-block').classList.contains('block-stub'));
+
+  // ---- 3. next thing to check, and 5. the quote behind the flag ----
+  ctx = await runType(NOTE, { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  doc = ctx.doc;
+  const dxBlock = $(doc, 'diagnoses-block');
+  ok('a flagged row says which words it checked',
+    /Checked: \u201cthirty four has buccal abrasion\u201d/.test(dxBlock.textContent),
+    dxBlock.textContent.slice(-260));
+  ok('the next-to-check control is offered, and counts what is left',
+    !$(doc, 'check-nav-row').classList.contains('hidden') &&
+    /thing(s)? to check/.test($(doc, 'check-count').textContent), $(doc, 'check-count').textContent);
+  const stops = [...$(doc, 'fields').querySelectorAll('.field')]
+    .filter((el) => el.classList.contains('is-gap') || !!el.querySelector('p.bpe-note.warn'));
+  ok('and it counts the gaps and the flagged rows, nothing else',
+    $(doc, 'check-count').textContent.startsWith(String(stops.length)) ||
+    (stops.length === 1 && /^1 thing/.test($(doc, 'check-count').textContent)),
+    stops.length + ' vs ' + $(doc, 'check-count').textContent);
+  ok('the flagged diagnosis row is one of the stops', stops.includes(dxBlock));
+  click($(doc, 'check-next'));
+  await tick(20);
+  ok('pressing it marks where it moved to',
+    [...$(doc, 'fields').querySelectorAll('.check-flash')].length === 1,
+    String([...$(doc, 'fields').querySelectorAll('.check-flash')].length));
+
+  // ---- 4. ordering by tooth, on request only ----
+  const OUT_OF_ORDER = () => note27({
+    sources: {},
+    diagnoses: [
+      { tooth: '34', diagnosis: 'Buccal abrasion', notes: null, source: 'dictated', quotes: ['x'] },
+      { tooth: 'UR6', diagnosis: 'Failed restoration', notes: null, source: 'dictated', quotes: ['x'] },
+      { tooth: '11', diagnosis: 'Distal buccal caries', notes: null, source: 'dictated', quotes: ['x'] },
+      { tooth: 'the ridge', diagnosis: 'Knife-edge ridge', notes: null, source: 'dictated', quotes: ['x'] }
+    ],
+    speakers: { S1: 'clinician' }
+  });
+  ctx = await runType(OUT_OF_ORDER, { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  doc = ctx.doc;
+  const toothCells = () => [...$(doc, 'diagnoses-block').querySelectorAll('tr')]
+    .slice(1).map((tr) => tr.querySelectorAll('td')[1].textContent);
+  ok('the draft keeps the order things were said in',
+    toothCells().join('|') === '34|UR6|11|the ridge', toothCells().join('|'));
+  ok('and ordering by tooth is offered, not done', !!$(doc, 'order-teeth'));
+  // Wait for the list to have CHANGED, not for the order we expect: waiting
+  // for the expected order means a wrong sort aborts the run instead of
+  // failing an assertion that names what it got.
+  const saidOrder = toothCells().join('|');
+  click($(doc, 'order-teeth'));
+  await waitFor(() => toothCells().join('|') !== saidOrder, 'the list reordered');
+  ok('pressed, it sorts by tooth across both notations, FDI and UK shorthand',
+    toothCells().join('|') === '11|UR6|34|the ridge', toothCells().join('|'));
+  ok('a site it cannot read is left at the end rather than guessed at, and said so',
+    /1 row whose site could not be read was left at the end, as said/.test($(doc, 'diagnoses-block').textContent),
+    $(doc, 'diagnoses-block').textContent.slice(0, 260));
+  text = await ctx.copy();
+  ok('and the copy follows the order on screen',
+    /1\. Tooth \/ site 11, Distal buccal caries/.test(text) &&
+    text.indexOf('site 11,') < text.indexOf('site UR6,') &&
+    text.indexOf('site UR6,') < text.indexOf('site 34,'), text.slice(0, 700));
+
+  // A single row has no order to put right, so nothing is offered.
+  ctx = await runType(NOTE, { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  ok('with one row there is nothing to order', !$(ctx.doc, 'order-teeth'));
+}
 
 async function testDiagnosisItemised() {
   section('The diagnosis itemised: what was found, per tooth');

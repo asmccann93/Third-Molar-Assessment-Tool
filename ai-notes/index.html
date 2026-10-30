@@ -143,6 +143,7 @@ button:disabled { opacity: .45; cursor: default; }
      un-dictated extraction was otherwise printing "Nothing was dictated, so no
      local anaesthetic was taken from the recording. If you gave one, add it
      here." onto a patient's clinical record. */
+  #recorded, #check-nav-row,
   .bpe-note,
   /* A block offered but never filled contributes nothing to the copy, so it
      contributes nothing to the paper either. Set by each block's refresh(). */
@@ -613,6 +614,44 @@ label.pmpr input { margin-top: 4px; }
 .field.is-gap pre { color: var(--ink-faint); font-style: italic; }
 .field.is-core .field-head h3 { color: var(--accent); }
 
+/* A block offered but still empty, compacted to one line (30 October 2026).
+   Three offered-empty blocks arrived in two days — the diagnosis list, the LA
+   log on every treatment type, the sedation question — and an exam now offers
+   four of them above twelve consent fields. Each was four stacked lines of
+   heading, Copy and explanation for a table with nothing in it, so the content
+   of the note had been pushed off the screen by the invitations to add more.
+   Nothing is removed: the same heading, the same sentence and the same Add
+   button, laid out across one line instead of down four. The Copy goes, having
+   nothing to copy. Toggled from the same emptiness test as .print-none. */
+.field.block-stub { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 11px 0; }
+.field.block-stub .field-head { margin: 0; flex: none; }
+.field.block-stub .field-head h3 { flex: none; }
+.field.block-stub .field-head .copy { display: none; }
+.field.block-stub > p.bpe-note { margin: 0; flex: 1 1 12ch; order: 5; }
+.field.block-stub .add-row { margin: 0; order: 9; flex: none; }
+
+/* The row the next-to-check control has just moved to. */
+.check-flash { animation: checkflash 1.4s ease-out 1; }
+@keyframes checkflash {
+  0%, 35% { background: var(--warn-bg, rgba(180,110,0,.14)); }
+  100%    { background: transparent; }
+}
+
+/* What was recorded. Read-only, never copied, never printed. */
+#recorded-list { list-style: none; margin: 0; padding: 0; }
+#recorded-list > li { margin: 0 0 10px; font-size: .8125rem; line-height: 1.55; }
+#recorded-list .who { font-weight: 700; margin-right: 6px; }
+#recorded-list .when {
+  font-size: .625rem; text-transform: uppercase; letter-spacing: .06em;
+  font-weight: 700; color: var(--muted); margin-left: 6px;
+}
+#recorded-list li.dict { border-left: 3px solid var(--line); padding-left: 10px; }
+#recorded-list li.unplaced .when { color: var(--warn-ink); }
+#recorded-list .part-head {
+  font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  font-size: .625rem; color: var(--muted); margin: 14px 0 6px;
+}
+
 /* ---- footer actions ---- */
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
 .actions .primary { flex: 1 1 200px; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
@@ -826,6 +865,25 @@ label.pmpr input { margin-top: 4px; }
       <ul id="sourcecheck-list"></ul>
     </div>
 
+    <!-- What was actually recorded (30 October 2026).
+
+         The source check could say a sentence was not found in the recording,
+         and the only remedy it could offer was "read it against what you
+         remember" — which is the thing this tool exists to replace. The words
+         were in memory all along and already drive every check; they just could
+         not be looked at. Nothing is stored by showing them: no request, no
+         write, no new data leaving the page. It is destroyed with everything
+         else, it is never copied into the note, and it never prints. -->
+    <div class="card hidden print-none" id="recorded">
+      <div class="field-head">
+        <h2 id="recorded-title">What was recorded</h2>
+        <button type="button" class="copy" id="recorded-toggle" aria-expanded="false"
+                aria-controls="recorded-list">Show</button>
+      </div>
+      <p class="timer-note" id="recorded-lead" style="margin:0;text-align:left"></p>
+      <ol id="recorded-list" class="hidden"></ol>
+    </div>
+
     <div class="card">
       <div class="draft-head">
         <h2 id="draft-heading">Draft note</h2>
@@ -842,6 +900,14 @@ label.pmpr input { margin-top: 4px; }
       </div>
       <p class="timer-note" id="template-hint" style="margin:2px 0 0"></p>
       <p class="timer-note" id="edit-hint">Every field can be edited here before you copy it.</p>
+      <!-- Walks the gaps and the flagged rows in page order (30 October 2026).
+           Both were already listed above the note, but finding each one in a
+           long note meant scrolling and hunting, and review time is what
+           decides whether this gets used at four o'clock on a full list. -->
+      <div class="actions print-none hidden" id="check-nav-row" style="margin:0 0 10px">
+        <button type="button" id="check-next">Next to check</button>
+        <span class="timer-note" id="check-count" style="margin:0;align-self:center"></span>
+      </div>
       <div id="fields"></div>
     </div>
 
@@ -972,7 +1038,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-29.5';
+  var BUILD = '2026-10-30.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -3342,6 +3408,8 @@ label.pmpr input { margin-top: 4px; }
     });
 
     markPrintSections();
+    renderRecorded();
+    renderCheckNav();
 
     // The four clinical blocks are rendered by the layout above, in their
     // section. What is left here is not note content: "Covered elsewhere" is an
@@ -3354,6 +3422,149 @@ label.pmpr input { margin-top: 4px; }
     updateAddPart();
     // The consent text is built from these fields: kept in step, as an edit does.
     if (!$('consent-box').classList.contains('hidden')) $('consent-text').textContent = consentFormText(S.note);
+  }
+
+  /* ---- what was recorded (30 October 2026) ----
+     Rendered from S.parts, which is where the transcript already lives. It
+     marks each turn the way transcriptIndex() does, and is honest where that
+     function refuses to place one: a turn that crosses the Dictate press with
+     no word timings to cut it by is not claimed as either, because a quote
+     from it is reported as not found for exactly that reason. */
+  function turnWhen(part, t) {
+    var from = (part.dictationFromS === null || part.dictationFromS === undefined) ? null : part.dictationFromS;
+    if (from === null) return 'none';
+    var start = Number.isFinite(t && t.start) ? t.start : null;
+    var end = Number.isFinite(t && t.end) ? t.end : null;
+    if (start === null) return 'unplaced';
+    var crosses = from > start && (end === null || from < end);
+    if (crosses) {
+      var words = Array.isArray(t && t.words) ? t.words : [];
+      if (!words.some(function (w) { return w && Number.isFinite(w.start) && w.start >= from; })) return 'unplaced';
+      return 'both';
+    }
+    return start >= from ? 'after' : 'before';
+  }
+
+  function recordedTurns() {
+    var out = [];
+    (S.parts || []).forEach(function (p, pi) {
+      (p.turns || []).forEach(function (t) {
+        var text = String((t && t.text) || '').trim();
+        if (!text) return;
+        out.push({ part: pi, who: speakerName(pi, String((t && t.speaker) || 'UU')),
+                   text: text, when: turnWhen(p, t) });
+      });
+    });
+    return out;
+  }
+
+  function renderRecorded() {
+    var box = $('recorded'), list = $('recorded-list'), lead = $('recorded-lead');
+    if (!box) return;
+    list.textContent = '';
+    var turns = recordedTurns();
+    if (!turns.length) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    var parts = turns.reduce(function (n, t) { return Math.max(n, t.part + 1); }, 0);
+    lead.textContent = 'The words this draft was made from' +
+      (parts > 1 ? ', across ' + parts + ' recordings' : '') +
+      '. Held in memory only: nothing here is saved, copied into the note or printed.';
+    var lastPart = -1;
+    turns.forEach(function (t) {
+      if (t.part !== lastPart && parts > 1) {
+        var ph = document.createElement('li');
+        ph.className = 'part-head';
+        ph.textContent = 'Recording ' + (t.part + 1);
+        list.appendChild(ph);
+        lastPart = t.part;
+      }
+      var li = document.createElement('li');
+      if (t.when === 'after') li.className = 'dict';
+      if (t.when === 'unplaced' || t.when === 'both') li.className = 'unplaced';
+      var who = document.createElement('span');
+      who.className = 'who';
+      who.textContent = t.who + ':';
+      li.appendChild(who);
+      li.appendChild(document.createTextNode(t.text));
+      if (t.when !== 'none' && t.when !== 'before') {
+        var tag = document.createElement('span');
+        tag.className = 'when';
+        tag.textContent = t.when === 'after' ? 'dictated'
+          : 'crosses the Dictate press \u2014 counted as neither';
+        li.appendChild(tag);
+      }
+      list.appendChild(li);
+    });
+  }
+
+  /* ---- next thing to check (30 October 2026) ----
+     The things worth stopping at, in the order they appear on screen: a field
+     the draft could not fill, and any block holding a row whose source did not
+     hold up. Recomputed on every press rather than cached, because answering a
+     gap or correcting a row removes it from the list. */
+  function checkStops() {
+    var host = $('fields');
+    if (!host) return [];
+    return [].filter.call(host.querySelectorAll('.field'), function (el) {
+      return el.classList.contains('is-gap') || !!el.querySelector('p.bpe-note.warn');
+    });
+  }
+
+  function renderCheckNav() {
+    var row = $('check-nav-row'), count = $('check-count');
+    if (!row) return;
+    var stops = checkStops();
+    if (!stops.length) { row.classList.add('hidden'); S.checkAt = -1; return; }
+    row.classList.remove('hidden');
+    count.textContent = stops.length === 1 ? '1 thing to check' : stops.length + ' things to check';
+  }
+
+  function gotoNextCheck() {
+    var stops = checkStops();
+    if (!stops.length) return;
+    var at = typeof S.checkAt === 'number' ? S.checkAt : -1;
+    S.checkAt = (at + 1) % stops.length;
+    var el = stops[S.checkAt];
+    if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.remove('check-flash');
+    // Force the animation to restart when the same element is reached twice.
+    void el.offsetWidth;
+    el.classList.add('check-flash');
+    setTimeout(function () { el.classList.remove('check-flash'); }, 1600);
+  }
+
+  /* ---- ordering the diagnosis list by tooth (30 October 2026) ----
+     On request only. The draft keeps the order things were SAID in, which is a
+     property of the record, so nothing here reorders a note on its own.
+     Understands FDI (11-48, and the 51-85 deciduous codes) and the UK quadrant
+     shorthand (UR6, LL8). A row it cannot place keeps its place at the end
+     rather than being guessed at. */
+  var UK_QUAD = { UR: 10, UL: 20, LL: 30, LR: 40 };
+  function toothRank(v) {
+    if (!hasText(v)) return null;
+    var t = String(v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    var fdi = t.match(/^([1-8])([1-8])$/);
+    if (fdi) return Number(t);
+    var dec = t.match(/^([5-8])([1-5])$/);
+    if (dec) return Number(t);
+    var uk = t.match(/^(UR|UL|LL|LR)([1-8])$/);
+    if (uk) return UK_QUAD[uk[1]] + Number(uk[2]);
+    return null;
+  }
+
+  function orderDiagnosesByTooth() {
+    var rows = itemRows(S.note, 'diagnoses');
+    if (rows.length < 2) return 0;
+    var placed = [], unplaced = [];
+    rows.forEach(function (r, i) {
+      var rank = toothRank(r.tooth);
+      (rank === null ? unplaced : placed).push({ r: r, rank: rank, i: i });
+    });
+    // Stable: equal ranks keep the order they were said in.
+    placed.sort(function (a, b) { return a.rank - b.rank || a.i - b.i; });
+    S.note.diagnoses = placed.concat(unplaced).map(function (x) { return x.r; });
+    S.edited = true;
+    return unplaced.length;
   }
 
   /* A section heading whose whole group is kept off the paper must go with it
@@ -3734,6 +3945,19 @@ label.pmpr input { margin-top: 4px; }
       return '- ' + String(a.text).trim() + (S.todoDone[i] ? ' (done)' : '');
     }).join('\n');
   }
+
+  $('recorded-toggle').addEventListener('click', function () {
+    resetIdle();
+    var list = $('recorded-list'), btn = $('recorded-toggle');
+    var open = list.classList.toggle('hidden') === false;
+    btn.textContent = open ? 'Hide' : 'Show';
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  $('check-next').addEventListener('click', function () {
+    resetIdle();
+    gotoNextCheck();
+  });
 
   $('copy-todo').addEventListener('click', function () {
     var t = todoAsText();
@@ -4215,10 +4439,12 @@ label.pmpr input { margin-top: 4px; }
       var notes = [];
       laRows(S.note).forEach(function (r, i) {
         var pr = laRowProblem(r, i, idx);
-        if (pr) notes.push('Row ' + (i + 1) + ': ' + pr + '.');
+        if (pr) notes.push('Row ' + (i + 1) + ': ' + pr + '.' + quoteTail(r));
       });
       status.className = 'bpe-note' + (notes.length ? ' warn' : '');
-      wrap.classList.toggle('print-none', !laLogAsText(S.note));
+      var laFilled = laLogAsText(S.note);
+      wrap.classList.toggle('print-none', !laFilled);
+      wrap.classList.toggle('block-stub', !laFilled);
       markPrintSections();
       status.textContent = !laRows(S.note).length
         ? (noteDictation()
@@ -4444,7 +4670,7 @@ label.pmpr input { margin-top: 4px; }
     // button re-rendering itself and the form could never be opened.
     if (!sedRecord(note) && secondary) {
       var ask = document.createElement('div');
-      ask.className = 'field print-none';
+      ask.className = 'field print-none block-stub';
       ask.id = 'sedation-offer';
       var ah = document.createElement('div');
       ah.className = 'field-head';
@@ -4512,7 +4738,9 @@ label.pmpr input { margin-top: 4px; }
         : '';
       check.style.display = problems.length ? '' : 'none';
 
-      wrap.classList.toggle('print-none', !sedationAsText(S.note));
+      var sedFilled = sedationAsText(S.note);
+      wrap.classList.toggle('print-none', !sedFilled);
+      wrap.classList.toggle('block-stub', !sedFilled);
       markPrintSections();
       var missing = SED_TEXT.filter(function (k) {
         return k !== 'notes' && k !== 'reversal' && k !== 'cannulaSite' && !hasText(rec[k]);
@@ -4774,6 +5002,18 @@ label.pmpr input { margin-top: 4px; }
     return null;
   }
 
+  /* What the check actually looked at. A flag could say a row's words were not
+     in the dictation without showing which words it tried, so the clinician had
+     to open the source list to find out what it had read. Shown inline instead
+     (30 October 2026). Trimmed, because a quote is one phrase, not a paragraph. */
+  function quoteTail(row) {
+    var q = (Array.isArray(row && row.quotes) ? row.quotes : []).filter(hasText)[0];
+    if (!q) return '';
+    var t = String(q).replace(/\s+/g, ' ').trim();
+    if (t.length > 70) t = t.slice(0, 69).replace(/\s+\S*$/, '') + '\u2026';
+    return ' Checked: \u201c' + t + '\u201d.';
+  }
+
   function itemProblems(idx) {
     var out = [];
     Object.keys(ITEM_LISTS).forEach(function (k) {
@@ -4818,16 +5058,19 @@ label.pmpr input { margin-top: 4px; }
       var notes = [];
       itemRows(S.note, key).forEach(function (r, i) {
         var p = itemRowProblem(key, cols, r, i, idx);
-        if (p) notes.push('Item ' + (i + 1) + ': ' + p + '.');
+        if (p) notes.push('Item ' + (i + 1) + ': ' + p + '.' + quoteTail(r));
       });
-      wrap.classList.toggle('print-none', !itemListAsText(S.note, spec));
+      var filled = itemListAsText(S.note, spec);
+      wrap.classList.toggle('print-none', !filled);
+      wrap.classList.toggle('block-stub', !filled);
       markPrintSections();
       status.className = 'bpe-note' + (notes.length ? ' warn' : '');
-      status.textContent = !itemRows(S.note, key).length
+      status.textContent = (spec.key === 'diagnoses' && S.orderNote ? S.orderNote + ' ' : '') +
+        (!itemRows(S.note, key).length
         ? spec.empty
         : notes.length ? notes.join(' ') + ' Check before you paste.'
         : 'Each item says whether it was discussed with the patient or dictated afterwards.' +
-          (itemListEdited(key, cols) ? ' Edited by you.' : ' Every item was found where it says it was.');
+          (itemListEdited(key, cols) ? ' Edited by you.' : ' Every item was found where it says it was.'));
       wrap.classList.toggle('edited', itemListEdited(key, cols));
     };
 
@@ -4899,6 +5142,28 @@ label.pmpr input { margin-top: 4px; }
         table.appendChild(tr);
       });
       wrap.appendChild(table);
+    }
+
+    /* Ordering by tooth, on the diagnosis list only and on request only
+       (30 October 2026). Offered from two rows up, because one row has no
+       order to put right. The draft keeps the order things were SAID in, so
+       nothing does this on its own. */
+    if (spec.key === 'diagnoses' && rows.length > 1) {
+      var sort = document.createElement('button');
+      sort.type = 'button';
+      sort.className = 'add-row';
+      sort.id = 'order-teeth';
+      sort.textContent = 'Order by tooth';
+      sort.addEventListener('click', function () {
+        resetIdle();
+        var left = orderDiagnosesByTooth();
+        S.orderNote = left
+          ? 'Ordered by tooth. ' + left + (left === 1 ? ' row whose site could not be read was' : ' rows whose sites could not be read were') +
+            ' left at the end, as said.'
+          : 'Ordered by tooth.';
+        render(S.note);
+      });
+      wrap.appendChild(sort);
     }
 
     var add = document.createElement('button');
@@ -5006,7 +5271,9 @@ label.pmpr input { margin-top: 4px; }
     var status = document.createElement('p');
     var refresh = function () {
       status.className = 'bpe-note';
-      wrap.classList.toggle('print-none', !implantLogAsText(implantRows(S.note)));
+      var impFilled = implantLogAsText(implantRows(S.note));
+      wrap.classList.toggle('print-none', !impFilled);
+      wrap.classList.toggle('block-stub', !impFilled);
       markPrintSections();
       status.textContent = !implantRows(S.note).length
         ? (noteDictation()
@@ -6245,6 +6512,19 @@ label.pmpr input { margin-top: 4px; }
     $('ask-input').value = '';
     $('sourcecheck').classList.add('hidden');
     $('sourcecheck-list').textContent = '';
+    /* The transcript panel holds the patient's words verbatim, so it is torn
+       out of the DOM here with the rest of the note rather than merely hidden
+       — the same reason #fields is emptied above and not just blanked. It also
+       goes back to closed: the next consultation does not inherit a panel
+       somebody left open. */
+    $('recorded-list').textContent = '';
+    $('recorded-list').classList.add('hidden');
+    $('recorded').classList.add('hidden');
+    $('recorded-toggle').textContent = 'Show';
+    $('recorded-toggle').setAttribute('aria-expanded', 'false');
+    $('check-nav-row').classList.add('hidden');
+    S.checkAt = -1;
+    S.orderNote = '';
     srcOpen = {};
     $('add-part').classList.add('hidden');
     $('add-part-note').classList.add('hidden');
