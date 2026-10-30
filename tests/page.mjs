@@ -145,6 +145,11 @@ async function boot({ session = { authenticated: true, expiresIn: 40000 }, onFet
 
 const $ = (doc, id) => doc.getElementById(id);
 const click = (el) => el.dispatchEvent(new el.ownerDocument.defaultView.MouseEvent('click', { bubbles: true }));
+/* The consult-type buttons. #types held them directly until 30 October 2026,
+   when they were grouped — so fifty call sites reading .children silently
+   became four group boxes. One helper, so the next change to that markup is
+   one edit and not fifty. */
+const typeButtons = (doc) => [...$(doc, 'types').querySelectorAll('button')];
 
 // Consent, pick a type, record, stop, and let the stubbed API return a draft.
 // Everything goes through the page's real controls and real code path.
@@ -154,7 +159,7 @@ async function runConsultation(ctx, note, turns, opts) {
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
   // By label, not index: inserting a consult type used to shift this silently.
   // It has always meant Extraction / surgery.
-  click([...$(doc, 'types').children].find((b) => /^Extraction/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /^Extraction/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -218,17 +223,31 @@ async function testConsentGate() {
   const types = $(doc, 'types');
 
   ok('Start is disabled on load', start.disabled);
+  /* Counted as BUTTONS, not children: since 30 October 2026 #types holds four
+     group boxes, each with a row of buttons inside. Counting children said
+     "4". */
+  const typeBtns = () => [...types.querySelectorAll('button')];
   // Twelve since 26 October 2026: removable prosthodontics had no type, and
   // dentures existed in this tool only as an alternative inside the implant list.
-  ok('thirteen consult types offered, three of them oral surgery', types.children.length === 13, String(types.children.length));
+  ok('thirteen consult types offered, three of them oral surgery', typeBtns().length === 13, String(typeBtns().length));
   ok('and dentures are two of them: the consult and the construction stages',
-    ['Denture consult', 'Denture stage'].every((l) => [...types.children].some((b) => b.textContent === l)) &&
-    ![...types.children].some((b) => b.textContent === 'Dentures'),
-    [...types.children].map((b) => b.textContent).join('|'));
+    ['Denture consult', 'Denture stage'].every((l) => typeBtns().some((b) => b.textContent === l)) &&
+    !typeBtns().some((b) => b.textContent === 'Dentures'),
+    typeBtns().map((b) => b.textContent).join('|'));
   ok('no consult type preselected',
-    ![...types.children].some((b) => b.getAttribute('aria-pressed') === 'true'));
+    !typeBtns().some((b) => b.getAttribute('aria-pressed') === 'true'));
+  // In four groups, and every type in exactly one of them: a type left out of
+  // a group would vanish from the screen with nothing to say so.
+  ok('offered in four named groups, with every type in one of them',
+    [...types.querySelectorAll('.type-group')].length === 4 &&
+    [...types.querySelectorAll('.type-group')].every((g) => !!g.querySelector('.type-group-label').textContent.trim()) &&
+    [...types.querySelectorAll('.type-group .type-row button')].length === 13,
+    [...types.querySelectorAll('.type-group-label')].map((l) => l.textContent).join('|'));
 
-  click(types.children[4]);
+  /* By label, not index. types.children[4] had always meant one particular
+     button and broke the moment the list was grouped — the same trap that
+     the 26 October insert sprang, written again two days later. */
+  click(typeBtns().find((b) => /^Restorative$/.test(b.textContent)));
   await tick();
   ok('type alone does not enable Start', start.disabled);
 
@@ -259,7 +278,7 @@ async function testSessionGate() {
   let { doc, win } = await boot({ session: { authenticated: false, expiresIn: 0 } });
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(80);
@@ -362,7 +381,7 @@ async function testWipe() {
     !doc.body.textContent.includes('pericoronitis'));
   ok('consent is reset, so the next patient must be asked again', !$(doc, 'consent').checked);
   ok('consult type is reset',
-    ![...$(doc, 'types').children].some((b) => b.getAttribute('aria-pressed') === 'true'));
+    !typeButtons(doc).some((b) => b.getAttribute('aria-pressed') === 'true'));
   ok('Start is disabled again', $(doc, 'start').disabled);
   ok('timer is reset', $(doc, 'timer').textContent === '0:00');
   ok('back to the setup view', !$(doc, 'setup').classList.contains('hidden'));
@@ -565,7 +584,7 @@ async function testDiscardAndCancellation() {
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
   // By label, not index: inserting a consult type used to shift this silently.
   // It has always meant Extraction / surgery.
-  click([...$(doc, 'types').children].find((b) => /^Extraction/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /^Extraction/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -607,7 +626,7 @@ async function testDiscardAndCancellation() {
 
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -736,7 +755,7 @@ async function testDerivedAndDictation() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  const implantSurgery = [...$(doc, 'types').children].find((b) => /Implant surgery/.test(b.textContent));
+  const implantSurgery = typeButtons(doc).find((b) => /Implant surgery/.test(b.textContent));
   ok('Implant surgery is a selectable type', !!implantSurgery);
   click(implantSurgery);
   await tick();
@@ -920,8 +939,10 @@ async function testPolish() {
     const printCss = (src.match(/@media print \{[\s\S]*?\n\}/) || [''])[0];
     // Joined by the diagnosis list's Order by tooth on 30 October 2026: both
     // are controls, and neither belongs on a clinical record.
-    ok('and the add-a-row and ordering buttons do not print',
-      /\.add-row, \.order-row \{ display: none !important; \}/.test(printCss), printCss.slice(0, 400));
+    // Joined by the per-row remove control on 30 October 2026.
+    ok('and the add, ordering and remove controls do not print',
+      /\.add-row, \.order-row, \.row-del, th\.row-del-h \{ display: none !important; \}/.test(printCss),
+      printCss.slice(0, 400));
   }
 
   // 3. the promise, stated
@@ -948,7 +969,7 @@ async function testPolish() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -1060,7 +1081,7 @@ async function testEditingAndLength() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -1163,7 +1184,7 @@ async function testNotSaidPanel() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -1218,7 +1239,7 @@ async function testSummaryFailureIsNotCopyable() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -1256,7 +1277,7 @@ async function testSummaryFailureIsNotCopyable() {
     });
     $(c2.doc, 'consent').checked = true;
     $(c2.doc, 'consent').dispatchEvent(new c2.win.Event('change', { bubbles: true }));
-    click([...$(c2.doc, 'types').children].find((b3) => /Third molar/.test(b3.textContent)));
+    click(typeButtons(c2.doc).find((b3) => /Third molar/.test(b3.textContent)));
     await tick();
     click($(c2.doc, 'start'));
     await tick(60);
@@ -1307,7 +1328,7 @@ async function testReferral() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -1389,7 +1410,7 @@ async function testNewRecordingDropsThePreviousPatient() {
   };
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
 
   await record();
@@ -1445,7 +1466,7 @@ async function testFailedDraftNeverShowsThePreviousPatientsNote() {
   };
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
 
   await record();
@@ -1511,7 +1532,7 @@ async function testMicCheck() {
 
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(80);
@@ -1531,7 +1552,7 @@ async function testWakeLock() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   ok('no lock is held before recording', win.__wake.taken === 0);
   click($(doc, 'start'));
@@ -1574,8 +1595,14 @@ async function testUrlSwitches() {
   // selects nothing. The window was 900 characters and the per-type default
   // layout (26 October 2026) pushed the loop body past it; widened rather than
   // loosened, because what is being pinned is the comparison, not its distance.
+  // The loop became ORDERED_TYPES on 30 October 2026, when the buttons were
+  // grouped: same list, built in group order. What is pinned is unchanged —
+  // the ?type= click sits inside it and compares against pair[0].
   ok('validated against the real list rather than trusted',
-    /CONSULT_TYPES\.forEach[\s\S]{0,1400}PARAMS\.get\('type'\) === pair\[0\]/.test(src));
+    /ORDERED_TYPES\.forEach[\s\S]{0,1400}PARAMS\.get\('type'\) === pair\[0\]/.test(src));
+  ok('and that list is built from the groups, so no type can be left off the screen',
+    /ORDERED_TYPES = TYPE_GROUPS\.reduce/.test(src) && /function verifyTypeGroups/.test(src) &&
+    /in no group, so it would not appear at all/.test(src));
   ok('audio processing can be turned off for a comparison', /RAW_AUDIO = PARAMS\.get\('audio'\) === 'raw'/.test(src));
   ok('one constraint builder serves both the check and the recording',
     /function micConstraints\(\)/.test(src) &&
@@ -1618,7 +1645,7 @@ async function testMicCheckFailureModes() {
   };
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(150);
@@ -1680,7 +1707,7 @@ async function testMicTestClosesBeforeRecording() {
 
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(150);
@@ -1753,7 +1780,7 @@ async function testDerivedButtonsRecoverForTheNextPatient() {
   const record = async () => { click($(doc, 'start')); await tick(60); click($(doc, 'stop')); await tick(300); };
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   await record();
 
@@ -1796,7 +1823,7 @@ async function testWakeLockHonoursClear() {
   };
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(80);
@@ -1963,7 +1990,7 @@ async function testSpeakerSwap() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -2003,7 +2030,7 @@ async function testSpeakerSwap() {
     });
     $(c2.doc, 'consent').checked = true;
     $(c2.doc, 'consent').dispatchEvent(new c2.win.Event('change', { bubbles: true }));
-    click([...$(c2.doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+    click(typeButtons(c2.doc).find((b) => /Third molar/.test(b.textContent)));
     await tick();
     click($(c2.doc, 'start'));
     await tick(60);
@@ -2049,7 +2076,7 @@ async function testSessionLine() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -2110,7 +2137,7 @@ async function testThinRecordingSaysSo() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -2143,7 +2170,7 @@ async function testRepeatedFailureSaysRetryingWontHelp() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -2163,14 +2190,14 @@ async function testRepeatedFailureSaysRetryingWontHelp() {
 
   // Changing the type is a new prompt and a new checklist, so the next failure
   // is a first attempt again. Telling them to give up here was wrong.
-  click([...$(doc, 'types').children].find((b) => /Exam/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Exam/.test(b.textContent)));
   await tick();
   click(retry);
   await tick(340);
   ok('after changing the consult type, a failure is a first attempt again',
     /still held in memory/.test($(doc, 'error-body').textContent) && !/deterministic/.test($(doc, 'error-body').textContent),
     $(doc, 'error-body').textContent.slice(0, 140));
-  click([...$(doc, 'types').children].find((b) => /Exam/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Exam/.test(b.textContent)));
   await tick();
   click(retry);
   await tick(340);
@@ -2194,7 +2221,7 @@ async function testExpiredWhileDraftingKeepsTranscript() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -2232,7 +2259,7 @@ async function testSiteCheck() {
     const { doc, win } = ctx;
     $(doc, 'consent').checked = true;
     $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-    click([...$(doc, 'types').children].find((b) => new RegExp(type, 'i').test(b.textContent)));
+    click(typeButtons(doc).find((b) => new RegExp(type, 'i').test(b.textContent)));
     await tick();
     click($(doc, 'start'));
     await tick(60);
@@ -2302,7 +2329,7 @@ async function testPostopSheet() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -2351,7 +2378,7 @@ async function testPostopSheet() {
   });
   $(ctx2.doc, 'consent').checked = true;
   $(ctx2.doc, 'consent').dispatchEvent(new ctx2.win.Event('change', { bubbles: true }));
-  click([...$(ctx2.doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(ctx2.doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(ctx2.doc, 'start'));
   await tick(60);
@@ -2405,7 +2432,7 @@ async function testRedraftInvalidatesWhatCameFromTheOldNote() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => /Third molar/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -2493,7 +2520,7 @@ async function testPauseResume() {
   const { doc, win } = ctx;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(80);
@@ -2605,7 +2632,7 @@ async function testFormatAndSize() {
     const { doc, win } = bad;
     $(doc, 'consent').checked = true;
     $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-    click($(doc, 'types').children[0]);
+    click(typeButtons(doc)[0]);
     await tick();
     click($(doc, 'start'));
     await tick(120);
@@ -2623,7 +2650,7 @@ async function testFormatAndSize() {
     const { doc, win } = old;
     $(doc, 'consent').checked = true;
     $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-    click($(doc, 'types').children[0]);
+    click(typeButtons(doc)[0]);
     await tick();
     click($(doc, 'start'));
     await tick(80);
@@ -2642,7 +2669,7 @@ async function testFormatAndSize() {
     const { doc, win } = short;
     $(doc, 'consent').checked = true;
     $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-    click($(doc, 'types').children[0]);
+    click(typeButtons(doc)[0]);
     await tick();
     click($(doc, 'start'));
     await tick(60);
@@ -2721,7 +2748,7 @@ async function testPausedMeterIsFrozen() {
 
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(80);
@@ -2795,7 +2822,7 @@ async function testNotePreferencesDoNotFollowThePatientOut() {
   // Patient one: ask for a Full note, lay it out as SOAP, and correct a field.
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   await longRecording();
   ok('the first recording was long enough to take the real path',
@@ -2817,7 +2844,7 @@ async function testNotePreferencesDoNotFollowThePatientOut() {
   await tick(80);
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   await longRecording();
 
@@ -2874,7 +2901,7 @@ async function testRedraftInterruptedByClear() {
 
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -2904,7 +2931,7 @@ async function testRedraftInterruptedByClear() {
   const before = sent.length;
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -2947,7 +2974,7 @@ async function testLeavingWarnsWhileAnythingIsHeld() {
 
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(80);
@@ -3233,6 +3260,7 @@ await testSedationRecord();
 await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
 await testReviewAids();
+await testFriendlier();
 await testReviewAidsHoldUp();
 await testDiagnosisItemised();
 await testItemisedTreatment();
@@ -3282,7 +3310,7 @@ async function testQuietSpeechIsNotSilence() {
 
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click($(doc, 'types').children[0]);
+  click(typeButtons(doc)[0]);
   await tick();
   click($(doc, 'start'));
   await tick(60);
@@ -3384,7 +3412,7 @@ async function testSecondMicCheckWins() {
 function armStart(doc, win, find = /Third molar/) {
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
-  click([...$(doc, 'types').children].find((b) => find.test(b.textContent)));
+  click(typeButtons(doc).find((b) => find.test(b.textContent)));
 }
 
 // A getUserMedia that records which streams are still open.
@@ -4895,7 +4923,7 @@ async function testRecordMoreGuards() {
   // ?type= clicks a consult type while the script is still running; that click
   // asks for the checklist, so the cache must exist before the buttons do.
   ok('the checklist cache exists before ?type= can click a consult type',
-    src.indexOf('var checklistCache = {};') > -1 && src.indexOf('var checklistCache = {};') < src.indexOf('CONSULT_TYPES.forEach('));
+    src.indexOf('var checklistCache = {};') > -1 && src.indexOf('var checklistCache = {};') < src.indexOf('ORDERED_TYPES.forEach('));
   ok('discarding one lets the recorder go before stopping it', /S\.recorder = null;[\s\S]*rec\.stop\(\)/.test(discard) && !/wipe\(\)/.test(discard));
 }
 
@@ -5971,7 +5999,7 @@ async function testPerTypeDefaultLayout() {
   const ctx = await boot();
   const { doc, win } = ctx;
   const on = () => [...doc.querySelectorAll('#template-picker button')].find((b) => b.classList.contains('on'));
-  const pick = (re) => click([...$(doc, 'types').children].find((b) => re.test(b.textContent)));
+  const pick = (re) => click(typeButtons(doc).find((b) => re.test(b.textContent)));
   const hint = () => $(doc, 'template-hint').textContent;
 
   ok('before any type is chosen the layout is the clinical note', on().dataset.template === 'clinical');
@@ -6021,13 +6049,13 @@ async function testPerTypeDefaultLayout() {
   const on2 = () => [...ctx2.doc.querySelectorAll('#template-picker button')].find((b) => b.classList.contains('on'));
   click([...ctx2.doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'clinical'));
   await tick(20);
-  click([...$(ctx2.doc, 'types').children].find((b) => /^Perio/.test(b.textContent)));
+  click(typeButtons(ctx2.doc).find((b) => /^Perio/.test(b.textContent)));
   await tick(20);
   ok('tapping the layout already showing also pins it',
     on2().dataset.template === 'clinical', on2().dataset.template);
 
   // And the next patient starts clean.
-  click([...$(doc, 'types').children].find((b) => /^Perio/.test(b.textContent)));
+  click(typeButtons(doc).find((b) => /^Perio/.test(b.textContent)));
   await tick(20);
   click($(doc, 'clear'));
   await tick(40);
@@ -6192,6 +6220,138 @@ async function testReviewAids() {
 
 /* What the eighth sweep found in the five above, all of it mine from the same
    day. Each is small; each would have been believed. */
+/* The four user-facing changes of 30 October 2026, second batch. */
+async function testFriendlier() {
+  section('Dictate explains itself and can be undone; rows can be removed');
+
+  // ---- Dictate: on screen, not in a tooltip, and reversible ----
+  const bodies = [];
+  let ctx = await boot({ onFetch: async (e, opts) => {
+    if (e.url.includes('/api/transcribe') && e.method === 'POST') {
+      return json200({ status: 'done', turns: [{ speaker: 'S1', start: 1, end: 3, text: 'Lower left eight for removal.' }] });
+    }
+    if (e.url.includes('/api/extract')) {
+      bodies.push(JSON.parse(opts.body || '{}'));
+      return json200({ status: 'done', note: note27({ sources: {} }) });
+    }
+    return null;
+  } });
+  let { doc, win } = ctx;
+  ok('the Dictate button no longer hides its meaning in a tooltip',
+    !$(doc, 'dictate').getAttribute('title'), String($(doc, 'dictate').getAttribute('title')));
+  armStart(doc, win, /^Extraction/);
+  await tick();
+  click($(doc, 'start'));
+  await tick(60);
+  ok('what Dictate does is written on screen while recording',
+    /Press Dictate once the patient has left/.test($(doc, 'dictate-note').textContent),
+    $(doc, 'dictate-note').textContent);
+  ok('and no undo is offered before it is pressed',
+    $(doc, 'undictate').classList.contains('hidden'));
+
+  click($(doc, 'dictate'));
+  await tick(20);
+  ok('pressing it says so unmistakably, in the bar and under the buttons',
+    /Dictating/.test($(doc, 'recbar-label').textContent) &&
+    /Everything from the moment you pressed it is your dictation/.test($(doc, 'dictate-note').textContent),
+    $(doc, 'recbar-label').textContent + ' | ' + $(doc, 'dictate-note').textContent);
+  ok('and an undo appears', !$(doc, 'undictate').classList.contains('hidden'));
+
+  click($(doc, 'undictate'));
+  await tick(20);
+  ok('undo puts the recording back to conversation',
+    /Recording \u2014 conversation only/.test($(doc, 'recbar-label').textContent) &&
+    !$(doc, 'dictate').disabled && $(doc, 'dictate').textContent === 'Dictate' &&
+    $(doc, 'undictate').classList.contains('hidden'),
+    $(doc, 'recbar-label').textContent);
+  ok('and the recording is still running, not re-paused',
+    !$(doc, 'recording').classList.contains('hidden') && !$(doc, 'pause').classList.contains('resuming'));
+  ok('and it can be pressed again afterwards', !$(doc, 'dictate').disabled);
+
+  /* The marker itself, not just the labels — it is what the draft is split on,
+     and a label that lies about it would be worse than the tooltip was.
+     Pressed, undone, and the note asked for: the request must carry no
+     dictation point at all. */
+  click($(doc, 'dictate'));
+  await tick(20);
+  click($(doc, 'undictate'));
+  await tick(20);
+  click($(doc, 'stop'));
+  await settle(doc);
+  ok('the draft is asked for with no dictation point, the undo having been real',
+    bodies.length === 1 &&
+    (bodies[0].dictationFromS === null || bodies[0].dictationFromS === undefined),
+    JSON.stringify({ n: bodies.length, from: bodies[0] && bodies[0].dictationFromS }));
+  ok('and nothing in the note is labelled as dictated',
+    !$(doc, 'fields').querySelector('.dictated-tag'));
+
+  // ---- a row can be removed ----
+  ctx = await runType(() => note27({
+    sources: {},
+    diagnoses: [
+      { tooth: '11', diagnosis: 'Distal buccal caries', notes: null, source: 'discussed',
+        quotes: ['distal buccal caries'] },
+      { tooth: '27', diagnosis: 'Grossly carious', notes: null, source: 'dictated',
+        quotes: ['twenty seven is grossly carious'] },
+      { tooth: '34', diagnosis: 'Buccal abrasion', notes: null, source: 'discussed',
+        quotes: ['thirty four has buccal abrasion'] }
+    ],
+    speakers: { S1: 'clinician', S2: 'patient' }
+  }), { type: /Exam/, dictate: true, turns: DIAG_TURNS() });
+  doc = ctx.doc;
+  const dx = () => $(doc, 'diagnoses-block');
+  const teeth = () => [...dx().querySelectorAll('tr')].slice(1)
+    .map((tr) => tr.querySelectorAll('td')[1].textContent);
+  ok('every row offers a way to remove it', dx().querySelectorAll('.row-del').length === 3,
+    String(dx().querySelectorAll('.row-del').length));
+  ok('and it says which row it removes',
+    /Remove diagnosis item 2/.test(dx().querySelectorAll('.row-del')[1].getAttribute('aria-label')),
+    dx().querySelectorAll('.row-del')[1].getAttribute('aria-label'));
+  /* The row that was flagged is the third. Removing the FIRST shifts it, and
+     the check is index-based against the drafted copy — so if the drafted side
+     is not spliced too, every later row reads as hand-edited and stops being
+     checked. That is the ordering bug arrived at another way. */
+  ok('the third row is flagged before anything is removed',
+    /Item 3: marked as discussed with the patient, but its words are only in your dictation/.test(dx().textContent),
+    dx().textContent.slice(-300));
+  click(dx().querySelectorAll('.row-del')[0]);
+  await waitFor(() => teeth().length === 2, 'the row to go');
+  ok('removing a row removes that row and no other', teeth().join('|') === '27|34', teeth().join('|'));
+  ok('and the flagged row is STILL flagged, now as item 2',
+    /Item 2: marked as discussed with the patient, but its words are only in your dictation/.test(dx().textContent),
+    dx().textContent.slice(-300));
+  ok('with the rows that check out still unflagged', !/Item 1:/.test(dx().textContent), dx().textContent.slice(-300));
+  let text = await ctx.copy();
+  ok('and the copy renumbers from what is left',
+    /Diagnosis\n1\. Tooth \/ site 27, Grossly carious \(dictated\)\n2\. Tooth \/ site 34, Buccal abrasion/.test(text),
+    text.slice(0, 800));
+
+  // Every table offers it, not just this one.
+  ctx = await runType(() => note27({ sources: {} }), { type: /^Extraction/, dictate: false });
+  click($(ctx.doc, 'la-block').querySelector('.add-row'));
+  await waitFor(() => !!$(ctx.doc, 'la-block').querySelector('.row-del'), 'the LA row');
+  ok('the LA log offers it too', !!$(ctx.doc, 'la-block').querySelector('.row-del'));
+
+  // ---- the clinician's place survives adding a row ----
+  /* The exact cell, not merely "something editable has focus": that passed
+     with the fix removed, because focus happened to be on an editable cell
+     already. What is being pinned is that the cursor is in the row that was
+     just asked for. */
+  const laRowsNow = [...$(ctx.doc, 'la-block').querySelectorAll('tr')];
+  const newCell = laRowsNow[laRowsNow.length - 1] &&
+    laRowsNow[laRowsNow.length - 1].querySelector('td[contenteditable="true"], td[contenteditable="plaintext-only"]');
+  ok('the cursor lands in the new row, not wherever the rebuild left it',
+    !!newCell && ctx.doc.activeElement === newCell,
+    ctx.doc.activeElement && (ctx.doc.activeElement.tagName + '/' + (ctx.doc.activeElement.getAttribute('aria-label') || '')));
+  ok('and adding, removing and ordering all hold the page still',
+    /function keepPlace\(/.test(html) &&
+    /keepPlace\(function \(\) \{ render\(S\.note\); \}, spec\.id\)/.test(html) &&
+    /keepPlace\(function \(\) \{ render\(S\.note\); \}, 'la-block'\)/.test(html));
+  ok('the remove control never prints',
+    /\.add-row, \.order-row, \.row-del, th\.row-del-h \{ display: none !important; \}/
+      .test((html.match(/@media print \{[\s\S]*?\n\}/) || [''])[0]));
+}
+
 async function testReviewAidsHoldUp() {
   section('The review aids under their own rules');
 
@@ -6298,7 +6458,7 @@ async function testReviewAidsHoldUp() {
   ok('every Add button in every block is styled by one rule, not per block id',
     /\n\.add-row, \.order-row \{ min-height/.test(html) && !/#[a-z-]+-block \.add-row/.test(html));
   ok('and the sort button is kept off the paper like the Add buttons',
-    /\.add-row, \.order-row \{ display: none !important; \}/.test(printCss));
+    /\.add-row, \.order-row, \.row-del, th\.row-del-h \{ display: none !important; \}/.test(printCss));
 }
 
 async function testDiagnosisItemised() {
@@ -6360,7 +6520,7 @@ async function testDiagnosisItemised() {
 
   // Offered on EVERY consult type, which is what was asked for: there is no
   // appointment at which a diagnosis cannot be recorded.
-  const types = [...$(ctx.doc, 'types').children].map((b) => b.textContent);
+  const types = typeButtons(ctx.doc).map((b) => b.textContent);
   const missing = [];
   for (const label of types) {
     const c = await runType(() => note27({ sources: {} }),

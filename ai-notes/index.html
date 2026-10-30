@@ -135,7 +135,7 @@ button:disabled { opacity: .45; cursor: default; }
   /* "Add a row" / "Add an increment" are controls, not record. They were
      printing on the paper note — the LA log's since 27 September, the sedation
      block's since 26 October. */
-  .add-row, .order-row { display: none !important; }
+  .add-row, .order-row, .row-del, th.row-del-h { display: none !important; }
   /* Screen guidance, never record. Every .bpe-note is a line telling the
      clinician what to do or where something came from — "add it here", "check
      before you paste", "Taken as dictated" — and noteAsText() includes none of
@@ -295,7 +295,9 @@ button:disabled { opacity: .45; cursor: default; }
 .consent-confirm span { font-weight: 500; }
 
 /* ---- consult type ---- */
-.types { display: flex; flex-wrap: wrap; gap: 8px; }
+/* No longer a flex row of buttons: it holds the groups, each with its own
+   row inside (.type-row). */
+.types { display: block; }
 .types button {
   flex: 1 1 auto; min-width: 130px;
   font-size: .875rem; padding: 0 14px;
@@ -460,6 +462,24 @@ table.item-log select { font: inherit; font-size: .8rem; padding: 2px 4px; borde
    list added the same day, and the sedation offer all rendered a full-size
    default button next to the compact ones. One rule, keyed on the class that
    means what it does. */
+/* The consult types, in groups. */
+.type-group + .type-group { margin-top: 10px; }
+.type-group-label {
+  font-size: .625rem; text-transform: uppercase; letter-spacing: .07em;
+  font-weight: 700; color: var(--muted); margin: 0 0 5px;
+}
+.type-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* The remove control. A narrow column, quiet until reached for: it deletes a
+   line of a clinical record, so it should not compete with the content, and it
+   must never appear on paper. */
+.row-del {
+  min-height: 28px; min-width: 28px; padding: 0; line-height: 1;
+  font-size: .9rem; border-radius: 6px; color: var(--ink-faint);
+  background: none; border: 1px solid transparent;
+}
+.row-del:hover, .row-del:focus { color: var(--stop); border-color: var(--line); }
+th.row-del-h { width: 2em; }
 .add-row, .order-row { min-height: 30px; padding: 0 10px; font-size: .75rem; font-weight: 600; border-radius: 6px; margin-top: 6px; }
 .sed-group { font-family: var(--mono); font-size: .68rem; letter-spacing: .07em; text-transform: uppercase;
   color: var(--ink-faint); margin: 12px 0 4px; }
@@ -810,10 +830,19 @@ label.pmpr input { margin-top: 4px; }
       </details>
       <div class="record-row">
         <button class="btn-pause" id="pause">Pause</button>
-        <button class="btn-pause" id="dictate" title="Everything after this is dictated to the record, not conversation">Dictate</button>
+        <button class="btn-pause" id="dictate">Dictate</button>
+        <button class="btn-pause hidden" id="undictate">Undo dictate</button>
         <button class="btn-stop" id="stop">Stop and draft note</button>
         <button class="btn-discard" id="discard">Discard</button>
       </div>
+      <!-- What Dictate does, on screen (30 October 2026). This lived in a
+           title= attribute, and a tablet has no hover: chairside, the
+           explanation of the control the whole Montgomery split rests on did
+           not exist. It is also one-way within a recording, so a mis-tap at
+           minute two used to mark the rest of the consultation as dictation
+           and make things the patient WAS told read as dictated-only, with
+           nothing on screen saying so and no way back. -->
+      <p class="timer-note" id="dictate-note"></p>
     </div>
   </section>
 
@@ -1044,7 +1073,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-30.2';
+  var BUILD = '2026-10-30.3';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1147,6 +1176,38 @@ label.pmpr input { margin-top: 4px; }
     ['treatment-plan',     'Treatment plan consult'],
     ['sedation',           'Sedation']
   ];
+
+  /* Thirteen buttons in one flat row was a scan, not a glance (30 October
+     2026). Grouped by what the appointment IS: the four that open in the
+     consent record together, the surgical list together, chairside treatment
+     together, and the one that arrives unannounced on its own.
+
+     Every type must appear in exactly one group. A key left out would simply
+     vanish from the screen with nothing to say so, which is why this is
+     checked rather than trusted. */
+  var TYPE_GROUPS = [
+    ['Assessment and planning', ['exam-recall', 'treatment-plan', 'implant-consult', 'denture-consult']],
+    ['Surgery',                 ['extraction-surgery', 'third-molar', 'implant-surgery', 'sedation']],
+    ['Treatment',               ['restorative', 'endo', 'perio', 'denture-stage']],
+    ['Urgent',                  ['emergency']]
+  ];
+
+  function verifyTypeGroups() {
+    var seen = {}, bad = [];
+    TYPE_GROUPS.forEach(function (g) {
+      g[1].forEach(function (k) {
+        if (seen[k]) bad.push('listed twice: ' + k);
+        seen[k] = true;
+        if (!CONSULT_TYPES.some(function (t) { return t[0] === k; })) bad.push('not a consult type: ' + k);
+      });
+    });
+    CONSULT_TYPES.forEach(function (t) {
+      if (!seen[t[0]]) bad.push('in no group, so it would not appear at all: ' + t[0]);
+    });
+    if (bad.length) console.error('Consult type groups: ' + bad.join('; '));
+    return bad;
+  }
+  verifyTypeGroups();
 
   // Order and headings mirror FIELDS in api/_prompt.mjs. Keep them in step.
   var FIELDS = [
@@ -1819,7 +1880,31 @@ label.pmpr input { margin-top: 4px; }
   // and that click asks for the checklist.
   var checklistCache = {};
 
-  CONSULT_TYPES.forEach(function (pair) {
+  var typeHosts = {};
+  TYPE_GROUPS.forEach(function (g) {
+    var box = document.createElement('div');
+    box.className = 'type-group';
+    var lab = document.createElement('p');
+    lab.className = 'type-group-label';
+    lab.textContent = g[0];
+    box.appendChild(lab);
+    var row = document.createElement('div');
+    row.className = 'type-row';
+    box.appendChild(row);
+    $('types').appendChild(box);
+    g[1].forEach(function (k) { typeHosts[k] = row; });
+  });
+
+  // In group order, so the DOM order matches what is on screen.
+  var ORDERED_TYPES = TYPE_GROUPS.reduce(function (out, g) {
+    return out.concat(g[1].map(function (k) {
+      var pair = null;
+      CONSULT_TYPES.forEach(function (t) { if (t[0] === k) pair = t; });
+      return pair;
+    }).filter(Boolean));
+  }, []);
+
+  ORDERED_TYPES.forEach(function (pair) {
     var b = document.createElement('button');
     b.type = 'button';
     b.textContent = pair[1];
@@ -1829,7 +1914,10 @@ label.pmpr input { margin-top: 4px; }
       // retry after changing it is a new attempt, not a repeat of the last one.
       if (S.consultType !== pair[0]) S.draftFails = 0;
       S.consultType = pair[0];
-      Array.prototype.forEach.call($('types').children, function (other) {
+      // The buttons, not the children: #types holds group boxes since 30
+      // October 2026, and setting aria-pressed on a group box would have
+      // announced the heading as a pressed control.
+      [].forEach.call($('types').querySelectorAll('button'), function (other) {
         other.setAttribute('aria-pressed', String(other === b));
       });
       // Open in the layout this kind of appointment reads best in — unless the
@@ -1838,7 +1926,7 @@ label.pmpr input { margin-top: 4px; }
       refreshStart();
       loadChecklist(pair[0]);
     });
-    $('types').appendChild(b);
+    (typeHosts[pair[0]] || $('types')).appendChild(b);
     // ?type=third-molar lands straight on the right clinic. Validated against
     // the real list, so a typo or a stale bookmark simply selects nothing.
     if (PARAMS.get('type') === pair[0]) b.click();
@@ -2488,9 +2576,48 @@ label.pmpr input { margin-top: 4px; }
     S.dictationFromMs = from !== null ? from : audioMs();
     $('dictate').textContent = 'Dictating';
     $('dictate').disabled = true;
+    $('undictate').classList.remove('hidden');
     $('recbar-label').textContent = 'Dictating \u2014 the patient has left';
+    setDictateNote();
     tick();
   });
+
+  /* Undo, while this recording is still running (30 October 2026).
+
+     An undo rather than a confirmation on the way in. A confirm would tax
+     every correct press — gloved, at the chair, mid-list — to guard against a
+     rare mis-tap, and the press is correct nearly every time. This costs
+     nothing unless something went wrong.
+
+     Only the marker is undone. If the press also resumed from a pause, the
+     recording stays running: silently re-pausing a live recording because the
+     clinician corrected a label is a worse surprise than the one being fixed.
+     Nothing has been sent anywhere at this point — the marker is a number held
+     in memory and read when the draft is asked for. */
+  $('undictate').addEventListener('click', function () {
+    resetIdle();
+    if (S.dictationFromMs === null) return;
+    S.dictationFromMs = null;
+    $('dictate').textContent = 'Dictate';
+    $('dictate').disabled = false;
+    $('undictate').classList.add('hidden');
+    $('recbar-label').textContent = S.paused
+      ? 'Paused \u2014 nothing is being recorded'
+      : 'Recording \u2014 conversation only';
+    setDictateNote();
+    tick();
+    toast('Back to recording the conversation');
+  });
+
+  // The line under the record row. Written from the state rather than set at
+  // each call site, so the two cannot drift apart.
+  function setDictateNote() {
+    var el = $('dictate-note');
+    if (!el) return;
+    el.textContent = S.dictationFromMs === null
+      ? 'Press Dictate once the patient has left. Everything after it is recorded as your dictation to the record, not as conversation with the patient.'
+      : 'Dictating. Everything from the moment you pressed it is your dictation, not conversation. Undo dictate puts it back if you pressed it too early.';
+  }
 
   $('stop').addEventListener('click', function () { resetIdle(); stopRecording(); });
 
@@ -3518,6 +3645,70 @@ label.pmpr input { margin-top: 4px; }
     });
   }
 
+  /* ---- removing a row, and keeping your place (30 October 2026) ----
+
+     No table row could be deleted. To be rid of a row the draft invented, the
+     clinician blanked three or four cells one at a time — and the emptied row
+     then stayed in the table for good, because itemRows keeps the object and
+     only the COPY skips a row with nothing in it. Tables accumulated rows that
+     could not be cleared, and three more tables arrived in two days.
+
+     The drafted copy is spliced with the note. itemRowEdited and laRowEdited
+     compare a row against S.drafted[...][i] BY INDEX, so removing a row would
+     shift every row after it onto the wrong comparison, mark them all as
+     hand-edited, and stop them being source-checked — the same defect
+     reordering had, arrived at a different way. */
+  function removeRow(key, i) {
+    if (!S.note || !Array.isArray(S.note[key])) return;
+    S.note[key].splice(i, 1);
+    if (S.drafted && Array.isArray(S.drafted[key])) S.drafted[key].splice(i, 1);
+    S.edited = true;
+    keepPlace(function () { render(S.note); });
+  }
+
+  /* The increments are not a top-level key: they live inside the sedation
+     record, and sedIncEdited compares against sedRecord(S.drafted).increments
+     by index, so the drafted side is spliced here too for the same reason. */
+  function removeIncrement(i) {
+    var r = sedRecord(S.note);
+    if (!r || !Array.isArray(r.increments)) return;
+    r.increments.splice(i, 1);
+    var d = S.drafted && sedRecord(S.drafted);
+    if (d && Array.isArray(d.increments)) d.increments.splice(i, 1);
+    S.edited = true;
+    keepPlace(function () { render(S.note); });
+  }
+
+  function delButton(label, onClick) {
+    var td = document.createElement('td');
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'row-del';
+    b.textContent = '\u00d7';
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.addEventListener('click', function () { resetIdle(); onClick(); });
+    td.appendChild(b);
+    return td;
+  }
+
+  /* Rebuilding the note throws the clinician where the browser likes. render()
+     replaces every field, and nothing held the scroll — so adding a row moved
+     the page and left them hunting for the empty row they had just asked for,
+     on a tablet, mid-list. */
+  function keepPlace(fn, focusId) {
+    var y = window.scrollY || window.pageYOffset || 0;
+    fn();
+    if (window.scrollTo) window.scrollTo(0, y);
+    if (!focusId) return;
+    var block = document.getElementById(focusId);
+    if (!block) return;
+    var rows = block.querySelectorAll('tr');
+    var last = rows[rows.length - 1];
+    var cell = last && last.querySelector('td[contenteditable="true"], td[contenteditable="plaintext-only"]');
+    if (cell && cell.focus) { try { cell.focus(); } catch (e) {} }
+  }
+
   /* ---- next thing to check (30 October 2026) ----
      The things worth stopping at, in the order they appear on screen: a field
      the draft could not fill, and any block holding a row whose source did not
@@ -4496,6 +4687,10 @@ label.pmpr input { margin-top: 4px; }
       table.className = 'implant-log la-log';
       var thead = document.createElement('tr');
       LA_COLS.forEach(function (c) { var th = document.createElement('th'); th.textContent = c[1]; thead.appendChild(th); });
+      var lahd = document.createElement('th');
+      lahd.className = 'row-del-h';
+      lahd.setAttribute('aria-label', 'Remove');
+      thead.appendChild(lahd);
       table.appendChild(thead);
       rows.forEach(function (row, i) {
         var tr = document.createElement('tr');
@@ -4519,6 +4714,8 @@ label.pmpr input { margin-top: 4px; }
           });
           tr.appendChild(td);
         });
+        tr.appendChild(delButton('Remove local anaesthetic row ' + (i + 1),
+          function () { removeRow('laLog', i); }));
         table.appendChild(tr);
       });
       wrap.appendChild(table);
@@ -4535,7 +4732,7 @@ label.pmpr input { margin-top: 4px; }
       LA_COLS.forEach(function (c) { r[c[0]] = null; });
       S.note.laLog.push(r);
       S.edited = true;
-      render(S.note);
+      keepPlace(function () { render(S.note); }, 'la-block');
     });
     wrap.appendChild(status);
     wrap.appendChild(add);
@@ -4846,6 +5043,10 @@ label.pmpr input { margin-top: 4px; }
       hn.textContent = '#';
       thead.appendChild(hn);
       SED_DOSE.forEach(function (c) { var t = document.createElement('th'); t.textContent = c[1]; thead.appendChild(t); });
+      var sdhd = document.createElement('th');
+      sdhd.className = 'row-del-h';
+      sdhd.setAttribute('aria-label', 'Remove');
+      thead.appendChild(sdhd);
       table.appendChild(thead);
       incs.forEach(function (row, i) {
         var tr = document.createElement('tr');
@@ -4872,6 +5073,7 @@ label.pmpr input { margin-top: 4px; }
           });
           tr.appendChild(td);
         });
+        tr.appendChild(delButton('Remove increment ' + (i + 1), function () { removeIncrement(i); }));
         table.appendChild(tr);
       });
       wrap.appendChild(table);
@@ -4889,7 +5091,7 @@ label.pmpr input { margin-top: 4px; }
       SED_DOSE.forEach(function (c) { n[c[0]] = null; });
       r.increments.push(n);
       S.edited = true;
-      render(S.note);
+      keepPlace(function () { render(S.note); }, 'sedation-block');
     });
     wrap.appendChild(add);
 
@@ -5129,6 +5331,10 @@ label.pmpr input { margin-top: 4px; }
       var hs = document.createElement('th');
       hs.textContent = 'Source';
       thead.appendChild(hs);
+      var hd = document.createElement('th');
+      hd.className = 'row-del-h';
+      hd.setAttribute('aria-label', 'Remove');
+      thead.appendChild(hd);
       table.appendChild(thead);
 
       rows.forEach(function (row, i) {
@@ -5183,6 +5389,8 @@ label.pmpr input { margin-top: 4px; }
         });
         sd.appendChild(sel);
         tr.appendChild(sd);
+        tr.appendChild(delButton('Remove ' + spec.heading.toLowerCase() + ' item ' + (i + 1),
+          function () { removeRow(key, i); }));
         table.appendChild(tr);
       });
       wrap.appendChild(table);
@@ -5209,7 +5417,7 @@ label.pmpr input { margin-top: 4px; }
           ? 'Ordered by tooth. ' + left + (left === 1 ? ' row whose site could not be read was' : ' rows whose sites could not be read were') +
             ' left at the end, as said.'
           : 'Ordered by tooth.';
-        render(S.note);
+        keepPlace(function () { render(S.note); });
       });
       wrap.appendChild(sort);
     }
@@ -5230,7 +5438,8 @@ label.pmpr input { margin-top: 4px; }
       cols.forEach(function (c) { r[c[0]] = null; });
       S.note[key].push(r);
       S.edited = true;
-      render(S.note);
+      // The cursor lands in the new row, where it was asked for.
+      keepPlace(function () { render(S.note); }, spec.id);
     });
     wrap.appendChild(add);
     wrap.appendChild(status);
@@ -5338,6 +5547,10 @@ label.pmpr input { margin-top: 4px; }
       table.className = 'implant-log la-log';
       var thead = document.createElement('tr');
       IMPLANT_COLS.forEach(function (c) { var th = document.createElement('th'); th.textContent = c[1]; thead.appendChild(th); });
+      var imhd = document.createElement('th');
+      imhd.className = 'row-del-h';
+      imhd.setAttribute('aria-label', 'Remove');
+      thead.appendChild(imhd);
       table.appendChild(thead);
       rows.forEach(function (row, i) {
         var tr = document.createElement('tr');
@@ -5361,6 +5574,8 @@ label.pmpr input { margin-top: 4px; }
           });
           tr.appendChild(td);
         });
+        tr.appendChild(delButton('Remove implant ' + (i + 1),
+          function () { removeRow('implantLog', i); }));
         table.appendChild(tr);
       });
       wrap.appendChild(table);
@@ -5378,7 +5593,7 @@ label.pmpr input { margin-top: 4px; }
       IMPLANT_COLS.forEach(function (c) { r[c[0]] = null; });
       S.note.implantLog.push(r);
       S.edited = true;
-      render(S.note);
+      keepPlace(function () { render(S.note); }, 'implant-block');
     });
     wrap.appendChild(add);
     wrap.appendChild(status);
@@ -6606,6 +6821,8 @@ label.pmpr input { margin-top: 4px; }
     // one's "Paused — nothing is being recorded" or "Dictating — the patient
     // has left" while it was recording the conversation.
     $('recbar-label').textContent = 'Recording \u2014 conversation only';
+    $('undictate').classList.add('hidden');
+    setDictateNote();
     $('timer').classList.remove('paused');
     $('timer').classList.remove('over');
     $('timer').textContent = '0:00';
@@ -6654,7 +6871,12 @@ label.pmpr input { margin-top: 4px; }
     $('consent').checked = false;
     S.consent = false;
     S.consultType = null;
-    Array.prototype.forEach.call($('types').children, function (b) {
+    /* The buttons, not the children. Grouping the types on 30 October 2026
+       turned these children into four group boxes, so this cleared the flag on
+       the boxes and left the last patient's type still showing as pressed —
+       a type that looks chosen while S.consultType is null and Start refuses
+       to enable, with nothing on screen to explain why. */
+    [].forEach.call($('types').querySelectorAll('button'), function (b) {
       b.setAttribute('aria-pressed', 'false');
     });
     refreshStart();
