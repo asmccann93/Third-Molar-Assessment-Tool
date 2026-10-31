@@ -147,7 +147,15 @@ button:disabled { opacity: .45; cursor: default; }
   .bpe-note,
   /* A block offered but never filled contributes nothing to the copy, so it
      contributes nothing to the paper either. Set by each block's refresh(). */
-  .print-none { display: none !important; }
+  .print-none,
+  /* A field that does not apply to this kind of appointment (31 October 2026).
+     An empty consent field still prints "Not captured" on purpose: that is a
+     claim about the record, and a consent discussion that named no risks
+     should say so on the paper. "Not applicable to this appointment" is not
+     that. It is the tool's own type table talking, it is in none of the copied
+     text, and on a routine recall it was about to put seven such lines onto a
+     patient's printed record — sentences the clinician never said. */
+  .field.is-na { display: none !important; }
   /* The source selector is a control on screen and a word on paper. Printed as
      a dropdown it reads like an unanswered question on a clinical record. */
   table.item-log select {
@@ -1088,7 +1096,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-31.2';
+  var BUILD = '2026-10-31.3';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -3459,6 +3467,17 @@ label.pmpr input { margin-top: 4px; }
         var value = note[key];
         var isGap = !hasText(value);
 
+        /* "Not captured" is a claim that something is MISSING. On an
+           appointment where the field does not apply — a recall discusses no
+           risks, offers no alternatives, settles no decision — that claim is
+           false, and it was made four times in one section while the gap list
+           above correctly said nothing was due. The server has always known
+           which fields those are; since 31 October it says so. An empty field
+           that does not apply is left blank and still editable, in case it did
+           come up after all. */
+        var na = Array.isArray(S.note && S.note.notApplicable) &&
+                 S.note.notApplicable.indexOf(key) !== -1;
+
         var wrap = document.createElement('div');
         wrap.className = 'field' + (isGap ? ' is-gap' : '') + (isCore ? ' is-core' : '') +
                          (isDictated ? ' is-dictated' : '');
@@ -3535,16 +3554,6 @@ label.pmpr input { margin-top: 4px; }
         pre.setAttribute('role', 'textbox');
         pre.setAttribute('aria-multiline', 'true');
         pre.setAttribute('aria-label', heading);
-        /* "Not captured" is a claim that something is MISSING. On an
-           appointment where the field does not apply — a recall discusses no
-           risks, offers no alternatives, settles no decision — that claim is
-           false, and it was made four times in one section while the gap list
-           above correctly said nothing was due. The server has always known
-           which fields those are; since 31 October it says so. An empty field
-           that does not apply is left blank and still editable, in case it did
-           come up after all. */
-        var na = Array.isArray(S.note && S.note.notApplicable) &&
-                 S.note.notApplicable.indexOf(key) !== -1;
         pre.dataset.placeholder = (isGap && na) ? 'Not applicable to this appointment' : 'Not captured';
         if (isGap) pre.classList.add('is-empty');
         if (isGap && na) wrap.classList.add('is-na');
@@ -3561,6 +3570,13 @@ label.pmpr input { margin-top: 4px; }
           S.edited = true;
           wrap.classList.toggle('edited', true);
           wrap.classList.toggle('is-gap', text === '');
+          /* is-na means "empty AND does not apply", so it must follow the
+             typing exactly as is-gap does. Set once at render and never
+             cleared, it would have survived into a field the clinician had
+             just filled in by hand — and the print rule below hides is-na, so
+             real clinical content would have silently left the paper record
+             until the next full re-render. */
+          wrap.classList.toggle('is-na', na && text === '');
           pre.classList.toggle('is-empty', text === '');
           /* Filling a gap removes it from the things to check, so the count
              must follow the typing (30 October 2026, same day as the control).

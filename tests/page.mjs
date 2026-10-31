@@ -6293,14 +6293,35 @@ async function testNotApplicableIsNotMissing() {
   ok('and the counter leaves the not-applicable ones out',
     counted === allGaps - naGaps + warned,
     `counted=${counted} expected=${allGaps - naGaps + warned} (gaps ${allGaps}, na ${naGaps}, warned ${warned})`);
+  /* On paper. An empty consent field still prints "Not captured" by design —
+     a consent discussion that named no risks should say so. "Not applicable to
+     this appointment" is the tool's own type table talking, it is in none of
+     the copied text, and on a recall it was seven such lines on a patient's
+     printed record. */
+  const printCssNa = (html.match(/@media print \{[\s\S]*?\n\}/) || [''])[0];
+  ok('a field that does not apply is kept off the paper',
+    /\.field\.is-na \{ display: none !important; \}/.test(printCssNa), printCssNa.slice(0, 700));
+
   // If it DID come up, typing into it works and it stops being not-applicable.
   const pre = risks.querySelector('pre[contenteditable]');
   pre.textContent = 'Nerve damage discussed after all.';
   pre.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
   await tick(20);
+  /* The mark must follow the typing. Set once at render and never cleared, it
+     would survive into a field just filled in by hand — and with the print
+     rule above, real clinical content would leave the paper record silently. */
+  ok('typing into it clears the mark, so it reaches the paper again',
+    !risks.classList.contains('is-na') && !risks.classList.contains('is-gap'),
+    risks.className);
   const text = await ctx.copy();
   ok('and it can still be filled in by hand if it did come up',
     /Nerve damage discussed after all\./.test(text), text.slice(0, 400));
+  // Emptied again, it goes back to not-applicable rather than to "Not captured".
+  pre.textContent = '';
+  pre.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  await tick(20);
+  ok('and emptying it again restores the mark, not a false gap',
+    risks.classList.contains('is-na') && risks.classList.contains('is-gap'), risks.className);
 }
 
 function testStoresNothing() {
@@ -7098,7 +7119,11 @@ async function testPrintCarriesOnlyWhatTheCopyDoes() {
   section('The printed record carries only what the copy does');
   const printCss = (html.match(/@media print \{[\s\S]*?\n\}/) || [''])[0];
   ok('the guidance lines are hidden on paper', /\.bpe-note,/.test(printCss), printCss.slice(0, 500));
-  ok('and so is a block that has nothing to copy', /\.print-none \{ display: none !important; \}/.test(printCss));
+  // Joined by .field.is-na on 31 October 2026, so the declaration now closes
+  // on that selector rather than on .print-none.
+  ok('and so is a block that has nothing to copy',
+    /\.print-none,[\s\S]{0,600}?\.field\.is-na \{ display: none !important; \}/.test(printCss),
+    printCss.slice(0, 700));
 
   // An extraction with nothing dictated: the LA block is on screen to be filled
   // in, and marked so it does not reach the paper empty.
