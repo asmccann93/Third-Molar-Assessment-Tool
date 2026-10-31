@@ -32,11 +32,12 @@ const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 /* ---------- boot the page with the browser bits stubbed ---------- */
 // `hook` runs last in beforeParse, so a test can replace a stub or add a browser
 // feature jsdom lacks before the page's script sees the window.
-async function boot({ session = { authenticated: true, expiresIn: 40000 }, onFetch, hook } = {}) {
+async function boot({ session = { authenticated: true, expiresIn: 40000 }, onFetch, hook, search = '' } = {}) {
   const calls = [];
   const dom = new JSDOM(html, {
     runScripts: 'dangerously',
-    url: 'https://oralsurgeryassess.com/ai-notes/',
+    // search: the page reads ?type= and ?audio= from its own URL at load.
+    url: 'https://oralsurgeryassess.com/ai-notes/' + search,
     pretendToBeVisual: true,
     beforeParse(win) {
       win.fetch = async (url, opts = {}) => {
@@ -1600,6 +1601,27 @@ async function testUrlSwitches() {
   // the ?type= click sits inside it and compares against pair[0].
   ok('validated against the real list rather than trusted',
     /ORDERED_TYPES\.forEach[\s\S]{0,1400}PARAMS\.get\('type'\) === pair\[0\]/.test(src));
+  /* Behaviourally, not just in the source. ?type= is how a surgery lands
+     straight on the right clinic, and the list it walks was reordered and
+     regrouped on 30 October with nothing exercising the deep link at all. */
+  {
+    for (const [q, label] of [['third-molar', 'Third molar surgery'],
+                              ['denture-stage', 'Denture stage'],
+                              ['sedation', 'Sedation']]) {
+      const c = await boot({ search: '?type=' + q });
+      const pressed = typeButtons(c.doc).filter((b2) => b2.getAttribute('aria-pressed') === 'true');
+      ok('?type=' + q + ' selects exactly that one, wherever it now sits',
+        pressed.length === 1 && pressed[0].textContent === label,
+        pressed.map((b2) => b2.textContent).join(',') || 'none');
+    }
+    const bad = await boot({ search: '?type=not-a-real-type' });
+    ok('and an unknown type selects nothing at all',
+      typeButtons(bad.doc).every((b2) => b2.getAttribute('aria-pressed') !== 'true'));
+  }
+  ok('the grouping is said as well as drawn, so it is not sighted-only',
+    /row\.setAttribute\('role', 'group'\)/.test(src) &&
+    /row\.setAttribute\('aria-labelledby', lab\.id\)/.test(src));
+
   ok('and that list is built from the groups, so no type can be left off the screen',
     /ORDERED_TYPES = TYPE_GROUPS\.reduce/.test(src) && /function verifyTypeGroups/.test(src) &&
     /in no group, so it would not appear at all/.test(src));
@@ -3260,6 +3282,7 @@ await testSedationRecord();
 await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
 await testReviewAids();
+testStoresNothing();
 await testFriendlier();
 await testReviewAidsHoldUp();
 await testDiagnosisItemised();
@@ -6221,6 +6244,44 @@ async function testReviewAids() {
 /* What the eighth sweep found in the five above, all of it mine from the same
    day. Each is small; each would have been believed. */
 /* The four user-facing changes of 30 October 2026, second batch. */
+/* The property the DPIA rests on (31 October 2026).
+
+   "Nothing is stored" is the premise of the whole assessment, and until now it
+   was true of this page by inspection only: the implant tool had this check,
+   AI Notes — the one that records patients — did not. A DPIA change record
+   written on 30 October claimed the test suite asserted it. The suite did not,
+   so the claim was corrected and the assertion written. It belongs here rather
+   than in a document: a sentence in a DPIA cannot fail a build. */
+function testStoresNothing() {
+  section('Nothing is stored: the premise, mechanically');
+  // Comments are stripped first: this file DISCUSSES browser storage at length,
+  // and a check that the word never appears would fail on its own commentary.
+  const code = html.replace(/<!--[\s\S]*?-->/g, '')
+                   .replace(/\/\*[\s\S]*?\*\//g, '')
+                   .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const stores = ['localStorage', 'sessionStorage', 'indexedDB', 'openDatabase', 'document.cookie']
+    .filter((a) => code.includes(a));
+  ok('the page uses no browser storage of any kind', stores.length === 0, stores.join(', '));
+  ok('and nothing writes to the cache API either',
+    !/caches\s*\.\s*(open|put|add|addAll)/.test(code), (code.match(/caches\s*\.\s*\w+/g) || []).join(', '));
+
+  /* The service worker at the origin root claims every path, so AI Notes is
+     kept out of it by name. A cached copy of this page would open without the
+     passcode on any device that had signed in once. */
+  const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+  ok('the origin service worker skips AI Notes and the API',
+    /const SKIP = \[[^\]]*"\/ai-notes"[^\]]*"\/api"[^\]]*\]/.test(sw),
+    (sw.match(/const SKIP = \[[^\]]*\]/) || [''])[0]);
+  ok('and it does so before anything else in the fetch handler, as its comment requires',
+    sw.indexOf('if (skipped(path)) return;') < sw.indexOf("e.request.method !== \"GET\""));
+
+  // The AI Notes worker itself must cache nothing at all.
+  const own = readFileSync(new URL('../ai-notes/sw.js', import.meta.url), 'utf8');
+  ok('the AI Notes worker declares no cache',
+    !/caches\s*\.\s*(open|put|add|addAll)/.test(own) && !/const CACHE/.test(own),
+    own.slice(0, 200));
+}
+
 async function testFriendlier() {
   section('Dictate explains itself and can be undone; rows can be removed');
 

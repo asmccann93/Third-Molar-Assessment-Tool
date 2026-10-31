@@ -1086,7 +1086,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-30.4';
+  var BUILD = '2026-10-31.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1898,15 +1898,22 @@ label.pmpr input { margin-top: 4px; }
   var checklistCache = {};
 
   var typeHosts = {};
-  TYPE_GROUPS.forEach(function (g) {
+  TYPE_GROUPS.forEach(function (g, gi) {
     var box = document.createElement('div');
     box.className = 'type-group';
     var lab = document.createElement('p');
     lab.className = 'type-group-label';
+    lab.id = 'type-group-' + gi;
     lab.textContent = g[0];
     box.appendChild(lab);
     var row = document.createElement('div');
     row.className = 'type-row';
+    /* The grouping was drawn and not said (31 October 2026). Four headings on
+       screen, and to a screen reader thirteen buttons under one label — the
+       grouping that makes the list a glance existed only for people who could
+       see it. Each row is a group named by the heading above it. */
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-labelledby', lab.id);
     box.appendChild(row);
     $('types').appendChild(box);
     g[1].forEach(function (k) { typeHosts[k] = row; });
