@@ -379,6 +379,15 @@ export default async function handler(req, res) {
     // written into the plan instead, labelled, so nothing dictated is lost.
     const features = Array.isArray(body?.features) ? body.features : [];
 
+    /* Which fields this kind of appointment does not have (31 October 2026).
+       The server has always known: assertShape skips them when listing gaps,
+       because "listing it told the clinician to check for something that was
+       never due". The PAGE did not know, so it went on rendering each of them
+       as "Not captured" — a claim that something is missing from the record.
+       On a routine recall that is four of them in one section, contradicting
+       the gap list directly above. Sent so the two can agree. */
+    note.notApplicable = notApplicableFields(consultType);
+
     // The itemised lists (28 October 2026). A row can only claim to have been
     // dictated if there WAS a dictation. With none, the claim is impossible, so
     // the source is emptied rather than believed — the page then shows the row

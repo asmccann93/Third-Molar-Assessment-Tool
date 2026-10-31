@@ -3313,6 +3313,31 @@ async function testSept27b() {
       /Proposed, itemised \(dictated\):\n1\. Tooth \/ site UL4, Crown/.test(n2.plan || '') &&
       !/UL4/.test(n2.proposed || ''), n2.plan);
 
+    /* ---- which fields do not apply (31 October 2026) ---- */
+    section('The server tells the page which fields do not apply');
+    {
+      const NOTE_NA = { ...base2, gaps: [], checklist: {} };
+      stubFetch(async () => ({ status: 200, body: { content: [{ type: 'text', text: JSON.stringify(NOTE_NA) }], stop_reason: 'end_turn' } }));
+      let rr = mockRes();
+      await extract(mockReq({ body: { turns: [{ speaker: 'S1', text: 'Routine check-up today.', start: 1, end: 3 }],
+        consultType: 'exam-recall', features: ['treatment', 'items', 'diagnoses'] } }), rr);
+      const nn = rr.body?.note || {};
+      ok('a recall is told which fields it does not have',
+        Array.isArray(nn.notApplicable) && nn.notApplicable.includes('risks') &&
+        nn.notApplicable.includes('decision'), JSON.stringify(nn.notApplicable));
+      ok('and it is the same list the gap check already skipped',
+        JSON.stringify(nn.notApplicable) === JSON.stringify(pm.notApplicableFields('exam-recall')),
+        JSON.stringify(nn.notApplicable));
+
+      rr = mockRes();
+      await extract(mockReq({ body: { turns: [{ speaker: 'S1', text: 'Removing the lower left eight.', start: 1, end: 3 }],
+        consultType: 'third-molar', features: ['treatment', 'items', 'diagnoses'] } }), rr);
+      const n3 = rr.body?.note || {};
+      ok('a consent appointment is told that every field applies',
+        Array.isArray(n3.notApplicable) && n3.notApplicable.length === 0,
+        JSON.stringify(n3.notApplicable));
+    }
+
     /* ---- the diagnosis itemised (29 October 2026) ---- */
     section('The diagnosis itemised: what was found, per tooth');
     ok('the schema asks for it', /"diagnoses": \[ \{ "tooth"/.test(sys));

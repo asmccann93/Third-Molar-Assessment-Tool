@@ -643,6 +643,8 @@ label.pmpr input { margin-top: 4px; }
   font: 400 .9375rem/1.6 var(--font-ui); color: var(--ink);
 }
 .field.is-gap pre { color: var(--ink-faint); font-style: italic; }
+/* Quieter again: it is not missing, it did not apply. */
+.field.is-na .field-head h3 { color: var(--muted); }
 .field.is-core .field-head h3 { color: var(--accent); }
 
 /* A block offered but still empty, compacted to one line (30 October 2026).
@@ -1086,7 +1088,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-31.1';
+  var BUILD = '2026-10-31.2';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -3533,8 +3535,19 @@ label.pmpr input { margin-top: 4px; }
         pre.setAttribute('role', 'textbox');
         pre.setAttribute('aria-multiline', 'true');
         pre.setAttribute('aria-label', heading);
-        pre.dataset.placeholder = 'Not captured';
+        /* "Not captured" is a claim that something is MISSING. On an
+           appointment where the field does not apply — a recall discusses no
+           risks, offers no alternatives, settles no decision — that claim is
+           false, and it was made four times in one section while the gap list
+           above correctly said nothing was due. The server has always known
+           which fields those are; since 31 October it says so. An empty field
+           that does not apply is left blank and still editable, in case it did
+           come up after all. */
+        var na = Array.isArray(S.note && S.note.notApplicable) &&
+                 S.note.notApplicable.indexOf(key) !== -1;
+        pre.dataset.placeholder = (isGap && na) ? 'Not applicable to this appointment' : 'Not captured';
         if (isGap) pre.classList.add('is-empty');
+        if (isGap && na) wrap.classList.add('is-na');
         pre.addEventListener('paste', function (e) {
           // Plain text only. Pasting from a PMS or a browser otherwise drops
           // markup into a clinical field.
@@ -3742,7 +3755,10 @@ label.pmpr input { margin-top: 4px; }
     var host = $('fields');
     if (!host) return [];
     return [].filter.call(host.querySelectorAll('.field'), function (el) {
-      return el.classList.contains('is-gap') || !!el.querySelector('p.bpe-note.warn');
+      // A field that does not apply to this appointment is not outstanding
+      // work, so it is not a stop on the walk either.
+      return (el.classList.contains('is-gap') && !el.classList.contains('is-na')) ||
+             !!el.querySelector('p.bpe-note.warn');
     });
   }
 

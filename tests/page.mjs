@@ -3282,6 +3282,7 @@ await testSedationRecord();
 await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
 await testReviewAids();
+await testNotApplicableIsNotMissing();
 testStoresNothing();
 await testFriendlier();
 await testReviewAidsHoldUp();
@@ -6252,6 +6253,56 @@ async function testReviewAids() {
    written on 30 October claimed the test suite asserted it. The suite did not,
    so the claim was corrected and the assertion written. It belongs here rather
    than in a document: a sentence in a DPIA cannot fail a build. */
+/* A recall does not discuss risks (31 October 2026). */
+async function testNotApplicableIsNotMissing() {
+  section('A field that does not apply is not a field left blank');
+  const RECALL = () => note27({
+    sources: {},
+    proposed: null, alternatives: null, risks: null, benefits: null,
+    costs: null, patientFactors: null, decision: null,
+    notApplicable: ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'patientFactors', 'decision']
+  });
+  const ctx = await runType(RECALL, { type: /Exam/, dictate: false });
+  const { doc } = ctx;
+  const risks = fieldWrap(doc, 'risks');
+  ok('the field is still on screen and still editable', !!risks &&
+    !!risks.querySelector('pre[contenteditable]'));
+  ok('but it does not claim something is missing',
+    risks.querySelector('pre').dataset.placeholder === 'Not applicable to this appointment' &&
+    risks.classList.contains('is-na'),
+    risks.querySelector('pre').dataset.placeholder);
+  ok('a field that DOES apply still says Not captured', (() => {
+    const q = fieldWrap(doc, 'patientQuestions');
+    return !!q && q.querySelector('pre').dataset.placeholder === 'Not captured' &&
+      !q.classList.contains('is-na');
+  })());
+  /* Four of them in one section was the complaint, and none is work to do.
+     Read off the PAGE's own counter, not recomputed here with the predicate
+     under test: the first version of this assertion rebuilt the stop list with
+     the same filter the page uses and then checked its own arithmetic, so
+     removing the exclusion from the page changed nothing it looked at. A test
+     that computes the answer it is checking cannot fail. */
+  const fieldsEl = $(doc, 'fields');
+  const allGaps = fieldsEl.querySelectorAll('.field.is-gap').length;
+  const naGaps = fieldsEl.querySelectorAll('.field.is-gap.is-na').length;
+  const warned = [...fieldsEl.querySelectorAll('.field')]
+    .filter((el) => !el.classList.contains('is-gap') && !!el.querySelector('p.bpe-note.warn')).length;
+  const counted = parseInt($(doc, 'check-count').textContent, 10) || 0;
+  ok('there are fields that do not apply, and gaps that do',
+    naGaps > 0 && allGaps > naGaps, `allGaps=${allGaps} na=${naGaps}`);
+  ok('and the counter leaves the not-applicable ones out',
+    counted === allGaps - naGaps + warned,
+    `counted=${counted} expected=${allGaps - naGaps + warned} (gaps ${allGaps}, na ${naGaps}, warned ${warned})`);
+  // If it DID come up, typing into it works and it stops being not-applicable.
+  const pre = risks.querySelector('pre[contenteditable]');
+  pre.textContent = 'Nerve damage discussed after all.';
+  pre.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
+  await tick(20);
+  const text = await ctx.copy();
+  ok('and it can still be filled in by hand if it did come up',
+    /Nerve damage discussed after all\./.test(text), text.slice(0, 400));
+}
+
 function testStoresNothing() {
   section('Nothing is stored: the premise, mechanically');
   // Comments are stripped first: this file DISCUSSES browser storage at length,

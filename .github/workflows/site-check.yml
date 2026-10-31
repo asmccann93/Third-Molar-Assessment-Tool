@@ -178,7 +178,14 @@ jobs:
           # sends it, and whether Vercel's matcher decodes %-escapes or folds
           # case is not documented. Anything but 200 is fine here (404 is the
           # likely answer); a 200 means the gate can be walked round.
-          for p in "/%69mplant/" "/IMPLANT/" "/Implant/viewer.js" "/ai-notes/%61dmin/" "/ai-notes//admin/" "/%61i-notes/"; do
+          # A six-week-old copy of the AI Notes page sits at api/ai-notes/index.html
+          # (build 2026-09-17.1, last touched 27 September). Nothing references
+          # it and it is the only non-function file under api/. The middleware
+          # matcher covers /api/:path*, so it should be gated or absent — but
+          # nothing has ever checked, and a stale clinical tool that answers 200
+          # is a worse page than the live one: an older prompt, an older gate,
+          # and none of the record fields added since. Anything but 200 is fine.
+          for p in "/%69mplant/" "/IMPLANT/" "/Implant/viewer.js" "/ai-notes/%61dmin/" "/ai-notes//admin/" "/%61i-notes/" "/api/ai-notes/" "/api/ai-notes/index.html"; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE$p")
             if [ "$code" = "200" ]; then
               echo "FAIL  $p  200  - a gated page answers under another spelling. Treat as urgent."
