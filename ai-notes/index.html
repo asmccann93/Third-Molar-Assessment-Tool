@@ -1096,7 +1096,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-31.3';
+  var BUILD = '2026-10-31.4';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1197,7 +1197,16 @@ label.pmpr input { margin-top: 4px; }
     ['implant-surgery',    'Implant surgery'],
     ['emergency',          'Emergency'],
     ['treatment-plan',     'Treatment plan consult'],
-    ['sedation',           'Sedation']
+    ['sedation',           'Sedation'],
+    // 31 October 2026, at the clinician's request, once the tool was in real
+    // clinical use. A surgical practice had no type for the visit AFTER the
+    // surgery; bone grafting, sinus lifts and GBR were being recorded under
+    // implant surgery, which never asks about graft material, membrane or the
+    // sinus; and a lesion had no type at all, so the appointment where an
+    // urgent referral is decided was being written as an ordinary exam.
+    ['post-op',            'Post-op review'],
+    ['bone-graft',         'Bone graft / sinus lift'],
+    ['lesion',             'Lesion / pathology']
   ];
 
   /* Thirteen buttons in one flat row was a scan, not a glance (30 October
@@ -1209,8 +1218,10 @@ label.pmpr input { margin-top: 4px; }
      vanish from the screen with nothing to say so, which is why this is
      checked rather than trusted. */
   var TYPE_GROUPS = [
-    ['Assessment and planning', ['exam-recall', 'treatment-plan', 'implant-consult', 'denture-consult']],
-    ['Surgery',                 ['extraction-surgery', 'third-molar', 'implant-surgery', 'sedation']],
+    ['Assessment and planning', ['exam-recall', 'treatment-plan', 'implant-consult', 'denture-consult',
+                                 'lesion']],
+    ['Surgery',                 ['extraction-surgery', 'third-molar', 'implant-surgery', 'bone-graft',
+                                 'sedation', 'post-op']],
     ['Treatment',               ['restorative', 'endo', 'perio', 'denture-stage']],
     ['Urgent',                  ['emergency']]
   ];
@@ -1261,9 +1272,13 @@ label.pmpr input { margin-top: 4px; }
   // Where the clinician can tick that a full mouth PMPR was carried out.
   var PMPR_TYPES = ['exam-recall', 'perio'];
   var PMPR_LINE = 'Full mouth professional mechanical plaque removal (PMPR) carried out.';
+  /* denture-consult left this list on 31 October 2026, at the clinician's
+     word: no local anaesthetic is given at a consultation, and it was the only
+     consult type here — implant consult, treatment plan and exam/recall never
+     were. It was offering a table for something that does not happen. */
   var TREATMENT_TYPES = ['extraction-surgery', 'third-molar', 'implant-surgery', 'emergency',
                          'restorative', 'endo', 'perio', 'sedation',
-                         'denture-consult', 'denture-stage'];
+                         'denture-stage', 'post-op', 'bone-graft', 'lesion'];
   // Where the sedation block is OFFERED empty, to fill in by hand. Everywhere
   // else it appears only if something sedation-shaped was actually dictated —
   // sedation for oral surgery may well be filed under the surgery, not under
@@ -1281,7 +1296,12 @@ label.pmpr input { margin-top: 4px; }
      Offered here as one button rather than the full eleven-field form: most
      extractions are not sedated, and an empty form on every one of them is the
      clutter that teaches a clinician to scroll past. */
-  var SEDATION_OFFER_TYPES = ['extraction-surgery', 'third-molar', 'implant-surgery'];
+  /* bone-graft added 31 October 2026 — sinus lifts and guided bone
+     regeneration are done under IV sedation at this practice. The emergency
+     type was considered and REFUSED by the clinician: sedation requires a
+     pre-assessment, so offering it on an unplanned appointment would invite
+     exactly the thing that must not happen. */
+  var SEDATION_OFFER_TYPES = ['extraction-surgery', 'third-molar', 'implant-surgery', 'bone-graft'];
   /* ---- the structured blocks, placed by layout (26 October 2026) ----
      The BPE chart, the LA log, the sedation record and the implant log used to
      render after the last section, in a fixed order, in every template. So in
@@ -1433,6 +1453,14 @@ label.pmpr input { margin-top: 4px; }
     'treatment-plan':  'consent',
     'third-molar':     'consent',
     sedation:          'consent',
+    // A graft is consented like any other surgery.
+    'bone-graft':      'consent',
+    /* A post-op review and a lesion are both findings-led: what was seen, what
+       it is, what follows. SOAP puts the examination first and leads the
+       Assessment with the diagnosis list, which is the right way round for
+       both — and for a lesion the assessment IS the appointment. */
+    'post-op':         'soap',
+    lesion:            'soap',
     // A denture CONSULT is a consent discussion like any other, so it leads
     // with it. The construction stages are not, and are deliberately left off
     // this map so they open chronologically: the consent layout puts the
@@ -5248,7 +5276,11 @@ label.pmpr input { margin-top: 4px; }
   // appear only when the recording actually produced rows.
   // exam-recall added 28 October 2026: examining and then setting out the
   // course of treatment is the commonest place a numbered plan is written.
-  var ITEM_TYPES = ['exam-recall', 'treatment-plan', 'implant-consult', 'denture-consult', 'third-molar'];
+  // emergency and perio added 31 October 2026, at the clinician's word: an
+  // emergency almost always ends with a plan for another day, and a perio
+  // appointment sets out a course. Both had nowhere to put one.
+  var ITEM_TYPES = ['exam-recall', 'treatment-plan', 'implant-consult', 'denture-consult', 'third-molar',
+                    'emergency', 'perio', 'post-op', 'lesion'];
 
   function itemRows(note, key) {
     return note && Array.isArray(note[key]) ? note[key].filter(function (r) { return r && typeof r === 'object'; }) : [];

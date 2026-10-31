@@ -230,7 +230,7 @@ async function testConsentGate() {
   const typeBtns = () => [...types.querySelectorAll('button')];
   // Twelve since 26 October 2026: removable prosthodontics had no type, and
   // dentures existed in this tool only as an alternative inside the implant list.
-  ok('thirteen consult types offered, three of them oral surgery', typeBtns().length === 13, String(typeBtns().length));
+  ok('sixteen consult types offered', typeBtns().length === 16, String(typeBtns().length));
   ok('and dentures are two of them: the consult and the construction stages',
     ['Denture consult', 'Denture stage'].every((l) => typeBtns().some((b) => b.textContent === l)) &&
     !typeBtns().some((b) => b.textContent === 'Dentures'),
@@ -242,7 +242,7 @@ async function testConsentGate() {
   ok('offered in four named groups, with every type in one of them',
     [...types.querySelectorAll('.type-group')].length === 4 &&
     [...types.querySelectorAll('.type-group')].every((g) => !!g.querySelector('.type-group-label').textContent.trim()) &&
-    [...types.querySelectorAll('.type-group .type-row button')].length === 13,
+    [...types.querySelectorAll('.type-group .type-row button')].length === 16,
     [...types.querySelectorAll('.type-group-label')].map((l) => l.textContent).join('|'));
 
   /* By label, not index. types.children[4] had always meant one particular
@@ -1607,7 +1607,10 @@ async function testUrlSwitches() {
   {
     for (const [q, label] of [['third-molar', 'Third molar surgery'],
                               ['denture-stage', 'Denture stage'],
-                              ['sedation', 'Sedation']]) {
+                              ['sedation', 'Sedation'],
+                              ['post-op', 'Post-op review'],
+                              ['bone-graft', 'Bone graft / sinus lift'],
+                              ['lesion', 'Lesion / pathology']]) {
       const c = await boot({ search: '?type=' + q });
       const pressed = typeButtons(c.doc).filter((b2) => b2.getAttribute('aria-pressed') === 'true');
       ok('?type=' + q + ' selects exactly that one, wherever it now sits',
@@ -6707,7 +6710,7 @@ async function testDiagnosisItemised() {
     if (!$(c.doc, 'diagnoses-block')) missing.push(label);
   }
   ok('every consult type offers somewhere to record a diagnosis, dictation or not',
-    missing.length === 0 && types.length === 13, 'missing: ' + missing.join(', ') + ' of ' + types.length);
+    missing.length === 0 && types.length === 16, 'missing: ' + missing.join(', ') + ' of ' + types.length);
 
   // A row typed by hand claims nothing about where it came from.
   ctx = await runType(() => note27({ sources: {} }), { type: /Emergency/, dictate: false });
@@ -6865,10 +6868,37 @@ async function testItemisedTreatment() {
       at('options-block') > hAt('Assessment') && at('options-block') < hAt('Plan') && at('plan-items-block') > hAt('Plan'),
       JSON.stringify({ assess: hAt('Assessment'), opts: at('options-block'), plan: hAt('Plan'), items: at('plan-items-block') }));
   }
+  /* No anaesthetic is given at a consultation (31 October 2026). denture-consult
+     was the only consult type offering the LA table; implant consult, treatment
+     plan and exam/recall never did. */
+  for (const [re, label] of [[/^Denture consult/, 'denture consult'],
+                             [/^Implant consult/, 'implant consult'],
+                             [/^Treatment plan/, 'treatment plan']]) {
+    const c = await runType(() => note27({ sources: {} }), { type: re, dictate: true, turns: ITEM_TURNS() });
+    ok('a ' + label + ' offers no local anaesthetic table', !$(c.doc, 'la-block'));
+  }
+  {
+    const c = await runType(() => note27({ sources: {} }), { type: /^Denture stage/, dictate: true, turns: ITEM_TURNS() });
+    ok('but a denture stage does, being a treatment visit', !!$(c.doc, 'la-block'));
+  }
+
+  /* Perio and emergency were given the lists on 31 October 2026, at the
+     clinician's word: an emergency almost always ends with a plan for another
+     day, and a perio appointment sets out a course. This assertion used to say
+     perio was NOT offered them, which recorded the earlier decision correctly
+     — it is the decision that changed, not the behaviour that broke. */
   ctx = await runType(() => note27({ sources: {} }), { type: /^Perio/, dictate: true, turns: ITEM_TURNS() });
-  ok('a perio appointment is not offered them', !$(ctx.doc, 'plan-items-block') && !$(ctx.doc, 'options-block'));
+  ok('a perio appointment is offered them, empty, to fill in',
+    !!$(ctx.doc, 'plan-items-block') && !!$(ctx.doc, 'options-block'));
+  ctx = await runType(() => note27({ sources: {} }), { type: /^Emergency/, dictate: true, turns: ITEM_TURNS() });
+  ok('and so is an emergency, which usually ends with a plan for another day',
+    !!$(ctx.doc, 'plan-items-block') && !!$(ctx.doc, 'options-block'));
+  // A restorative visit still is not: nothing changed there.
+  ctx = await runType(() => note27({ sources: {} }), { type: /^Restorative/, dictate: true, turns: ITEM_TURNS() });
+  ok('a restorative appointment still is not offered them',
+    !$(ctx.doc, 'plan-items-block') && !$(ctx.doc, 'options-block'));
   ctx = await runType(NOTE, { type: /^Perio/, dictate: true, turns: ITEM_TURNS() });
-  ok('but shows them if the recording produced items', !!$(ctx.doc, 'plan-items-block'));
+  ok('and they show whatever the recording produced', !!$(ctx.doc, 'plan-items-block'));
 }
 
 /**

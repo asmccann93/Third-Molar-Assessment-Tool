@@ -154,6 +154,61 @@ export const CONSULT_TYPES = {
       'Expect discussion of the sedation technique, escort arrangements, pre- and ' +
       'post-operative instructions, and fitness to be sedated.',
   },
+
+  /* Added 31 October 2026, once the tool was in real clinical use and the
+     clinician asked for them. */
+  'post-op': {
+    label: 'Post-op review',
+    /* A review after surgery is a RECORD of healing, not a consent discussion,
+       so the consent fields are inapplicable rather than missing — the same
+       shape as a recall or a denture stage. The clinician re-consents at the
+       treatment appointment, and this is not one. If a complication DOES turn
+       into new treatment, the fields below still fill exactly as on any other
+       appointment; what this switches off is the demand for a gap when they
+       are empty. */
+    notApplicable: ['proposed', 'alternatives', 'risks', 'benefits', 'costs', 'patientFactors', 'decision'],
+    emphasis:
+      'A review after surgery. This is a RECORD of how the site has healed, not a consent discussion. ' +
+      'Expect: how the patient has been since, pain, swelling, bleeding or bad taste; what the socket or ' +
+      'surgical site looks like; whether sutures were removed or have gone; whether there is infection or ' +
+      'a dry socket and what was done about it; and ALTERED SENSATION of the lip, chin or tongue — if ' +
+      'numbness, tingling or altered feeling is mentioned at all, record it in the clinician\'s own words, ' +
+      'including that it has resolved or is improving where that is what was said. Record a dressing, an ' +
+      'irrigation or a suture removal as treatment carried out. ' +
+      'The consent fields are usually empty at a review and that is the normal shape of the appointment, ' +
+      'not something missing. But if a complication led to something new being proposed, weighed, priced ' +
+      'or decided, put it in its own field exactly as on any other appointment.',
+  },
+
+  'bone-graft': {
+    label: 'Bone graft / sinus lift',
+    emphasis:
+      'Bone grafting, guided bone regeneration or a sinus lift, with or without implants placed at the ' +
+      'same time. Expect the GRAFT MATERIAL as named — autogenous, xenograft, allograft, synthetic, a ' +
+      'brand name — and any MEMBRANE used, with fixation if stated. For a sinus lift, expect the approach ' +
+      '(lateral window or crestal) and whether the Schneiderian membrane was perforated and what was done. ' +
+      'Expect discussion of graft failure or resorption, infection, the need for a second procedure, and ' +
+      'that an implant may not be placeable afterwards. Record lot or batch numbers of graft material and ' +
+      'membrane exactly as said: they are traceability, and a number that was not said must never be ' +
+      'invented. Sedation is common for these at this practice; where it was given, the sedation record ' +
+      'applies as on any sedation appointment.',
+  },
+
+  lesion: {
+    label: 'Lesion / pathology',
+    emphasis:
+      'A soft tissue or bony lesion. The whole point of this appointment is WHAT WAS SEEN and WHAT WAS ' +
+      'DECIDED, so the examination and the diagnosis matter more here than anywhere else. Expect the site, ' +
+      'size, colour, surface, borders, whether it is firm or soft, fixed or mobile, ulcerated or ' +
+      'indurated; how long it has been there and whether it has changed; pain, numbness or difficulty ' +
+      'swallowing; and smoking and alcohol as risk factors. Expect what was done about it: photographs, a ' +
+      'review interval, a biopsy (incisional or excisional), or a REFERRAL — and if an urgent or ' +
+      'two-week-wait referral was made or discussed, that is the single most important thing in the ' +
+      'record and must be captured in the clinician\'s own words. ' +
+      'Record the provisional or working diagnosis ONLY as the clinician stated it. Never supply one, ' +
+      'never upgrade a description into a diagnosis, and never soften or sharpen what was said about what ' +
+      'it might be. If nothing was named, the diagnosis list is empty and the description stands alone.',
+  },
 };
 
 /* ------------------------------------------------------------------ *

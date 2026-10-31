@@ -430,6 +430,63 @@ Object.assign(CHECKLISTS, {
       { key: 'ds-next',     ask: 'The next stage, or a review, was arranged or offered, said or dictated.', gap: 'Not recorded: the next stage or a review.' },
     ]
   },
+
+  /* post-op, bone-graft and lesion DRAFTED 31 October 2026 at AM's request,
+     once the tool was in real clinical use. NOT YET REVIEWED. Every word is
+     the assistant's; each carries `reviewed: false` and the page says so.
+
+     post-op and lesion are RECORD-KEEPING lists: what a record of that visit
+     is expected to contain, said to the patient or dictated. bone-graft is a
+     consent list like the surgical ones.
+
+     Two items carry more weight than the rest and are first in their lists on
+     purpose. A post-op review is where ALTERED SENSATION after a lower
+     extraction is found or missed, and a lesion appointment is where an URGENT
+     REFERRAL is decided. If either list is wrong, those are the lines to get
+     right. */
+  'post-op': {
+    label: 'Post-op review',
+    reviewed: false,
+    items: [
+      { key: 'po-sensation', ask: 'Altered sensation of the lip, chin or tongue was asked about or reported — numbness, tingling, or that feeling is normal, improving or resolved. This may be said or dictated.', gap: 'Not recorded: altered sensation of the lip, chin or tongue.' },
+      { key: 'po-symptoms',  ask: 'How the patient has been since the surgery was recorded — pain, swelling, bleeding, bad taste or trismus, or that there were no problems. This may be said or dictated.', gap: 'Not recorded: how the patient has been since the surgery.' },
+      { key: 'po-site',      ask: 'The state of the socket or surgical site was recorded — healing, inflamed, infected, a dry socket, or healing normally. This may be said or dictated.', gap: 'Not recorded: the state of the socket or surgical site.' },
+      { key: 'po-sutures',   ask: 'Sutures were addressed — removed, still in place, resorbed, or none were placed. This may be said or dictated. If no sutures were placed, report it as not applicable.', gap: 'Not recorded, for a case with sutures: whether they were removed or remain.' },
+      { key: 'po-treatment', ask: 'Any treatment carried out at the review was recorded — irrigation, a dressing, a prescription, or that nothing was needed. This may be said or dictated.', gap: 'Not recorded: what was done at the review, or that nothing was needed.' },
+      { key: 'po-next',      ask: 'What happens next was recorded — discharge, a further review, or a referral. This may be said or dictated.', gap: 'Not recorded: discharge, further review or referral.' },
+    ]
+  },
+
+  'bone-graft': {
+    label: 'Bone graft / sinus lift',
+    reviewed: false,
+    items: [
+      { key: 'bg-material',  ask: 'The graft material was named — autogenous, xenograft, allograft, synthetic, or a brand name. This may be said or dictated.', gap: 'Not recorded: the graft material used.' },
+      { key: 'bg-membrane',  ask: 'Whether a membrane was used, and which, was recorded — or that none was used. This may be said or dictated.', gap: 'Not recorded: whether a membrane was used.' },
+      { key: 'bg-sinus',     ask: 'For a sinus lift, the approach was recorded (lateral window or crestal) and whether the Schneiderian membrane was perforated, with what was done about it. This may be said or dictated. If this was not a sinus procedure, report it as not applicable.', gap: 'Not recorded, for a sinus lift: the approach and whether the membrane was perforated.' },
+      { key: 'bg-failure',   ask: 'The clinician mentioned that the graft may fail, resorb or become infected.', gap: 'Not mentioned: the graft may fail, resorb or become infected.' },
+      { key: 'bg-second',    ask: 'The clinician mentioned that a further procedure may be needed, or that an implant may not be placeable afterwards.', gap: 'Not mentioned: a further procedure may be needed, or an implant may not be possible.' },
+      { key: 'bg-swelling',  ask: 'The clinician told the patient to expect pain, swelling or bruising afterwards.', gap: 'Not mentioned: post-operative pain and swelling.' },
+      { key: 'bg-aftercare', ask: 'Post-operative instructions were given or promised, including when to seek help. For a sinus procedure, nose-blowing or sneezing precautions count here.', gap: 'Not mentioned: post-operative instructions or when to seek help.' },
+      { key: 'bg-alt',       ask: 'An alternative was offered or its absence explained — a shorter implant, a different site, a denture or bridge, or doing nothing.', gap: 'Not offered: an alternative to grafting (or why there is none).' },
+      MH.antiresorptives, MH.smoking, MH.diabetes, MH.allergies,
+    ]
+  },
+
+  lesion: {
+    label: 'Lesion / pathology',
+    reviewed: false,
+    items: [
+      { key: 'le-referral',  ask: 'What is to happen about the lesion was recorded — an urgent or two-week-wait referral, a routine referral, a biopsy, a review interval, or a decision that nothing is needed. This may be said or dictated.', gap: 'Not recorded: referral, biopsy, review or no action.' },
+      { key: 'le-site',      ask: 'The site of the lesion was recorded. This may be said or dictated.', gap: 'Not recorded: the site of the lesion.' },
+      { key: 'le-describe',  ask: 'The lesion was described — size, colour, surface, borders, or whether it is firm, fixed, ulcerated or indurated. This may be said or dictated.', gap: 'Not recorded: a description of the lesion.' },
+      { key: 'le-duration',  ask: 'How long the lesion has been present, or whether it has changed, was recorded. This may be said or dictated.', gap: 'Not recorded: how long it has been there or whether it has changed.' },
+      { key: 'le-symptoms',  ask: 'Symptoms were asked about or recorded — pain, numbness, bleeding, difficulty swallowing, or that it is symptomless. This may be said or dictated.', gap: 'Not recorded: symptoms, or that the lesion is symptomless.' },
+      { key: 'le-risk',      ask: 'Smoking or other tobacco use, and alcohol, were asked about or recorded. This may be said or dictated.', gap: 'Not recorded: smoking and alcohol.' },
+      { key: 'le-told',      ask: 'What the patient was told about the lesion, and about what happens next, was recorded. This may be said or dictated.', gap: 'Not recorded: what the patient was told.' },
+      { key: 'le-photo',     ask: 'A clinical photograph was taken or offered, or a reason given for not taking one. This may be said or dictated.', gap: 'Not recorded: a clinical photograph, or why none was taken.' },
+    ]
+  },
 });
 
 /** A checklist nobody has reviewed yet. The page says so beneath the list. */

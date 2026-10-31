@@ -3117,7 +3117,9 @@ async function testSept27b() {
   ok('every consult type now has a checklist', types.every((t) => cl.checklistFor(t).length > 0), types.filter((t) => !cl.checklistFor(t).length).join());
   // The six drafted on 27 September, plus dentures on 26 October 2026.
   const NEW = ['exam-recall', 'emergency', 'perio', 'restorative', 'endo', 'treatment-plan',
-               'denture-consult', 'denture-stage'];
+               'denture-consult', 'denture-stage',
+               // Drafted 31 October 2026, once the tool was in real use.
+               'post-op', 'bone-graft', 'lesion'];
   ok('the unreviewed ones are marked as drafts, the reviewed ones are not',
     NEW.every((t) => cl.checklistIsDraft(t)) && types.filter((t) => !NEW.includes(t)).every((t) => !cl.checklistIsDraft(t)),
     JSON.stringify({ draftsExpected: NEW.filter((t) => !cl.checklistIsDraft(t)),
