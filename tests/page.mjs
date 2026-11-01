@@ -1802,7 +1802,7 @@ async function testDerivedButtonsRecoverForTheNextPatient() {
     }
   });
   const { doc, win } = ctx;
-  const record = async () => { click($(doc, 'start')); await tick(60); click($(doc, 'stop')); await tick(300); };
+  const record = async () => { click($(doc, 'start')); await tick(60); click($(doc, 'stop')); await settle(doc); };
   $(doc, 'consent').checked = true;
   $(doc, 'consent').dispatchEvent(new win.Event('change', { bubbles: true }));
   click(typeButtons(doc).find((b) => /Third molar/.test(b.textContent)));
@@ -5060,7 +5060,7 @@ async function testDictationIsNotProofOfConversation() {
   armStart(doc, ctx.win); await tick();
   click($(doc, 'start')); await tick(60);
   click($(doc, 'dictate')); await tick(20);
-  click($(doc, 'stop')); await tick(300);
+  click($(doc, 'stop')); await settle(doc);
   const risks = [...doc.querySelectorAll('#fields .field')].find((x) => x.dataset.key === 'risks');
   click(risks.querySelector('.src-toggle'));
   ok('a risk found only in dictation is not counted as said to the patient',
@@ -5085,7 +5085,7 @@ async function testNothingOverAHeldExtraRecording() {
   const { doc } = ctx;
   await toDraft(ctx);
   failNext = true;
-  click($(doc, 'add-part')); await tick(80); click($(doc, 'stop')); await tick(300);
+  click($(doc, 'add-part')); await tick(80); click($(doc, 'stop')); await settle(doc);
   ok('"Record more" is not offered while one is waiting', $(doc, 'add-part').classList.contains('hidden'));
   const n = bodies.length;
   click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')].find((b) => b.dataset.length === 'full'));
@@ -5113,7 +5113,7 @@ async function testSpeakerConfirmationIsPerRecording() {
   await toDraft(ctx);
   click($(doc, 'swap-speakers')); await tick(300);
   ok('a swap in a single recording is confirmed', /confirmed by you$/.test($(doc, 'speaker-map').querySelector('h2').textContent));
-  click($(doc, 'add-part')); await tick(80); click($(doc, 'stop')); await tick(300);
+  click($(doc, 'add-part')); await tick(80); click($(doc, 'stop')); await settle(doc);
   const mb = bodies[bodies.length - 1];
   ok('the next recording is sent with only the first recording\'s labels confirmed',
     mb.speakerRoles && Object.keys(mb.speakerRoles).sort().join() === 'S1,S2', JSON.stringify(mb.speakerRoles));
@@ -5179,8 +5179,8 @@ async function testATurnAcrossDictationOrAPauseIsCut() {
     click($(doc, 'pause')); await tick(20);
     offset += 5000;
     click($(doc, dictate ? 'dictate' : 'pause')); await tick(20);
-    click($(doc, 'stop')); await tick(300);
-    for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+    click($(doc, 'stop'));
+    await settle(doc);
     return doc;
   };
   let doc = await run(true);
@@ -5436,8 +5436,8 @@ async function testBpe() {
   armStart(doc, win, /Exam/);
   await tick();
   click($(doc, 'start')); await tick(60);
-  click($(doc, 'stop')); await tick(300);
-  for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+  click($(doc, 'stop'));
+  await settle(doc);
   ok('an exam with no BPE heard shows an empty chart', !!$(doc, 'bpe-block') && /No BPE scores came back/.test($(doc, 'bpe-block').textContent) &&
     ['UR', 'LL'].every((s) => sel(doc, s).value === ''));
   click($(doc, 'copy-all'));
@@ -5613,8 +5613,8 @@ async function testTreatmentToday() {
     offset += 5000;
     if (dictate) { click($(doc, 'dictate')); await tick(20); }
     offset += 5000;
-    click($(doc, 'stop')); await tick(300);
-    for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+    click($(doc, 'stop'));
+    await settle(doc);
     return ctx;
   };
   let { doc, win } = await run();
@@ -5759,8 +5759,8 @@ async function runType(onNote, { type = /Third molar/, dictate = false, turns = 
   offset += 5000;
   if (dictate) { click($(doc, 'dictate')); await tick(20); }
   offset += 5000;
-  click($(doc, 'stop')); await tick(300);
-  for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+  click($(doc, 'stop'));
+  await settle(doc);
   /* Wait for the clipboard to actually receive a NEW write, rather than
      sleeping 20 ms and returning whatever was there. Under load the write had
      not always landed, so copy() returned '' or the PREVIOUS copy — and twenty
@@ -6897,6 +6897,14 @@ async function testItemisedTreatment() {
   ctx = await runType(() => note27({ sources: {} }), { type: /^Restorative/, dictate: true, turns: ITEM_TURNS() });
   ok('a restorative appointment still is not offered them',
     !$(ctx.doc, 'plan-items-block') && !$(ctx.doc, 'options-block'));
+  /* A post-op review may well PROPOSE something — a complication needs
+     treating — but it does not weigh options against each other, which is
+     what that table is for. The two lists were gated together until
+     1 November 2026. */
+  ctx = await runType(() => note27({ sources: {} }), { type: /^Post-op/, dictate: true, turns: ITEM_TURNS() });
+  ok('a post-op review offers the proposed treatment but not the options',
+    !!$(ctx.doc, 'plan-items-block') && !$(ctx.doc, 'options-block'),
+    (!!$(ctx.doc, 'plan-items-block')) + '/' + (!!$(ctx.doc, 'options-block')));
   ctx = await runType(NOTE, { type: /^Perio/, dictate: true, turns: ITEM_TURNS() });
   ok('and they show whatever the recording produced', !!$(ctx.doc, 'plan-items-block'));
 }
@@ -7282,8 +7290,8 @@ async function testPmpr() {
   click($(doc, 'clear'));
   await tick(30);
   armStart(doc, win, /Exam/); await tick();
-  click($(doc, 'start')); await tick(60); click($(doc, 'stop')); await tick(300);
-  for (let i = 0; i < 30 && !$(doc, 'working').classList.contains('hidden'); i++) await tick(100);
+  click($(doc, 'start')); await tick(60); click($(doc, 'stop'));
+  await settle(doc);
   ok('the next patient starts unticked', $(doc, 'pmpr') && !$(doc, 'pmpr').checked);
 
   ctx = await runType(() => note27({ treatmentToday: 'Root surface debridement UR and UL.' }), { type: /Perio/, dictate: true });

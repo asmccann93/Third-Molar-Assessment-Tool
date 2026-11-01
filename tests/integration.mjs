@@ -3315,6 +3315,28 @@ async function testSept27b() {
       /Proposed, itemised \(dictated\):\n1\. Tooth \/ site UL4, Crown/.test(n2.plan || '') &&
       !/UL4/.test(n2.proposed || ''), n2.plan);
 
+    /* ---- the guidance each type gives the model (1 November 2026) ---- */
+    section('No consult type is left with one line of guidance');
+    {
+      const thin = Object.entries(pm.CONSULT_TYPES)
+        .filter(([, v]) => (v.emphasis || '').length < 400)
+        .map(([k, v]) => k + '=' + (v.emphasis || '').length);
+      /* Eight types still carried their September one-liner on 1 November 2026,
+         and the thinnest of all (sedation, 130 characters) owned the most
+         structured output in the tool. A type with no steering drafts from the
+         field names alone. */
+      ok('every type carries more than a single sentence', thin.length === 0, thin.join(', '));
+      const sed = pm.CONSULT_TYPES.sedation.emphasis;
+      ok('and sedation, which owns the sedation record, says doses are never supplied',
+        /never supply one that was/.test(sed) && /escort by relationship only, never by name/.test(sed), sed.slice(0, 120));
+      ok('the surgical extraction guidance still refuses to generalise a risk',
+        /DO NOT GENERALISE/.test(pm.CONSULT_TYPES['extraction-surgery'].emphasis));
+      ok('and implant surgery names the lot number as traceability',
+        /LOT NUMBER/.test(pm.CONSULT_TYPES['implant-surgery'].emphasis));
+      ok('a restorative visit is told the consent fields are not optional there',
+        /re-consents at the treatment appointment/.test(pm.CONSULT_TYPES.restorative.emphasis));
+    }
+
     /* ---- which fields do not apply (31 October 2026) ---- */
     section('The server tells the page which fields do not apply');
     {

@@ -1096,7 +1096,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-10-31.4';
+  var BUILD = '2026-11-01.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1358,7 +1358,7 @@ label.pmpr input { margin-top: 4px; }
     // so a block-level tag would be wrong on half of them.
     '@options': {
       label: 'Options offered',
-      has: function (note) { return itemAny(note, 'optionsOffered') || ITEM_TYPES.indexOf(S.consultType) !== -1; },
+      has: function (note) { return itemAny(note, 'optionsOffered') || OPTION_TYPES.indexOf(S.consultType) !== -1; },
       render: function (note, host) { renderItemList(note, host, ITEM_LISTS.optionsOffered); },
       text: function (note) { return itemListAsText(note, ITEM_LISTS.optionsOffered); }
     },
@@ -5260,6 +5260,8 @@ label.pmpr input { margin-top: 4px; }
       heading: 'Options offered', copyHead: 'Options offered',
       cols: [['forWhat', 'For'], ['option', 'Option'], ['notes', 'Notes']],
       main: 'option',
+      // Everywhere the proposed list is offered, except a post-op review.
+      types: function () { return OPTION_TYPES; },
       addFirst: 'Add an option', addMore: 'Add another option',
       empty: 'No options came back from the recording. If you offered more than one course, add them here.'
     },
@@ -5281,6 +5283,12 @@ label.pmpr input { margin-top: 4px; }
   // appointment sets out a course. Both had nowhere to put one.
   var ITEM_TYPES = ['exam-recall', 'treatment-plan', 'implant-consult', 'denture-consult', 'third-molar',
                     'emergency', 'perio', 'post-op', 'lesion'];
+  /* The two lists were gated together until 1 November 2026, which put an
+     "Options offered" table on a post-op review. A review that finds a
+     complication may well PROPOSE something; it does not weigh options against
+     each other, which is what that table is for. The proposed-treatment list
+     stays. */
+  var OPTION_TYPES = ITEM_TYPES.filter(function (t) { return t !== 'post-op'; });
 
   function itemRows(note, key) {
     return note && Array.isArray(note[key]) ? note[key].filter(function (r) { return r && typeof r === 'object'; }) : [];
@@ -5362,7 +5370,8 @@ label.pmpr input { margin-top: 4px; }
   function renderItemList(note, host, spec) {
     var cols = spec.cols, key = spec.key;
     var rows = itemRows(note, key);
-    var offer = spec.always || ITEM_TYPES.indexOf(S.consultType) !== -1;
+    var offer = spec.always ||
+                (spec.types ? spec.types() : ITEM_TYPES).indexOf(S.consultType) !== -1;
     if (!rows.length && !offer) return;
 
     var edited = itemListEdited(key, cols);

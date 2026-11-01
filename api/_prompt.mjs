@@ -50,9 +50,14 @@ export const CONSULT_TYPES = {
   'implant-surgery': {
     label: 'Implant surgery',
     emphasis:
-      'The surgical appointment. The conversation is usually brief: re-confirming ' +
-      'consent, post-operative instructions, review. The substance is DICTATED by ' +
-      'the clinician afterwards — the implant log in particular.',
+      'The surgical appointment. The conversation is usually brief — re-confirming consent, ' +
+      'post-operative instructions, review — and the substance is DICTATED by the clinician ' +
+      'afterwards. The implant log in particular: system, diameter, length and LOT NUMBER per ' +
+      'implant, and which site each went into. Those numbers are traceability and a device-safety ' +
+      'notice turns on them, so take every one exactly as said and never infer, complete or tidy ' +
+      'one. Expect also the flap, any bone removed or grafted, primary stability or insertion ' +
+      'torque, a cover screw or healing abutment, sutures, and whether the implant was buried or ' +
+      'left exposed. Expect the post-operative instructions and the review arrangement.',
   },
   'exam-recall': {
     label: 'Exam / recall',
@@ -77,8 +82,15 @@ export const CONSULT_TYPES = {
   restorative: {
     label: 'Restorative',
     emphasis:
-      'Expect discussion of restoration options, materials, longevity expectations, ' +
-      'and the possibility of future endodontic treatment or extraction.',
+      'A restorative appointment, which at this practice is usually treatment being CARRIED OUT ' +
+      'rather than planned. Expect the material used, the tooth and the surfaces, and what was ' +
+      'found on removing the old restoration or the caries — including proximity to the pulp, a ' +
+      'pulp exposure, or a lining placed. Expect discussion of how long it may last, that it may ' +
+      'need redoing, sensitivity afterwards, and that the tooth may still need root canal treatment ' +
+      'or extraction later. ' +
+      'The clinician re-consents at the treatment appointment, so the consent fields apply here ' +
+      'exactly as on a consultation and are not optional. Never infer the material, the surfaces or ' +
+      'the shade: take them as said.',
   },
   'denture-consult': {
     label: 'Denture consult',
@@ -121,38 +133,79 @@ export const CONSULT_TYPES = {
   perio: {
     label: 'Perio',
     emphasis:
-      'Expect discussion of diagnosis, oral hygiene, smoking, the role of the patient ' +
-      'in the outcome, and that treatment stabilises rather than cures.',
+      'A periodontal appointment. Expect the diagnosis in the words used, what was done — scaling, ' +
+      'root surface debridement, which sextants or teeth, under what anaesthetic — and the oral ' +
+      'hygiene instruction given, in detail, because that instruction IS the treatment as much as ' +
+      'the instrumentation. Expect smoking and diabetes where they were raised, that the outcome ' +
+      'depends substantially on the patient, that treatment stabilises rather than cures, and that ' +
+      'teeth may still be lost. Expect a re-evaluation interval and a maintenance interval. ' +
+      'Take BPE codes or pocket depths ONLY as stated, and never work one out from anything else.',
   },
   endo: {
     label: 'Endo',
     emphasis:
-      'Expect discussion of success rates, number of visits, the alternative of ' +
-      'extraction, and the need for a definitive restoration afterwards.',
+      'Root canal treatment. Expect discussion of the chance of success and that it is not certain, ' +
+      'how many visits are likely, pain or a flare-up between visits, the alternative of extraction, ' +
+      'and that a definitive restoration — often a crown — is needed afterwards or the tooth may ' +
+      'fracture. Expect mention of a file separating, a perforation, or the tooth proving ' +
+      'untreatable, where those were raised. ' +
+      'Capture which tooth, which canals and what was done ONLY as stated. Never infer a working ' +
+      'length, a number of canals or a stage reached from the fact that endodontic treatment ' +
+      'happened.',
   },
   'extraction-surgery': {
     label: 'Extraction / surgery',
     emphasis:
-      'Expect discussion of specific surgical risks, post-operative course, and ' +
-      'aftercare. Capture exactly which risks the clinician named — do not generalise.',
+      'A surgical extraction. Expect which tooth, the approach — a flap, bone removal, sectioning, ' +
+      'sutures — and what was found. Expect the specific risks the clinician named: pain, swelling ' +
+      'and bruising, bleeding, infection or dry socket, damage to adjacent teeth or restorations, a ' +
+      'root fracturing or being left, and for a lower tooth altered sensation of the lip, chin or ' +
+      'tongue, or for an upper back tooth the sinus. Expect the post-operative course and the ' +
+      'aftercare given, including when to seek help. ' +
+      'CAPTURE EXACTLY WHICH RISKS WERE NAMED AND DO NOT GENERALISE. A risk the clinician did not ' +
+      'mention must not appear because it usually would, and a risk named for one tooth must not be ' +
+      'written as though it were named for another.',
   },
   emergency: {
     label: 'Emergency',
     emphasis:
-      'Expect a focused history, immediate management, and a plan for definitive ' +
-      'treatment. The discussion may be short and the record correspondingly thin.',
+      'An unplanned appointment for a problem. Expect a focused history — where the pain is, how ' +
+      'long it has been there, what makes it worse, whether it wakes them, whether there is ' +
+      'swelling — and the examination of the problem area. Expect what was done TODAY as immediate ' +
+      'management (a dressing, an extirpation, drainage, an extraction, a prescription) and, ' +
+      'separately, the plan for definitive treatment another day. Expect any red flag that was ' +
+      'raised: spreading swelling, difficulty swallowing or breathing, the eye closing, systemic ' +
+      'upset, trismus. ' +
+      'If an antibiotic or an analgesic was prescribed, take the drug, dose and duration exactly as ' +
+      'said and never supply one. The discussion may be short and the record correspondingly thin; ' +
+      'that is the shape of the appointment, not something missing.',
   },
   'treatment-plan': {
     label: 'Treatment plan consult',
     emphasis:
-      'Expect several options compared, sequencing, costs, and time to consider. ' +
-      'Alternatives and costs are usually the substance of this appointment.',
+      'A planning appointment, where the whole point is what was offered and what was chosen. ' +
+      'Alternatives and costs are usually the SUBSTANCE here, not an afterthought: expect several ' +
+      'courses compared, what each involves, what each costs, what happens if nothing is done, the ' +
+      'order treatment would be carried out in, and how long it would take. Expect time to think it ' +
+      'over to be offered, and a written estimate or plan to be given or promised. ' +
+      'Every figure of money belongs in costs, however it arose. A course the clinician advised ' +
+      'AGAINST is still an alternative that was offered: record it, with what was said about it.',
   },
   sedation: {
     label: 'Sedation',
     emphasis:
-      'Expect discussion of the sedation technique, escort arrangements, pre- and ' +
-      'post-operative instructions, and fitness to be sedated.',
+      'The sedation appointment itself. This type carries the SEDATION RECORD, the most structured ' +
+      'output in this tool, so what was said about the episode matters more here than anywhere ' +
+      'else. Expect the technique and the agent, the cannula site, doses given and when, how the ' +
+      'patient responded, oxygen and monitoring, any reversal agent, recovery, the discharge ' +
+      'criteria met, and that a responsible escort was present and took them home. Expect the ' +
+      'pre-operative checks too — fasting as instructed, fitness on the day, escort arrangements ' +
+      'confirmed — and the post-operative instructions given. ' +
+      'Take every drug, dose, time and observation EXACTLY as said and never supply one that was ' +
+      'not: a dose nobody stated is the most dangerous thing this note could contain. Record the ' +
+      'escort by relationship only, never by name. Consent for sedation is normally taken at the ' +
+      'pre-assessment rather than here, so the consent fields may be thin — but if anything was ' +
+      'proposed, weighed, priced or decided on the day, put it in its own field as usual.',
   },
 
   /* Added 31 October 2026, once the tool was in real clinical use and the
