@@ -3519,6 +3519,18 @@ async function testSept27b() {
     types.flatMap((t) => cl.checklistFor(t)).filter((i) => !/^Not [a-z ]{1,30}?(, for [^:]{1,40})?: /.test(i.gap)).map((i) => i.gap).join(' | '));
   ok('a "Not recorded" item says it may be dictated', types.every((t) => cl.checklistFor(t).filter((i) => /^Not recorded/.test(i.gap)).every((i) => /said or dictated/.test(i.ask))),
     types.flatMap((t) => cl.checklistFor(t)).filter((i) => /^Not recorded/.test(i.gap) && !/said or dictated/.test(i.ask)).map((i) => i.key).join());
+  /* The item is shown on screen WHILE recording, with its lead-in stripped and
+     any condition moved into brackets — so it has to stand on its own. One
+     post-op item read "Whether they were removed or remain": the sutures it
+     referred to were only ever in the lead-in that gets taken off, leaving a
+     pronoun with nothing to point at, mid-appointment. */
+  const DANGLER = /^(whether )?(they|it|them|those|these)\b/i;
+  /* `.topic`, not `.text`. The first version of this assertion read a property
+     that does not exist, so every topic came back as '' and the regex matched
+     nothing: it could not fail. */
+  ok('every checklist topic stands alone, without a pronoun left dangling',
+    types.every((t) => cl.checklistTopics(t).every((i) => i.topic && !DANGLER.test(i.topic))),
+    types.flatMap((t) => cl.checklistTopics(t)).filter((i) => !i.topic || DANGLER.test(i.topic)).map((i) => i.key + ': ' + i.topic).join(' | '));
   ok('no checklist item carries a figure', types.every((t) => cl.checklistFor(t).every((i) => !/\d\s*%|\d+\s*(in|out of)\s*\d/.test(i.ask + i.gap))));
   const recallSys = pm.buildSystemPrompt('exam-recall', 'standard');
   ok('the recall prompt now carries its record-keeping list', /"rk-softtissue":/.test(recallSys) && /"rk-recall":/.test(recallSys));
