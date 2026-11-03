@@ -323,6 +323,24 @@ export const LA_LOG_FIELDS = ['agent', 'strength', 'amount', 'technique', 'site'
  * Nothing here replaces `proposed`, `alternatives` or `plan`. Those remain the
  * prose record of the discussion; these are the itemised form of it.
  */
+/* The structured blocks, by the key a layout uses to place them (3 November
+   2026). The blocks themselves live in the page — they are rendering, and the
+   server neither builds nor reads one. What the server needs is the NAMES, so
+   it can refuse to store a layout mentioning a block that does not exist.
+
+   MIRRORS `BLOCKS` IN ai-notes/index.html. Keep them in step: the page suite
+   fails if they drift, because a block missing from this list could not be
+   placed in a saved layout, and a name here that the page does not know would
+   be stored and then silently ignored. */
+export const BLOCK_KEYS = ['@bpe', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'];
+
+/* Every key a layout may place: the prose fields, the dictated fields, and the
+   blocks. The order is the order a repaired layout appends in, so it is the
+   extraction order rather than any one layout's. */
+export function layoutKeys() {
+  return FIELDS.map((f) => f[0]).concat(DICTATED_FIELDS.map((f) => f[0])).concat(BLOCK_KEYS);
+}
+
 export const DIAG_ITEM_FIELDS = ['tooth', 'diagnosis', 'notes'];
 export const PLAN_ITEM_FIELDS = ['tooth', 'treatment', 'notes'];
 export const OPTION_ITEM_FIELDS = ['forWhat', 'option', 'notes'];

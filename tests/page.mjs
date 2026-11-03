@@ -1596,11 +1596,15 @@ async function testUrlSwitches() {
   // selects nothing. The window was 900 characters and the per-type default
   // layout (26 October 2026) pushed the loop body past it; widened rather than
   // loosened, because what is being pinned is the comparison, not its distance.
-  // The loop became ORDERED_TYPES on 30 October 2026, when the buttons were
-  // grouped: same list, built in group order. What is pinned is unchanged —
-  // the ?type= click sits inside it and compares against pair[0].
+  /* The loop became ORDERED_TYPES on 30 October 2026, when the buttons were
+     grouped: same list, built in group order. What is pinned is unchanged —
+     the ?type= click sits inside it and compares against pair[0]. The window
+     has now been widened twice (900 -> 1400 -> 2000) as the loop body grew;
+     widened rather than loosened each time, because the guarantee is the
+     COMPARISON, not how far down the body it sits. If it ever needs widening
+     again, widen it again. */
   ok('validated against the real list rather than trusted',
-    /ORDERED_TYPES\.forEach[\s\S]{0,1400}PARAMS\.get\('type'\) === pair\[0\]/.test(src));
+    /ORDERED_TYPES\.forEach[\s\S]{0,2000}PARAMS\.get\('type'\) === pair\[0\]/.test(src));
   /* Behaviourally, not just in the source. ?type= is how a surgery lands
      straight on the right clinic, and the list it walks was reordered and
      regrouped on 30 October with nothing exercising the deep link at all. */
@@ -3285,6 +3289,7 @@ await testSedationRecord();
 await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
 await testReviewAids();
+await testMyLayouts();
 await testNotApplicableIsNotMissing();
 testStoresNothing();
 await testFriendlier();
@@ -6257,6 +6262,129 @@ async function testReviewAids() {
    so the claim was corrected and the assertion written. It belongs here rather
    than in a document: a sentence in a DPIA cannot fail a build. */
 /* A recall does not discuss risks (31 October 2026). */
+/* A clinician's own layout, saved on their account (3 November 2026).
+
+   The assertion this whole feature turns on is the repair one: a layout is a
+   snapshot of the fields that existed when it was saved, and this tool gained
+   three blocks in the week before it was built. A field must never disappear
+   from a clinical note because of an arrangement chosen last month. */
+async function testMyLayouts() {
+  section('A layout saved on the account, and what happens when the tool moves on');
+
+  const LAYOUT = {
+    'exam-recall': { sections: [
+      ['What I found', [['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
+      ['Everything else', [
+        ['reasonForAttendance', false], ['medicalHistory', false], ['proposed', false],
+        ['alternatives', false], ['risks', false], ['benefits', false], ['costs', false],
+        ['patientQuestions', false], ['patientFactors', false], ['informationGiven', false],
+        ['decision', false], ['nextStep', false], ['treatmentToday', true], ['plan', true],
+        ['@la', false], ['@sedation', false], ['@implant', false], ['@options', false],
+        ['@planitems', false], ['@diagnoses', false]
+      ]]
+    ] }
+  };
+  const withLayouts = (layouts) => ({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/auth') && e.method === 'GET') {
+        return json200({ authenticated: true, who: 'AM', admin: false, expiresIn: 40000, layouts });
+      }
+      return null;
+    }
+  });
+
+  let ctx = await boot(withLayouts(LAYOUT));
+  let { doc } = ctx;
+  const labels = () => [...$(doc, 'template-picker').querySelectorAll('button')].map((b) => b.textContent);
+  await waitFor(() => labels().length >= 3, 'the picker to be built');
+  ok('the built-in three are still there', labels().slice(0, 3).join('|') === 'Clinical|Consent|SOAP', labels().join('|'));
+
+  /* It is per consult type, and no type is selected at boot — so the fourth
+     button appears only once the exam is chosen, not before. */
+  click(typeButtons(doc).find((b) => /^Exam/.test(b.textContent)));
+  await waitFor(() => labels().length > 3, 'the saved layout for the exam');
+  ok('and the clinician\'s own appears on the type they saved it for',
+    labels().includes('Mine'), labels().join('|'));
+  click(typeButtons(doc).find((b) => /^Third molar/.test(b.textContent)));
+  await tick(30);
+  ok('but not on a type they did not', !labels().includes('Mine'), labels().join('|'));
+
+  // Selecting it lays the note out that way.
+  click(typeButtons(doc).find((b) => /^Exam/.test(b.textContent)));
+  await tick(30);
+  click([...$(doc, 'template-picker').querySelectorAll('button')].find((b) => b.textContent === 'Mine'));
+  await tick(20);
+  ok('choosing it selects it', $(doc, 'template-picker').querySelector('button.on').textContent === 'Mine');
+
+  /* THE ONE THAT MATTERS. A layout saved before the diagnosis list existed.
+     Every other key is present; @diagnoses is not, exactly as a real October
+     layout would be. It must still reach the note. */
+  const OLD = { 'exam-recall': { sections: JSON.parse(JSON.stringify(LAYOUT['exam-recall'].sections)) } };
+  OLD['exam-recall'].sections[1][1] = OLD['exam-recall'].sections[1][1].filter((e) => e[0] !== '@diagnoses');
+  ctx = await boot(withLayouts(OLD));
+  doc = ctx.doc;
+  await waitFor(() => [...$(doc, 'template-picker').querySelectorAll('button')].length > 0, 'the picker');
+  const src = html;
+  const hint = () => $(doc, 'template-hint').textContent;
+  click(typeButtons(doc).find((b) => /^Exam/.test(b.textContent)));
+  await waitFor(() => [...$(doc, 'template-picker').querySelectorAll('button')].some((b) => b.textContent === 'Mine'),
+    'the saved layout');
+  click([...$(doc, 'template-picker').querySelectorAll('button')].find((b) => b.textContent === 'Mine'));
+  await tick(20);
+  ok('the clinician is told a field was added since they saved it',
+    /field has been added since you saved it/.test(hint()), hint());
+
+  /* Behaviourally, not from the source text. The first version of this
+     checked that the string "Added since you saved this" appears in the page
+     and that the hint mentions a count — and BOTH survived deleting the
+     append, because the literal is still in the source and the count is taken
+     before the push. What has to be true is that the field reaches the NOTE. */
+  const drafted = await boot({ onFetch: async (e, o) => {
+    if (e.url.includes('/api/auth') && e.method === 'GET') {
+      return json200({ authenticated: true, who: 'AM', admin: false, expiresIn: 40000, layouts: OLD });
+    }
+    if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns: DEFAULT_TURNS });
+    if (e.url.includes('/api/extract')) return json200({ status: 'done', note: note27({ sources: {} }) });
+    return null;
+  } });
+  armStart(drafted.doc, drafted.win, /^Exam/);
+  await waitFor(() => [...$(drafted.doc, 'template-picker').querySelectorAll('button')].some((b) => b.textContent === 'Mine'),
+    'the saved layout on the draft page');
+  click([...$(drafted.doc, 'template-picker').querySelectorAll('button')].find((b) => b.textContent === 'Mine'));
+  click($(drafted.doc, 'start'));
+  await tick(60);
+  click($(drafted.doc, 'stop'));
+  await settle(drafted.doc);
+  ok('and the field it never heard of is ON SCREEN, in the note it lays out',
+    !!$(drafted.doc, 'diagnoses-block'),
+    [...$(drafted.doc, 'fields').children].map((e) => e.id || e.dataset.key || '?').join(','));
+  ok('with every other field still placed exactly once',
+    [...$(drafted.doc, 'fields').querySelectorAll('.field[data-key]')]
+      .map((e) => e.dataset.key).length === new Set([...$(drafted.doc, 'fields').querySelectorAll('.field[data-key]')]
+      .map((e) => e.dataset.key)).size);
+
+  // A layout naming a field that no longer exists does not break the picker.
+  const JUNK = { 'exam-recall': { sections: [['Mess', [['noSuchField', false], ['risks', false]]]] } };
+  ctx = await boot(withLayouts(JUNK));
+  await waitFor(() => [...$(ctx.doc, 'template-picker').querySelectorAll('button')].length >= 3, 'the picker');
+  click(typeButtons(ctx.doc).find((b) => /^Exam/.test(b.textContent)));
+  await tick(30);
+  ok('an unknown field is dropped and the rest still works',
+    [...$(ctx.doc, 'template-picker').querySelectorAll('button')].length >= 3);
+
+  // No layouts, and a passcode session, behave as before.
+  ctx = await boot(withLayouts(null));
+  await waitFor(() => [...$(ctx.doc, 'template-picker').querySelectorAll('button')].length === 3, 'the three built-ins');
+  ok('with nothing saved there are exactly the three built-in layouts',
+    [...$(ctx.doc, 'template-picker').querySelectorAll('button')].map((b) => b.textContent).join('|') === 'Clinical|Consent|SOAP');
+
+  // The block names the server validates against must match the page's.
+  ok('the page and the server agree on which blocks a layout may place',
+    /BLOCK_KEYS = \['@bpe', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'\]/
+      .test(readFileSync(new URL('../api/_prompt.mjs', import.meta.url), 'utf8')) &&
+    /'@bpe':[\s\S]*'@la':[\s\S]*'@sedation':[\s\S]*'@implant':[\s\S]*'@options':[\s\S]*'@planitems':[\s\S]*'@diagnoses':/.test(src));
+}
+
 async function testNotApplicableIsNotMissing() {
   section('A field that does not apply is not a field left blank');
   const RECALL = () => note27({

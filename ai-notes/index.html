@@ -945,11 +945,10 @@ label.pmpr input { margin-top: 4px; }
     <div class="card">
       <div class="draft-head">
         <h2 id="draft-heading">Draft note</h2>
-        <div class="length-picker" id="template-picker" role="group" aria-label="Note layout">
-          <button type="button" data-template="clinical" class="on">Clinical</button>
-          <button type="button" data-template="consent">Consent</button>
-          <button type="button" data-template="soap">SOAP</button>
-        </div>
+        <!-- Built from TEMPLATES since 3 November 2026: the three built-in
+             layouts, plus the clinician's own for this consult type when they
+             have saved one. -->
+        <div class="length-picker" id="template-picker" role="group" aria-label="Note layout"></div>
         <div class="length-picker" role="group" aria-label="Level of detail">
           <button type="button" data-length="brief">Brief</button>
           <button type="button" data-length="standard" class="on">Standard</button>
@@ -1096,7 +1095,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-11-02.1';
+  var BUILD = '2026-11-03.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1479,6 +1478,108 @@ label.pmpr input { margin-top: 4px; }
 
   // The one place the layout changes: state, buttons and hint together, so they
   // cannot drift. `picked` is true only when the clinician chose it themselves.
+  /* ---- a clinician's own layout, saved on their account (3 November 2026) ----
+
+     It arrives with the session check, out of the cached staff list, so it
+     costs no extra request and no Global Config read. See api/_layouts.mjs
+     for why it is stored as KEYS and never positions.
+
+     This mirrors repair() on the server, and it has to exist on both sides:
+     the server repairs what it STORES, this repairs what it USES. A layout
+     saved in October knows nothing of the diagnosis list added on the 29th,
+     and a field must never vanish from a note because of an arrangement
+     somebody chose last month. Anything unknown is dropped; anything new is
+     appended under a heading that says what happened. */
+  var CUSTOM_PREFIX = 'mine:';
+
+  function layoutAllKeys() {
+    return FIELDS.map(function (f) { return f[0]; })
+      .concat(DICTATED_FIELDS.map(function (f) { return f[0]; }))
+      .concat(Object.keys(BLOCKS));
+  }
+
+  function repairLayout(sections, allKeys) {
+    var known = {}, seen = {}, out = [], added = [];
+    allKeys.forEach(function (k) { known[k] = true; });
+    (sections || []).forEach(function (sec) {
+      if (!Array.isArray(sec) || sec.length !== 2 || !Array.isArray(sec[1])) return;
+      var keep = [];
+      sec[1].forEach(function (e) {
+        if (!Array.isArray(e) || typeof e[0] !== 'string') return;
+        if (!known[e[0]] || seen[e[0]]) return;
+        seen[e[0]] = true;
+        keep.push([e[0], !!e[1]]);
+      });
+      if (keep.length) out.push([String(sec[0]).slice(0, 40), keep]);
+    });
+    allKeys.forEach(function (k) { if (!seen[k]) added.push([k, false]); });
+    if (added.length) out.push(['Added since you saved this', added]);
+    return { sections: out, added: added.map(function (a2) { return a2[0]; }) };
+  }
+
+  /* Merge what came back from the session check. One layout per consult type,
+     registered under a prefixed name so it can never collide with a built-in
+     one, and so a stored key cannot overwrite 'clinical'. */
+  function loadMyLayouts(layouts) {
+    S.myLayouts = {};
+    if (!layouts || typeof layouts !== 'object') return;
+    var keys = layoutAllKeys();
+    Object.keys(layouts).forEach(function (type) {
+      var l = layouts[type];
+      if (!l || !Array.isArray(l.sections) || !l.sections.length) return;
+      var fixed = repairLayout(l.sections, keys);
+      if (!fixed.sections.length) return;
+      var name = CUSTOM_PREFIX + type;
+      TEMPLATES[name] = {
+        label: 'Mine',
+        mine: true,
+        forType: type,
+        hint: 'Your own arrangement for this appointment type.' +
+              (fixed.added.length ? ' ' + fixed.added.length +
+               (fixed.added.length === 1 ? ' field has' : ' fields have') +
+               ' been added since you saved it, at the end.' : ''),
+        sections: fixed.sections
+      };
+      S.myLayouts[type] = name;
+    });
+    renderTemplatePicker();
+  }
+
+  /* The picker was three hardcoded buttons. It is built from TEMPLATES now,
+     showing the three built-in layouts plus the clinician's own for THIS
+     consult type, if they have saved one. */
+  function renderTemplatePicker() {
+    var host = $('template-picker');
+    if (!host) return;
+    var mine = S.myLayouts && S.consultType ? S.myLayouts[S.consultType] : null;
+    var names = ['clinical', 'consent', 'soap'];
+    if (mine && TEMPLATES[mine]) names.push(mine);
+    host.textContent = '';
+    names.forEach(function (name) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.template = name;
+      b.textContent = TEMPLATES[name].label === 'Clinical note' ? 'Clinical'
+        : TEMPLATES[name].label === 'Consent record' ? 'Consent'
+        : TEMPLATES[name].label;
+      if (name === S.template) b.classList.add('on');
+      b.addEventListener('click', function () {
+        resetIdle();
+        if (!TEMPLATES[name]) return;
+        /* Chosen by hand even if it is the layout already showing: that is the
+           clinician saying "this one", and it must stop a later change of
+           consult type moving it. Only the render is skipped when nothing
+           changed. */
+        var same = name === S.template;
+        setTemplate(name, true);
+        if (!same && S.note) render(S.note);
+      });
+      host.appendChild(b);
+    });
+    // A layout that is no longer offered must not stay selected.
+    if (names.indexOf(S.template) === -1) setTemplate('clinical', S.templatePicked);
+  }
+
   function setTemplate(name, picked) {
     if (!TEMPLATES[name]) return;
     S.template = name;
@@ -1498,6 +1599,11 @@ label.pmpr input { margin-top: 4px; }
       .concat(DICTATED_FIELDS.map(function (f) { return f[0]; }))
       .concat(Object.keys(BLOCKS)).sort();
     Object.keys(TEMPLATES).forEach(function (name) {
+      // A clinician's own layout is repaired on the way in rather than
+      // rejected here: it is checked against the keys that exist now, and
+      // anything new is appended. Running this check over it would report a
+      // layout saved last month as broken when it is merely out of date.
+      if (TEMPLATES[name].mine) return;
       var keys = [];
       TEMPLATES[name].sections.forEach(function (sec) { sec[1].forEach(function (k) { keys.push(k[0]); }); });
       var sorted = keys.slice().sort();
@@ -1985,6 +2091,8 @@ label.pmpr input { margin-top: 4px; }
       // Open in the layout this kind of appointment reads best in — unless the
       // clinician has already chosen one, in which case theirs stands.
       if (!S.templatePicked) setTemplate(templateFor(pair[0]), false);
+      // "Mine" is per consult type, so which buttons exist changes with it.
+      renderTemplatePicker();
       refreshStart();
       loadChecklist(pair[0]);
     });
@@ -2053,6 +2161,8 @@ label.pmpr input { margin-top: 4px; }
       var d = await r.json();
       sessionSeconds = d.authenticated ? d.expiresIn : 0;
       renderWho(d.authenticated ? d.who : null);
+      // Rides along with this check rather than costing a request of its own.
+      loadMyLayouts(d.authenticated ? d.layouts : null);
     } catch (err) {
       sessionSeconds = null; // unknown; do not block on a network blip
     }
@@ -6216,19 +6326,10 @@ label.pmpr input { margin-top: 4px; }
   }
 
   // Layout only. No model call, no redraft: the note is re-rendered from the
-  // same data, so this is instant and cannot change what it says.
-  [].forEach.call(document.querySelectorAll('#template-picker button'), function (btn) {
-    btn.addEventListener('click', function () {
-      resetIdle();
-      if (!TEMPLATES[btn.dataset.template]) return;
-      // Chosen by hand even if it is the layout already showing: that is the
-      // clinician saying "this one", and it must stop a later change of consult
-      // type moving it. Only the render is skipped when nothing changed.
-      var same = btn.dataset.template === S.template;
-      setTemplate(btn.dataset.template, true);
-      if (!same && S.note) render(S.note);
-    });
-  });
+  // same data, so this is instant and cannot change what it says. The handler
+  // moved into renderTemplatePicker on 3 November 2026, when the buttons
+  // stopped being written into the HTML and started being built from the
+  // layouts actually available.
 
   [].forEach.call(document.querySelectorAll('.length-picker:not(#template-picker) button'), function (btn) {
     btn.addEventListener('click', async function () {
@@ -7155,6 +7256,7 @@ label.pmpr input { margin-top: 4px; }
 
   $('build-stamp').textContent = 'build ' + BUILD;
   // Buttons and hint in step with whatever ?type= may already have defaulted.
+  renderTemplatePicker();
   setTemplate(S.template, false);
   refreshStart();
   show('setup');

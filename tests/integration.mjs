@@ -3315,6 +3315,68 @@ async function testSept27b() {
       /Proposed, itemised \(dictated\):\n1\. Tooth \/ site UL4, Crown/.test(n2.plan || '') &&
       !/UL4/.test(n2.proposed || ''), n2.plan);
 
+    /* ---- layouts saved on the account (3 November 2026) ---- */
+    section('A layout is an arrangement, and it must survive the tool changing');
+    {
+      const L = await import('../api/_layouts.mjs');
+      const keys = pm.layoutKeys();
+      ok('every field and block is placeable', keys.length === pm.FIELDS.length + pm.DICTATED_FIELDS.length + pm.BLOCK_KEYS.length &&
+        keys.includes('@diagnoses') && keys.includes('risks'), String(keys.length));
+
+      const full = { sections: [['A', keys.slice(0, 5).map((k) => [k, false])],
+                                ['B', keys.slice(5).map((k) => [k, false])]] };
+      ok('a complete arrangement is valid', L.validate(full, keys).ok, JSON.stringify(L.validate(full, keys).problems));
+      ok('an unknown field is refused', !L.validate({ sections: [['A', [['nope', false]]]] }, keys).ok);
+      ok('the same field twice is refused',
+        L.validate({ sections: [['A', [['risks', false], ['risks', false]]]] }, keys).problems.some((p2) => /twice/.test(p2)));
+      ok('a heading that is not plain text is refused',
+        !L.validate({ sections: [['<img onerror=x>', [['risks', false]]]] }, keys).ok);
+      ok('and so is something that is not a layout at all',
+        !L.validate(null, keys).ok && !L.validate({ sections: [] }, keys).ok && !L.validate([], keys).ok);
+
+      /* THE ONE THAT MATTERS. A layout saved before a field existed must not
+         lose it: three blocks were added in the week before this was built. */
+      const stale = { sections: [['Mine', keys.filter((k) => k !== '@diagnoses' && k !== 'costs').map((k) => [k, false])]] };
+      const fixed = L.repair(stale, keys);
+      const placed = fixed.sections.flatMap((sec) => sec[1].map((e) => e[0]));
+      ok('a field added after the layout was saved is appended, never dropped',
+        fixed.added.join(',') === 'costs,@diagnoses' && placed.length === keys.length &&
+        keys.every((k) => placed.includes(k)),
+        JSON.stringify({ added: fixed.added, placed: placed.length, of: keys.length }));
+      ok('and it says so, under a heading that explains itself',
+        fixed.sections[fixed.sections.length - 1][0] === 'Added since you saved this');
+      const gone = L.repair({ sections: [['Mine', [['risks', false], ['wasRemoved', false]]]] }, keys);
+      ok('a field the tool no longer has is removed, and reported',
+        gone.removed.join(',') === 'wasRemoved' && !gone.sections.flatMap((x) => x[1]).some((e) => e[0] === 'wasRemoved'));
+
+      const u = L.usable({ 'exam-recall': full, 'not-a-type': full, perio: { sections: [['A', [['nope', false]]]] } },
+        keys, Object.keys(pm.CONSULT_TYPES));
+      ok('only layouts for real types, in a shape we can use, survive',
+        Object.keys(u.out).join(',') === 'exam-recall' && u.dropped.sort().join(',') === 'not-a-type,perio',
+        JSON.stringify({ out: Object.keys(u.out), dropped: u.dropped }));
+
+      const ep = await import('../api/layouts.mjs');
+      /* The store holds who may sign in. The old 7 KB ceiling was a hedge
+         against Vercel documenting the store as 8 KB; the current limits page
+         gives 1 MB on every plan. Raised, still far under, and still a guard. */
+      ok('the size guard was raised with room to spare, not removed',
+        ep.STORE_SAFE_BYTES > 7 * 1024 && ep.STORE_SAFE_BYTES <= 128 * 1024, String(ep.STORE_SAFE_BYTES));
+
+      const callLayouts = async (body, headers = {}) => {
+        const r = mockRes();
+        await ep.default(mockReq({ method: 'POST', url: '/api/layouts', body, headers }), r);
+        return r;
+      };
+      // statusCode, not status: status() is the setter and returns the res.
+      const getRes = mockRes();
+      await ep.default(mockReq({ method: 'GET', url: '/api/layouts' }), getRes);
+      ok('only POST', getRes.statusCode === 405, String(getRes.statusCode));
+      const crossSite = await callLayouts({ type: 'perio' }, { origin: 'https://evil.example' });
+      ok('and only from this site', crossSite.statusCode === 403, String(crossSite.statusCode));
+      const noSession = await callLayouts({ type: 'perio' });
+      ok('a caller with no session saves nothing', noSession.statusCode === 401, String(noSession.statusCode));
+    }
+
     /* ---- the guidance each type gives the model (1 November 2026) ---- */
     section('No consult type is left with one line of guidance');
     {

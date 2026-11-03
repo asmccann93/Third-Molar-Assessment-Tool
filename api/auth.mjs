@@ -115,11 +115,31 @@ export default async function handler(req, res) {
     // sharing a surgery computer need to see whose session is open before they
     // start, or the second one records under the first one's identity and
     // neither of them ever knows. Null for a pre-multi-user session.
+    /* The clinician's saved note layouts ride along with the check the page
+       already makes (3 November 2026). Deliberately here and not on an
+       endpoint of their own: this read comes out of the CACHED staff list, so
+       layouts cost no additional Global Config reads at all. A separate
+       request would have cost one per session, against an allowance whose
+       exhaustion stops everyone signing in for thirty days (_store.mjs).
+
+       Only the caller's own, and only for an account session: a passcode
+       session has no account to have saved anything on. Any failure here is
+       silent — a layout is a convenience, and nobody is kept out of their
+       notes because an arrangement could not be fetched. */
+    let layouts = null;
+    if (session && session.via === 'account' && storeState() === 'ok') {
+      try {
+        const users = await loadUsers({ allowStale: true });
+        const me = users.get(session.who);
+        if (me && me.layouts && typeof me.layouts === 'object') layouts = me.layouts;
+      } catch { layouts = null; }
+    }
     return res.status(200).json({
       authenticated: !!session,
       who: session ? session.who : null,
       admin: !!(session && session.admin),
-      expiresIn: session ? secondsRemaining(token) : 0
+      expiresIn: session ? secondsRemaining(token) : 0,
+      layouts
     });
   }
 
