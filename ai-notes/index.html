@@ -1211,7 +1211,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-11-04.1';
+  var BUILD = '2026-11-04.2';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1810,8 +1810,6 @@ label.pmpr input { margin-top: 4px; }
     var can = !!S.canSaveLayouts && !!S.consultType;
     row.classList.toggle('hidden', !can);
     if (!can) return;
-    var mine = S.myLayouts && S.myLayouts[S.consultType];
-    $('layout-edit').textContent = mine ? 'Rearrange' : 'Rearrange';
     $('layout-edit').setAttribute('aria-label',
       'Rearrange the note for ' + (consultLabel(S.consultType) || 'this appointment type'));
   }
@@ -6553,6 +6551,25 @@ label.pmpr input { margin-top: 4px; }
     // sedated today should say what they had.
     var sed = S.note && sedationAsText(S.note);
     if (sed) out.sedation = sed;
+    /* The three itemised lists, as ROWS (4 November 2026). The referral had
+       none of them: a letter was drafted from the prose while the structured
+       record the consultation produced — the diagnosis per tooth, what was
+       offered, what is proposed — sat beside it unused. On a lesion referral
+       that is the whole point of the letter.
+
+       Sent as rows and not as the copied text, so the server can validate
+       them the way it validates everything else arriving from a browser, and
+       so each row keeps its SOURCE: whether the patient was told about a
+       proposed course changes what the letter may say they are expecting. */
+    ['diagnoses', 'optionsOffered', 'planItems'].forEach(function (key) {
+      var rows = itemRows(S.note, key).map(function (r) {
+        var o = {};
+        (ITEM_LISTS[key].cols).forEach(function (c) { if (hasText(r[c[0]])) o[c[0]] = String(r[c[0]]).trim(); });
+        if (r.source === 'discussed' || r.source === 'dictated') o.source = r.source;
+        return o;
+      }).filter(function (o) { return Object.keys(o).some(function (k) { return k !== 'source'; }); });
+      if (rows.length) out[key] = rows;
+    });
     return out;
   }
 

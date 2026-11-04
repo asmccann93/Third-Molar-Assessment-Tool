@@ -34,7 +34,8 @@ import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS
          SEDATION_TEXT_FIELDS, SEDATION_DOSE_FIELDS, SEDATION_LABELS, SEDATION_DRAFT,
          sedationAny, sedationAsLines, misplacedMoney,
          PLAN_ITEM_FIELDS, OPTION_ITEM_FIELDS, PLAN_ITEM_LABELS, OPTION_ITEM_LABELS,
-         DIAG_ITEM_FIELDS, DIAG_ITEM_LABELS, itemAsText } from './_prompt.mjs';
+         DIAG_ITEM_FIELDS, DIAG_ITEM_LABELS, itemAsText,
+         cleanDiagnoses, cleanPlanItems, cleanOptionItems } from './_prompt.mjs';
 import { checklistGaps, checklistIsDraft } from './_checklists.mjs';
 import { sessionStillGood } from './_store.mjs';
 
@@ -269,6 +270,20 @@ export default async function handler(req, res) {
           return !!m && (labels.has(m[1]) || /^Increment \d{1,2}$/.test(m[1]));
         });
         if (good) note.sedation = lines.join('\n').slice(0, 2000);
+      }
+      /* The three itemised lists (4 November 2026). Run through the same
+         cleaners the model's own output goes through rather than trusted:
+         this arrives from the browser, and a row that reaches the letter is
+         a clinical statement sent outside the practice. The cleaners cap the
+         list at 30 rows and each cell at 300 characters, keep only the
+         columns the list declares, and accept a source only if it is one of
+         the two the tool knows. Anything else is dropped. */
+      for (const [key, clean] of [['diagnoses', cleanDiagnoses],
+                                  ['optionsOffered', cleanOptionItems],
+                                  ['planItems', cleanPlanItems]]) {
+        if (!Array.isArray(incoming[key]) || !incoming[key].length) continue;
+        const { rows } = clean(incoming[key]);
+        if (rows.length) note[key] = rows;
       }
       const context = typeof body?.context === 'string' ? body.context.trim().slice(0, 2000) : '';
       if (!Object.keys(note).length && !context) {

@@ -1307,6 +1307,7 @@ async function testReferral() {
     informationGiven: null, decision: 'Proceed.', nextStep: null, examination: null, radiographicFindings: null,
     plan: null, gaps: [] };
   let referralBody = null;
+  let listedBody = null;
   const ctx = await boot({
     onFetch: async (entry, opts) => {
       if (entry.url.includes('/api/transcribe')) return { ok: true, status: 200, json: async () => ({ status: 'done', turns: DEFAULT_TURNS }) };
@@ -1342,6 +1343,57 @@ async function testReferral() {
   ok('the referral request is a referral request', referralBody?.kind === 'referral');
   ok('and it carries the note as corrected, not just the transcript',
     referralBody?.note?.reasonForAttendance === 'Pain from lower left eight.', JSON.stringify(referralBody?.note || {}).slice(0, 100));
+
+  /* The three itemised lists (4 November 2026). The referral carried none of
+     them: a letter was drafted from the prose while the structured record the
+     consultation produced sat beside it unused. Sent as ROWS, so the server
+     can validate them, and keeping each row's SOURCE, because whether the
+     patient was told about a proposed course changes what the letter may say
+     they are expecting. */
+  {
+    const listed = await boot({
+      onFetch: async (entry, opts) => {
+        if (entry.url.includes('/api/transcribe')) return json200({ status: 'done', turns: DEFAULT_TURNS });
+        if (entry.url.includes('/api/extract')) {
+          const b = JSON.parse(opts.body);
+          if (b.kind === 'referral') { listedBody = b; return json200({ status: 'done', referral: {
+            situation: 's', background: null, assessment: null, recommendation: null, redFlags: [] } }); }
+          return json200({ status: 'done', note: { ...note,
+            diagnoses: [
+              { tooth: '38', diagnosis: 'Pericoronitis', notes: 'Second episode', source: 'dictated', quotes: [] },
+              { tooth: '11', diagnosis: 'Distal buccal caries', notes: null, source: 'discussed', quotes: [] }
+            ],
+            optionsOffered: [{ forWhat: 'LL8', option: 'Surgical removal', notes: null, source: 'discussed', quotes: [] }],
+            planItems: [{ tooth: '38', treatment: 'Surgical removal under IV sedation', notes: null, source: 'discussed', quotes: [] }]
+          } });
+        }
+      }
+    });
+    armStart(listed.doc, listed.win, /Third molar/);
+    click($(listed.doc, 'start'));
+    await tick(60);
+    click($(listed.doc, 'stop'));
+    await settle(listed.doc);
+    click($(listed.doc, 'make-referral'));
+    await waitFor(() => !!listedBody, 'the referral request');
+    const n = listedBody?.note || {};
+    ok('the referral carries the itemised diagnosis, as rows rather than as copied text',
+      Array.isArray(n.diagnoses) && n.diagnoses.length === 2 &&
+      n.diagnoses[0].diagnosis === 'Pericoronitis' && n.diagnoses[0].tooth === '38',
+      JSON.stringify(n.diagnoses));
+    ok('and the options offered, and the proposed treatment',
+      n.optionsOffered?.[0]?.option === 'Surgical removal' &&
+      n.planItems?.[0]?.treatment === 'Surgical removal under IV sedation',
+      JSON.stringify({ o: n.optionsOffered, p: n.planItems }));
+    /* The source goes with each row. A letter that leaves the practice must
+       not be able to say the patient was told something they were not. */
+    ok('each row keeps whether it was discussed with the patient or dictated',
+      n.diagnoses[0].source === 'dictated' && n.diagnoses[1].source === 'discussed',
+      JSON.stringify(n.diagnoses.map((r) => r.source)));
+    ok('and nothing else from the row is sent — no quotes, no internal flags',
+      Object.keys(n.diagnoses[0]).sort().join(',') === 'diagnosis,notes,source,tooth',
+      Object.keys(n.diagnoses[0]).join(','));
+  }
   ok('all four SBAR headings are present', ['Situation', 'Background', 'Assessment', 'Recommendation'].every((h) => txt.includes(h)));
   ok('a section with no source is named, not silently dropped',
     /Background\n\[Not stated in this consultation/.test(txt), txt.slice(0, 200));

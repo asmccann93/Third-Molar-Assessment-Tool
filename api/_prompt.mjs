@@ -1874,6 +1874,16 @@ export const REFERRAL_FIELDS = [
   ['recommendation', 'Recommendation'],
 ];
 
+/* The itemised lists the referral carries, in the order the note reads them:
+   what it is, what was offered for it, what is proposed. One place, so the
+   handler that validates them and the message that renders them cannot come
+   to disagree about which lists exist. */
+export const REFERRAL_ITEM_LISTS = [
+  ['diagnoses', 'Diagnosis, itemised by the clinician', DIAG_ITEM_FIELDS, DIAG_ITEM_LABELS],
+  ['optionsOffered', 'Options offered, itemised by the clinician', OPTION_ITEM_FIELDS, OPTION_ITEM_LABELS],
+  ['planItems', 'Proposed treatment, itemised by the clinician', PLAN_ITEM_FIELDS, PLAN_ITEM_LABELS],
+];
+
 export function buildReferralSystemPrompt(consultTypeKey) {
   const type = consultType(consultTypeKey);
   return `You draft the clinical narrative of a dental referral for a UK clinician to check, correct and paste into an e-referral form. Write it in SBAR: Situation, Background, Assessment, Recommendation.
@@ -1888,9 +1898,11 @@ THE RULE THAT MATTERS MOST: absence of mention is NOT a negative finding. If any
 
 The note's dictated fields — examination, radiographic findings, treatment carried out today and plan — are usually where the referral's clinical substance lives, because the conversation with the patient rarely contains it. Use them in full.
 
+THE ITEMISED LISTS. The note may carry the clinician's own itemised diagnosis, options offered and proposed treatment, one line each. These are the clinician's record, written or corrected by them, and they are the most reliable thing you have. Use them. Do NOT add a line, drop a line, merge two lines into one, or restate a specific line as something broader — "distal buccal caries at 11" does not become "caries". Where a DIAGNOSIS list is present, that IS the clinician's working diagnosis: use it and derive no other. Each line says whether it was discussed with the patient or dictated after they left; you may write that something was discussed with, offered to, or explained to the patient only where its line says it was discussed.
+
 - situation: why this patient is being referred now — the presenting problem and, if stated, its duration and any urgency. Not a diagnosis unless the clinician gave one.
 - background: relevant history ACTUALLY STATED — medical history, medications, previous treatment or attempts, oral hygiene, social factors affecting the referral. Null if none was stated.
-- assessment: examination and radiographic findings as described, and the working diagnosis ONLY if the clinician gave one. Do not derive a diagnosis from the findings yourself.
+- assessment: examination and radiographic findings as described, and the working diagnosis ONLY if the clinician gave one — an itemised diagnosis list IS the clinician giving one. Do not derive a diagnosis from the findings yourself.
 - recommendation: what is being asked of the receiving service, and what the patient has been told to expect, as stated.
 
 REGISTER. Write as one clinician writes to another: third person about the patient, complete sentences, unhurried but not padded. Note fields and dictation are telegraphic and your job is to make them read properly WITHOUT adding anything — "moderate crowding upper arch, posterior crossbite, OH good" becomes "There is moderate crowding in the upper arch and a posterior crossbite. Oral hygiene is good." Expanding the grammar is required; expanding the content is forbidden. Put the ask plainly and courteously, in the form "Please could you see this patient for an orthodontic assessment." Do not use headings inside a section, do not use bullet points, and do not begin every section with "The patient".
@@ -1930,6 +1942,31 @@ export function buildReferralUserMessage(note, context, transcriptMessage, { dic
     any = true;
     // With nothing dictated, a dictated field can only have been typed.
     parts.push(`${dictated ? label : label.replace(/ \(dictated\)$/, '')}: ${v.trim()}`);
+  }
+  /* The three itemised lists (4 November 2026). They were not in the referral
+     at all, so a letter was drafted from the prose fields while the structured
+     record the consultation had actually produced — the diagnosis per tooth,
+     what was offered, what is proposed — sat beside it unused. On a lesion
+     referral that is the whole point of the letter.
+
+     Rendered through itemAsText, the same function the page's clipboard uses,
+     so the referral and the note cannot drift apart. The SOURCE is carried in
+     words rather than dropped: whether the patient was told about a proposed
+     course changes what the Recommendation may claim they are expecting. */
+  for (const [key, heading, cols, labels] of REFERRAL_ITEM_LISTS) {
+    const rows = Array.isArray(note && note[key]) ? note[key] : [];
+    const lines = [];
+    for (const row of rows) {
+      const text = row && typeof row === 'object' ? itemAsText(row, cols, labels) : '';
+      if (!text) continue;
+      const src = row.source === 'discussed' ? ' — discussed with the patient'
+        : row.source === 'dictated' ? ' — dictated after the patient left'
+        : '';
+      lines.push(`${lines.length + 1}. ${text}${src}`);
+    }
+    if (!lines.length) continue;
+    any = true;
+    parts.push(`${heading}:`, ...lines);
   }
   // The clinician's PMPR tick: the fixed line, and nothing else, is accepted.
   if (note && note.pmpr === PMPR_LINE) {
