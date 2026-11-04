@@ -3739,6 +3739,68 @@ async function testSept27b() {
   ok('and a blank the shape check listed still gets its question',
     note.questions.some((q) => q.field === 'costs' && /Costs discussed: left blank/.test(q.gap)), JSON.stringify(note.questions));
 
+  /* --- the transcriber's dictionary knows the words the tool asks for ---
+     (4 November 2026)
+
+     Five terms the tool has a dedicated field or a fixed line for were missing
+     from the Speechmatics custom dictionary: BPE, whose scores the clinician
+     calls aloud sextant by sextant into a block built for them; PMPR, a fixed
+     line the clinician ticks; ISQ, a column of the implant log; Schneiderian,
+     a bone-graft checklist item; and flumazenil, the sedation record's
+     reversal field. The tool was asking the clinician to say words and then
+     handing the audio to a recogniser that had never heard of them.
+
+     This is the invariant, not the list: anything the tool has a field for is
+     a word it expects to hear. */
+  {
+    const tr = await import('../api/transcribe.mjs');
+    const vocab = tr.ADDITIONAL_VOCAB;
+    const words = new Set(vocab.map((e) => String(e.content).toLowerCase()));
+
+    ok('every dictionary entry is well formed',
+      vocab.every((e) => e && typeof e.content === 'string' && e.content.trim() &&
+        (e.sounds_like === undefined ||
+         (Array.isArray(e.sounds_like) && e.sounds_like.every((s) => typeof s === 'string' && s.trim())))),
+      JSON.stringify(vocab.filter((e) => !e || typeof e.content !== 'string').slice(0, 3)));
+    ok('and appears once', vocab.length === words.size,
+      String(vocab.length - words.size) + ' duplicates');
+    // Speechmatics documents a ceiling of about a thousand; this is a guard
+    // against a list that has grown past being a list.
+    ok('and the dictionary is still a dictionary, not a corpus', vocab.length <= 400, String(vocab.length));
+
+    /* The terms the tool itself names, each checked against the STRUCTURE
+       that names it rather than against the source text — so this fails if
+       the field goes as well as if the word goes, and cannot be satisfied by
+       a mention in a comment. */
+    const cl = await import('../api/_checklists.mjs');
+    const graftAsks = (cl.CHECKLISTS['bone-graft'].items || []).map((i) => i.ask).join(' ');
+    const sedationPrompt = pm.buildSystemPrompt('sedation', 'standard');
+    for (const [term, where, usedByTheTool] of [
+      ['bpe', 'the BPE block records sextant by sextant',
+        Array.isArray(pm.BPE_SEXTANTS) && pm.BPE_SEXTANTS.length === 6],
+      ['pmpr', 'the clinician ticks as a fixed line',
+        /PMPR/.test(pm.PMPR_LINE)],
+      ['isq', 'is a column of the implant log',
+        pm.IMPLANT_LOG_FIELDS.includes('isq')],
+      ['schneiderian', 'the bone-graft checklist asks about',
+        /Schneiderian/i.test(graftAsks)],
+      ['flumazenil', 'the sedation prompt names as the reversal agent',
+        /flumazenil/i.test(sedationPrompt)]
+    ]) {
+      ok(`the dictionary knows "${term}", which ${where}`,
+        words.has(term) && usedByTheTool,
+        words.has(term) ? 'the tool no longer uses it' : 'missing from the dictionary');
+    }
+
+    /* Nothing is added that collides with ordinary English: the dictionary
+       weights TOWARDS recognition, so a common word in it pulls ordinary
+       speech onto it. These were considered and left out on purpose. */
+    for (const w of ['every', 'bite', 'ridge', 'pocket', 'post']) {
+      ok(`"${w}" is deliberately not in the dictionary — it would pull ordinary speech onto it`,
+        !words.has(w));
+    }
+  }
+
   // --- the referral takes the BPE line, and nothing else in its place ---
   reply = { situation: 'x', background: null, assessment: null, recommendation: null, redFlags: [] };
   res = mockRes();

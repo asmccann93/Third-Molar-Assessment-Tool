@@ -52,7 +52,34 @@ const MIN_BYTES = 2000;        // matches the client-side floor; below this ther
 // they are exactly the words a general model gets wrong in a dental surgery.
 // Add to this list as testing turns up misrecognitions — it is cheap and it is
 // the single highest-yield accuracy lever in the pipeline.
-const ADDITIONAL_VOCAB = [
+//
+// EXTENDED 4 November 2026, on one principle: THE TOOL ASKS THE CLINICIAN TO
+// SAY THESE THINGS. Five terms the tool has a dedicated field or a fixed line
+// for were missing from the dictionary the transcriber uses — BPE (a whole
+// block, with the scores called aloud sextant by sextant), PMPR (a fixed line),
+// ISQ (a column of the implant log), Schneiderian (a bone-graft checklist item)
+// and flumazenil (the sedation record's reversal field). The tool was asking
+// for words and then handing the audio to a recogniser that had never heard of
+// them. A test now holds that consistency.
+//
+// The rest are the vocabulary of the types added since September: the sedation
+// record, the implant log, the bone graft, the lesion, and the dentures that
+// are a large part of this practice.
+//
+// THE SELECTION RULE, because a custom dictionary can make things worse:
+// Speechmatics weights these TOWARDS recognition, so a term that is also an
+// ordinary English word can pull ordinary speech onto it. Nothing is added
+// here that collides with a common word. Deliberately left out for that
+// reason: "Every denture" (the design is named after a Dr Every, and the word
+// is in every other sentence), "post-dam" (post), "bite", "ridge", "pocket".
+// If one of those is being mangled in real use it needs a `sounds_like` entry
+// written around the collision, not a bare addition.
+//
+// Brand names are a judgement call and only the widely used ones are here. An
+// implant SYSTEM that is misheard goes into a traceability record, which is
+// why the implant log exists at all — so the systems this practice actually
+// uses are worth adding by name, and this list is a guess at them.
+export const ADDITIONAL_VOCAB = [
   { content: 'periodontitis' },
   { content: 'periodontal' },
   { content: 'gingivitis' },
@@ -99,7 +126,116 @@ const ADDITIONAL_VOCAB = [
   { content: 'CBCT', sounds_like: ['C B C T'] },
   { content: 'RCT', sounds_like: ['R C T'] },
   { content: 'MRONJ', sounds_like: ['em ron j', 'M R O N J'] },
-  { content: 'Montgomery' }
+  { content: 'Montgomery' },
+
+  /* ---- things the tool has a field or a fixed line for (4 Nov 2026) ---- */
+  { content: 'BPE', sounds_like: ['B P E', 'bee pee ee'] },
+  { content: 'PMPR', sounds_like: ['P M P R'] },
+  { content: 'ISQ', sounds_like: ['I S Q'] },
+  { content: 'Schneiderian', sounds_like: ['schneiderian', 'snyderian'] },
+  { content: 'flumazenil', sounds_like: ['flu mazenil', 'flumazanil'] },
+
+  /* ---- the sedation record ---- */
+  { content: 'cannula' },
+  { content: 'cannulation' },
+  { content: 'capnography' },
+  { content: 'oximetry' },
+  { content: 'titration' },
+  { content: 'titrated' },
+  { content: 'antecubital' },
+  { content: 'venflon' },
+
+  /* ---- the implant log: system and lot go into a traceability record ---- */
+  { content: 'Straumann', sounds_like: ['strowman', 'straw man'] },
+  { content: 'Neodent' },
+  { content: 'BioHorizons' },
+  { content: 'Osstem' },
+  { content: 'Ankylos' },
+  { content: 'MegaGen' },
+  { content: 'Nobel Biocare' },
+  { content: 'osseointegration' },
+  { content: 'osseointegrated' },
+  { content: 'abutment' },
+  { content: 'Ncm', sounds_like: ['newton centimetres', 'N C M'] },
+
+  /* ---- bone graft and sinus lift ---- */
+  { content: 'xenograft' },
+  { content: 'allograft' },
+  { content: 'autogenous' },
+  { content: 'autograft' },
+  { content: 'Bio-Oss', sounds_like: ['bio oss', 'bioh oss'] },
+  { content: 'Bio-Gide', sounds_like: ['bio guide', 'bio gide'] },
+  { content: 'resorbable' },
+  { content: 'GBR', sounds_like: ['G B R'] },
+  { content: 'antrum' },
+  { content: 'antral' },
+  { content: 'oroantral', sounds_like: ['oro antral', 'oral antral'] },
+
+  /* ---- the lesion ---- */
+  { content: 'leukoplakia' },
+  { content: 'erythroplakia' },
+  { content: 'lichen planus' },
+  { content: 'candidiasis' },
+  { content: 'aphthous' },
+  { content: 'indurated' },
+  { content: 'induration' },
+  { content: 'submandibular' },
+  { content: 'cervical lymph nodes' },
+  { content: 'biopsy' },
+  { content: 'incisional' },
+  { content: 'excisional' },
+
+  /* ---- dentures ---- */
+  { content: 'cobalt chrome' },
+  { content: 'acrylic' },
+  { content: 'flange' },
+  { content: 'relining' },
+  { content: 'rebasing' },
+  { content: 'alginate' },
+  { content: 'articulator' },
+  { content: 'retruded' },
+  { content: 'freeway space' },
+  { content: 'immediate denture' },
+
+  /* ---- medication the checklists ask about ---- */
+  { content: 'apixaban' },
+  { content: 'rivaroxaban' },
+  { content: 'dabigatran' },
+  { content: 'edoxaban' },
+  { content: 'warfarin' },
+  { content: 'clopidogrel' },
+  { content: 'INR', sounds_like: ['I N R'] },
+  { content: 'amoxicillin' },
+  { content: 'co-amoxiclav', sounds_like: ['co amoxiclav'] },
+  { content: 'metronidazole' },
+  { content: 'clindamycin' },
+  { content: 'penicillin' },
+  { content: 'ibuprofen' },
+  { content: 'paracetamol' },
+
+  /* ---- local anaesthesia, which the LA log records as dictated ---- */
+  { content: 'prilocaine' },
+  { content: 'mepivacaine' },
+  { content: 'bupivacaine' },
+  { content: 'felypressin' },
+  { content: 'adrenaline' },
+  { content: 'Citanest' },
+  { content: 'Scandonest' },
+  { content: 'Septanest' },
+  { content: 'infiltration' },
+
+  /* ---- anatomy and periodontal terms said at the chair ---- */
+  { content: 'mandibular' },
+  { content: 'maxillary' },
+  { content: 'retromolar' },
+  { content: 'mylohyoid' },
+  { content: 'tuberosity' },
+  { content: 'foramen' },
+  { content: 'supragingival' },
+  { content: 'subgingival' },
+  { content: 'recession' },
+  { content: 'sequestrum' },
+  { content: 'hypodontia' }
 ];
 
 import { readCookie, readToken, mintJobTicket, verifyJobTicket } from './_session.mjs';
