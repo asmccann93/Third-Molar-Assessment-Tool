@@ -129,7 +129,7 @@ button:disabled { opacity: .45; cursor: default; }
   .wrap { max-width: none; padding: 0; }
   .masthead #lock, .masthead .who, .storage-note, .session-note,
   #recbar, #setup, #recording, #working, #mask, #error-actions,
-  .length-picker, #edit-hint, #template-hint, .rate-note, .actions,
+  .length-picker, .edit-picker, #edit-hint, #template-hint, .rate-note, .actions,
   .field-head .copy, .derived .actions, #ask-box, #referral-box,
   .mic-check, #idle-warn, #stats-row, #teeth-strip button, #postop-box .actions,
   /* "Add a row" / "Add an increment" are controls, not record. They were
@@ -417,13 +417,17 @@ button:disabled { opacity: .45; cursor: default; }
 .draft-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; }
 .draft-head h2 { flex: 1 1 100%; }
 @media (min-width: 620px) { .draft-head h2 { flex: 1 1 auto; } }
-.length-picker { display: flex; gap: 4px; }
-.length-picker button {
+/* The three pill rows in the draft head. .edit-picker is styled identically
+   and named separately on purpose: the suites select the level-of-detail row
+   as `.length-picker:not(#template-picker)`, and a third row sharing that
+   class silently widened every one of those selectors. */
+.length-picker, .edit-picker { display: flex; gap: 4px; }
+.length-picker button, .edit-picker button {
   padding: 4px 11px; border: 1px solid var(--line); background: var(--paper);
   border-radius: 999px; font-size: .8rem; color: var(--ink-faint); cursor: pointer;
 }
 .length-picker button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.length-picker button[disabled] { opacity: .5; cursor: default; }
+.length-picker button[disabled], .edit-picker button[disabled] { opacity: .5; cursor: default; }
 #edit-hint { margin: 2px 0 14px; }
 .field pre.is-empty::before {
   content: attr(data-placeholder); color: var(--ink-faint); font-style: italic;
@@ -718,6 +722,80 @@ label.pmpr input { margin-top: 4px; }
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
+/* ===================================================================
+   THE LAYOUT BUILDER
+   A panel, not a full-screen takeover: the clinician is rearranging the
+   note they can see behind it, and on a laptop at 780px the note stays
+   in view beside it. On a phone it fills the screen, because there is no
+   beside.
+   =================================================================== */
+#layout-builder {
+  position: fixed; inset: 0; z-index: 95;
+  display: grid; place-items: center;
+  /* minmax(0, 1fr), not the default auto. An auto track is sized by its
+     content, so the row grew to the panel's full 1,730px, the panel's
+     max-height clamped the BOX but centred it inside that oversized row, and
+     the footer with Save in it sat 300px below the bottom of the screen. With
+     explicit tracks the area is the viewport and the percentages mean what
+     they look like they mean. */
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  background: color-mix(in srgb, var(--ink) 28%, transparent);
+  padding: 16px;
+}
+.lb-panel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius);
+  width: min(560px, 100%); max-height: min(86vh, 100%);
+  display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(15, 47, 99, .18);
+}
+.lb-head { padding: 16px 16px 10px; border-bottom: 1px solid var(--line); }
+/* .timer-note is centred, which suits a recording clock and not a sentence. */
+#lb-sub, #lb-msg { text-align: left; }
+/* min-height: 0 is load-bearing. A flex item defaults to min-height: auto,
+   which refuses to shrink below its content — so the panel grew past its own
+   max-height and the footer, with Save in it, was off the bottom of the
+   screen. Found by looking at a screenshot, not by a test. */
+.lb-body { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px 16px; flex: 1 1 auto; min-height: 0; }
+.lb-foot {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 12px 16px; border-top: 1px solid var(--line);
+}
+.lb-foot .primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.lb-foot .danger { color: var(--stop); border-color: var(--stop); }
+.lb-sec { border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 10px; }
+.lb-sec-head { display: flex; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid var(--line); background: var(--tint-soft); }
+.lb-sec-head input {
+  font: inherit; font-weight: 600; color: inherit; flex: 1 1 auto; min-width: 0;
+  min-height: 40px; padding: 0 8px; border: 1px solid var(--line-firm);
+  border-radius: var(--radius); background: var(--surface);
+}
+/* The move and remove controls are small on purpose — the ROW is the
+   target that matters and stays 48px — but never below 40px, and never
+   less than 40px apart. */
+.lb-btn { min-height: 40px; min-width: 40px; padding: 0 6px; font-size: .875rem; line-height: 1; }
+.lb-rows { list-style: none; margin: 0; padding: 4px; }
+.lb-row {
+  display: flex; gap: 6px; align-items: center;
+  min-height: var(--tap); padding: 2px 4px;
+}
+.lb-row + .lb-row { border-top: 1px solid var(--tint); }
+.lb-row span.lb-name { flex: 1 1 auto; min-width: 0; font-size: .9375rem; }
+.lb-row span.lb-tag {
+  font-size: .6875rem; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--ink-faint); background: var(--wash);
+  border-radius: 4px; padding: 2px 6px; white-space: nowrap;
+}
+.lb-empty { margin: 0; padding: 10px 8px; font-size: .8125rem; color: var(--ink-faint); }
+#lb-msg:not(:empty) { padding: 8px 0 0; }
+#lb-msg.warn { color: var(--stop); }
+@media (max-width: 480px) {
+  #layout-builder { padding: 0; }
+  .lb-panel { max-height: 100%; height: 100%; border: none; border-radius: 0; width: 100%; }
+}
+@media print { #layout-builder { display: none !important; } }
+
 #mask button { min-height: 56px; padding: 0 28px; font-weight: 600; background: var(--surface); }
 #mask p { margin: 14px 0 0; font-size: .8125rem; color: var(--ink-muted); }
 #mask div { text-align: center; }
@@ -949,6 +1027,11 @@ label.pmpr input { margin-top: 4px; }
              layouts, plus the clinician's own for this consult type when they
              have saved one. -->
         <div class="length-picker" id="template-picker" role="group" aria-label="Note layout"></div>
+        <!-- Shown only to a clinician signed in on their own account: a
+             passcode session has nowhere to save one. See canSaveLayouts. -->
+        <div class="edit-picker hidden" id="layout-edit-row" role="group" aria-label="Edit this layout">
+          <button type="button" id="layout-edit">Rearrange</button>
+        </div>
         <div class="length-picker" role="group" aria-label="Level of detail">
           <button type="button" data-length="brief">Brief</button>
           <button type="button" data-length="standard" class="on">Standard</button>
@@ -1082,6 +1165,39 @@ label.pmpr input { margin-top: 4px; }
   <div>
     <button id="unmask" type="button">Show draft</button>
     <p>Hidden while the tab was in the background.</p>
+  </div>
+</div>
+
+<!-- ===================================================================
+     THE LAYOUT BUILDER (4 November 2026)
+
+     Rearranging the note, for one consult type, saved on the clinician's
+     own account. It edits a WORKING COPY: nothing reaches the note or the
+     store until Save, so Cancel is a real cancel.
+
+     A field cannot be removed, only moved, and the only moves are up and
+     down — past the top of a section it joins the one above, past the
+     bottom the one below. That is deliberate on two counts. It makes
+     losing a field from a clinical record structurally impossible rather
+     than merely checked: there is nowhere for one to go. And it works
+     gloved, on a tablet, at the end of a list, which drag-and-drop does
+     not — the same reason the teeth strip and the item lists are buttons.
+     =================================================================== -->
+<div id="layout-builder" class="hidden" role="dialog" aria-modal="true" aria-labelledby="lb-title">
+  <div class="lb-panel">
+    <div class="lb-head">
+      <h2 id="lb-title">Rearrange the note</h2>
+      <p class="timer-note" id="lb-sub" style="margin:4px 0 0"></p>
+    </div>
+    <div class="lb-body" id="lb-sections"></div>
+    <p class="timer-note" id="lb-msg" style="margin:0 16px"></p>
+    <div class="lb-foot">
+      <button type="button" id="lb-add">Add a section</button>
+      <button type="button" id="lb-forget" class="danger hidden">Use the built-in layouts</button>
+      <span style="flex:1 1 auto"></span>
+      <button type="button" id="lb-cancel">Cancel</button>
+      <button type="button" id="lb-save" class="primary">Save</button>
+    </div>
   </div>
 </div>
 
@@ -1553,6 +1669,22 @@ label.pmpr input { margin-top: 4px; }
     return { sections: out, added: added };
   }
 
+  /* Everything the session check says about the CLINICIAN, applied together.
+
+     Not inlined into checkSession, which is where it came from: that function
+     awaits, and the page's standing rule is that an awaited path does not write
+     session state without checking S.gen (there is a test for it). Nothing here
+     is about the consultation — whose account this is, and what they have saved,
+     are the same for the patient after this one — so a late answer cannot
+     corrupt a patient's note. Keeping the writes out of the awaited body is how
+     that stays true of the NEXT thing somebody adds to the check, rather than
+     resting on this paragraph. */
+  function applyAccount(d) {
+    S.canSaveLayouts = !!(d && d.authenticated && d.canSaveLayouts);
+    loadMyLayouts(d && d.authenticated ? d.layouts : null);
+    renderLayoutEditRow();
+  }
+
   /* Merge what came back from the session check. One layout per consult type,
      registered under a prefixed name so it can never collide with a built-in
      one, and so a stored key cannot overwrite 'clinical'. */
@@ -1624,6 +1756,419 @@ label.pmpr input { margin-top: 4px; }
       b.classList.toggle('on', b.dataset.template === name);
     });
     $('template-hint').textContent = TEMPLATES[name].hint;
+  }
+
+  /* ==================================================================
+     THE LAYOUT BUILDER (4 November 2026)
+
+     Stage two. Stage one put a saved layout into the picker; this is how
+     one gets saved. It edits a WORKING COPY — S.builder — so Cancel is a
+     real cancel and nothing reaches the note or the store until Save.
+
+     WHAT IT CANNOT DO, and why:
+
+       Remove a field.  There is no remove. A field can only be MOVED,
+         and the only moves are up and down: past the top of a section it
+         joins the one above, past the bottom the one below. So losing a
+         field out of a clinical record is not prevented by a check that
+         could be got round — there is nowhere for one to go.
+
+       Say what was dictated.  A layout holds order and headings and
+         nothing else; see the comment on TEMPLATES. The builder shows
+         the Dictated and Montgomery marks as read-only labels so the
+         clinician can see why a field behaves as it does.
+
+       Change any content.  It never touches S.note.
+
+     Drag-and-drop was the obvious design and is the wrong one here: this
+     is used gloved, on a tablet, at the end of a list. Buttons are what
+     the teeth strip and the item lists use, for the same reason.
+     ================================================================== */
+  var MAX_LAYOUT_SECTIONS = 12;             // matches api/_layouts.mjs
+  var MAX_LAYOUT_HEADING = 40;              //   "
+  var LAYOUT_HEADING_OK = /^[A-Za-z0-9 ,.'()\/&-]{1,40}$/;
+  var builderReturnTo = null;               // the button to put focus back on
+
+  function layoutLabelOf(key) {
+    if (isBlock(key)) return BLOCKS[key].label;
+    var spec = fieldSpec(key);
+    return spec ? spec.label : key;
+  }
+
+  function consultLabel(type) {
+    var out = '';
+    CONSULT_TYPES.forEach(function (c) { if (c[0] === type) out = c[1]; });
+    return out;
+  }
+
+  /* Offered only where it can work: a consult type is chosen (a layout is
+     per type) and the session is the clinician's own account (a passcode
+     session has nothing to save onto — see canSaveLayouts in api/auth.mjs). */
+  function renderLayoutEditRow() {
+    var row = $('layout-edit-row');
+    if (!row) return;
+    var can = !!S.canSaveLayouts && !!S.consultType;
+    row.classList.toggle('hidden', !can);
+    if (!can) return;
+    var mine = S.myLayouts && S.myLayouts[S.consultType];
+    $('layout-edit').textContent = mine ? 'Rearrange' : 'Rearrange';
+    $('layout-edit').setAttribute('aria-label',
+      'Rearrange the note for ' + (consultLabel(S.consultType) || 'this appointment type'));
+  }
+
+  function openBuilder() {
+    if (!S.canSaveLayouts || !S.consultType) return;
+    /* Seeded from the layout ON SCREEN, not from a blank slate or always from
+       'clinical'. "I like the consent record but costs should be higher up" is
+       then two taps and a Save, which is the whole request. */
+    var from = TEMPLATES[S.template] || TEMPLATES.clinical;
+    S.builder = from.sections.map(function (sec) { return [String(sec[0]), sec[1].slice()]; });
+    builderReturnTo = $('layout-edit');
+    $('lb-sub').textContent = 'For ' + (consultLabel(S.consultType) || 'this appointment type') +
+      ', starting from ' + (from.mine ? 'your saved layout' : from.label) +
+      '. Nothing in the note changes — only the order it reads in.';
+    $('lb-forget').classList.toggle('hidden', !(S.myLayouts && S.myLayouts[S.consultType]));
+    $('lb-msg').textContent = '';
+    $('lb-msg').classList.remove('warn');
+    $('layout-builder').classList.remove('hidden');
+    renderBuilder();
+    var first = $('lb-sections').querySelector('input');
+    if (first && first.focus) { try { first.focus(); } catch (e) {} }
+  }
+
+  function closeBuilder() {
+    $('layout-builder').classList.add('hidden');
+    S.builder = null;
+    $('lb-sections').textContent = '';
+    if (builderReturnTo && builderReturnTo.focus) { try { builderReturnTo.focus(); } catch (e) {} }
+    builderReturnTo = null;
+  }
+
+  function builderOpen() { return !!S.builder && !$('layout-builder').classList.contains('hidden'); }
+
+  // Re-rendered after every move, so focus is put back by id: the clinician is
+  // usually pressing the same arrow again, and losing focus to the top of the
+  // panel on each press makes the keyboard route unusable.
+  function renderBuilder(focusId) {
+    var host = $('lb-sections');
+    if (!host || !S.builder) return;
+    host.textContent = '';
+    S.builder.forEach(function (sec, si) {
+      var box = document.createElement('div');
+      box.className = 'lb-sec';
+
+      var head = document.createElement('div');
+      head.className = 'lb-sec-head';
+
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.value = sec[0];
+      input.maxLength = MAX_LAYOUT_HEADING;
+      input.id = 'lb-h-' + si;
+      input.setAttribute('aria-label', 'Heading for section ' + (si + 1));
+      input.addEventListener('input', function () {
+        resetIdle();
+        S.builder[si][0] = input.value;
+        $('lb-msg').textContent = '';
+        $('lb-msg').classList.remove('warn');
+      });
+      head.appendChild(input);
+
+      var up = document.createElement('button');
+      up.type = 'button'; up.className = 'lb-btn'; up.id = 'lb-sup-' + si;
+      up.textContent = '↑';
+      up.setAttribute('aria-label', 'Move the section "' + sec[0] + '" earlier in the note');
+      up.title = 'Move this section earlier';
+      up.disabled = si === 0;
+      up.addEventListener('click', function () { moveSection(si, -1); });
+      head.appendChild(up);
+
+      var down = document.createElement('button');
+      down.type = 'button'; down.className = 'lb-btn'; down.id = 'lb-sdn-' + si;
+      down.textContent = '↓';
+      down.setAttribute('aria-label', 'Move the section "' + sec[0] + '" later in the note');
+      down.title = 'Move this section later';
+      down.disabled = si === S.builder.length - 1;
+      down.addEventListener('click', function () { moveSection(si, 1); });
+      head.appendChild(down);
+
+      var del = document.createElement('button');
+      del.type = 'button'; del.className = 'lb-btn'; del.id = 'lb-sdel-' + si;
+      del.textContent = '✕';
+      /* Removing a section moves its fields into the neighbour rather than
+         deleting them, which is the same guarantee the row moves give. */
+      del.setAttribute('aria-label', 'Remove the section "' + sec[0] + '" and move what is in it to the next one');
+      del.title = 'Remove this heading. What is in it moves to the section above \u2014 nothing is deleted.';
+      del.disabled = S.builder.length < 2;
+      del.addEventListener('click', function () { removeSection(si); });
+      head.appendChild(del);
+
+      box.appendChild(head);
+
+      if (!sec[1].length) {
+        var empty = document.createElement('p');
+        empty.className = 'lb-empty';
+        empty.textContent = 'Nothing here yet — move something in with the arrows, ' +
+          'or remove this section.';
+        box.appendChild(empty);
+      } else {
+        var list = document.createElement('ul');
+        list.className = 'lb-rows';
+        sec[1].forEach(function (key, ki) {
+          var li = document.createElement('li');
+          li.className = 'lb-row';
+          li.dataset.key = key;
+
+          var name = document.createElement('span');
+          name.className = 'lb-name';
+          name.textContent = layoutLabelOf(key);
+          li.appendChild(name);
+
+          /* Read-only marks. They are the two things about a field that a
+             layout must not change, and showing them is how the clinician
+             sees that: a Dictated field is one they said to the record after
+             the patient left, wherever it is put. */
+          if (!isBlock(key) && fieldSpec(key) && fieldSpec(key).core) {
+            var core = document.createElement('span');
+            core.className = 'lb-tag';
+            core.textContent = 'Montgomery';
+            core.title = 'One of the four fields a consent claim turns on';
+            li.appendChild(core);
+          }
+          if (dictatedFor(key)) {
+            var dt = document.createElement('span');
+            dt.className = 'lb-tag';
+            dt.textContent = 'Dictated';
+            dt.title = 'Said by you after the patient left. Moving it does not change that.';
+            li.appendChild(dt);
+          }
+
+          var rup = document.createElement('button');
+          rup.type = 'button'; rup.className = 'lb-btn'; rup.id = 'lb-up-' + key;
+          rup.textContent = '↑';
+          rup.setAttribute('aria-label', 'Move ' + layoutLabelOf(key) + ' up');
+          rup.title = 'Move up. Past the top of a section it joins the one above.';
+          rup.disabled = si === 0 && ki === 0;
+          rup.addEventListener('click', function () { moveKey(si, ki, -1); });
+          li.appendChild(rup);
+
+          var rdn = document.createElement('button');
+          rdn.type = 'button'; rdn.className = 'lb-btn'; rdn.id = 'lb-dn-' + key;
+          rdn.textContent = '↓';
+          rdn.setAttribute('aria-label', 'Move ' + layoutLabelOf(key) + ' down');
+          rdn.title = 'Move down. Past the bottom of a section it joins the one below.';
+          rdn.disabled = si === S.builder.length - 1 && ki === sec[1].length - 1;
+          rdn.addEventListener('click', function () { moveKey(si, ki, 1); });
+          li.appendChild(rdn);
+
+          list.appendChild(li);
+        });
+        box.appendChild(list);
+      }
+      host.appendChild(box);
+    });
+
+    $('lb-add').disabled = S.builder.length >= MAX_LAYOUT_SECTIONS;
+    if (focusId) {
+      var back = document.getElementById(focusId);
+      if (back && back.focus && !back.disabled) { try { back.focus(); } catch (e2) {} }
+    }
+  }
+
+  /* Up or down one place, crossing into the neighbouring section at the ends.
+     A field is never removed and never duplicated: every path here is a splice
+     out followed by exactly one splice in. */
+  function moveKey(si, ki, dir) {
+    resetIdle();
+    if (!S.builder) return;
+    var sec = S.builder[si];
+    if (!sec || !sec[1][ki]) return;
+    var key = sec[1][ki];
+    if (dir < 0) {
+      if (ki > 0) { sec[1].splice(ki, 1); sec[1].splice(ki - 1, 0, key); }
+      else if (si > 0) { sec[1].splice(ki, 1); S.builder[si - 1][1].push(key); }
+      else return;
+    } else {
+      if (ki < sec[1].length - 1) { sec[1].splice(ki, 1); sec[1].splice(ki + 1, 0, key); }
+      else if (si < S.builder.length - 1) { sec[1].splice(ki, 1); S.builder[si + 1][1].unshift(key); }
+      else return;
+    }
+    renderBuilder((dir < 0 ? 'lb-up-' : 'lb-dn-') + key);
+  }
+
+  function moveSection(si, dir) {
+    resetIdle();
+    if (!S.builder) return;
+    var to = si + dir;
+    if (to < 0 || to >= S.builder.length) return;
+    var sec = S.builder.splice(si, 1)[0];
+    S.builder.splice(to, 0, sec);
+    renderBuilder((dir < 0 ? 'lb-sup-' : 'lb-sdn-') + to);
+  }
+
+  function addSection() {
+    resetIdle();
+    if (!S.builder || S.builder.length >= MAX_LAYOUT_SECTIONS) return;
+    S.builder.push(['New section', []]);
+    renderBuilder('lb-h-' + (S.builder.length - 1));
+    var el = $('lb-h-' + (S.builder.length - 1));
+    if (el && el.select) { try { el.select(); } catch (e) {} }
+  }
+
+  /* The fields go to the section ABOVE, or to the one below when this is the
+     first. They are never dropped — see the header. */
+  function removeSection(si) {
+    resetIdle();
+    if (!S.builder || S.builder.length < 2) return;
+    var moving = S.builder[si][1];
+    var into = si > 0 ? si - 1 : 1;
+    if (si > 0) S.builder[into][1] = S.builder[into][1].concat(moving);
+    else S.builder[into][1] = moving.concat(S.builder[into][1]);
+    S.builder.splice(si, 1);
+    renderBuilder();
+  }
+
+  function builderProblem() {
+    if (!S.builder || !S.builder.length) return 'There has to be at least one section.';
+    if (S.builder.length > MAX_LAYOUT_SECTIONS) return 'No more than ' + MAX_LAYOUT_SECTIONS + ' sections.';
+    for (var i = 0; i < S.builder.length; i++) {
+      var h = String(S.builder[i][0] || '').trim();
+      if (!h) return 'Section ' + (i + 1) + ' needs a heading.';
+      if (!LAYOUT_HEADING_OK.test(h)) {
+        return '“' + h + '” cannot be a heading — letters, numbers and ordinary ' +
+               'punctuation only, up to ' + MAX_LAYOUT_HEADING + ' characters.';
+      }
+      /* Refused rather than dropped silently. An empty section does not appear
+         in a note, so saving one would quietly lose the heading they typed. */
+      if (!S.builder[i][1].length) {
+        return '“' + h + '” has nothing in it. Move something into it with the ' +
+               'arrows, or remove it — an empty section does not appear in the note.';
+      }
+    }
+    // Belt and braces on the guarantee the moves are supposed to give.
+    var seen = {}, count = 0;
+    for (var s = 0; s < S.builder.length; s++) {
+      for (var k = 0; k < S.builder[s][1].length; k++) {
+        if (seen[S.builder[s][1][k]]) return 'Something has gone wrong: ' +
+          layoutLabelOf(S.builder[s][1][k]) + ' is in the layout twice. Cancel and try again.';
+        seen[S.builder[s][1][k]] = true;
+        count++;
+      }
+    }
+    var all = layoutAllKeys();
+    var missing = all.filter(function (key) { return !seen[key]; });
+    if (missing.length || count !== all.length) {
+      return 'Something has gone wrong: ' + (missing.length ? missing.map(layoutLabelOf).join(', ') +
+        (missing.length === 1 ? ' is' : ' are') + ' missing from the layout' : 'the layout does not add up') +
+        '. Cancel and try again.';
+    }
+    return null;
+  }
+
+  function builderSays(text, warn) {
+    $('lb-msg').textContent = text || '';
+    $('lb-msg').classList.toggle('warn', !!warn);
+  }
+
+  var LAYOUT_SAVE_ERRORS = {
+    unauthenticated: 'Your session has ended. Sign in again in a new tab, then come back to this one — do not reload this page.',
+    no_account: 'This session is on the practice passcode, which has no account to save a layout onto.',
+    store_unavailable: 'The account store is not reachable, so nothing was saved. The layout on screen is unchanged.',
+    store_unreadable: 'Your account could not be read, so nothing was saved.',
+    store_full: 'There is no room to save a layout at the moment. Nothing was saved.',
+    too_many: 'You already have a layout for every appointment type.',
+    write_limit: 'That is a lot of saves in a short time. Try again later — nothing was saved.',
+    bad_origin: 'The save was refused. Reload the page in a new tab and try again.',
+    bad_type: 'This appointment type cannot have a layout saved for it.',
+    save_failed: 'The save did not go through. Nothing was changed.'
+  };
+
+  async function postLayout(body) {
+    var r = await fetch('/api/layouts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify(body)
+    });
+    var d = {};
+    try { d = await r.json(); } catch (e) { d = {}; }
+    return { r: r, d: d };
+  }
+
+  function layoutSaveMessage(res) {
+    var d = res.d || {};
+    if (LAYOUT_SAVE_ERRORS[d.error]) return LAYOUT_SAVE_ERRORS[d.error];
+    if (d.error === 'bad_layout') {
+      return 'That arrangement was refused' +
+        (Array.isArray(d.problems) && d.problems.length ? ': ' + d.problems.slice(0, 2).join('; ') : '') + '.';
+    }
+    return 'The save did not go through (' + res.r.status + '). Nothing was changed.';
+  }
+
+  async function saveBuilder() {
+    if (!builderOpen()) return;
+    var problem = builderProblem();
+    if (problem) { builderSays(problem, true); return; }
+    var btn = $('lb-save');
+    btn.disabled = true;
+    builderSays('Saving…', false);
+    var type = S.consultType;
+    // Trimmed headings, keys only: the layout says order and headings and
+    // nothing else, so there is nothing else to send.
+    var payload = { type: type, layout: { sections: S.builder.map(function (sec) {
+      return [String(sec[0]).trim().slice(0, MAX_LAYOUT_HEADING), sec[1].slice()];
+    }) } };
+    try {
+      var res = await postLayout(payload);
+      if (!res.r.ok) { builderSays(layoutSaveMessage(res), true); btn.disabled = false; return; }
+      /* Rebuilt from what the SERVER stored, not from the working copy: the
+         server repairs what it keeps, so this is the arrangement that will come
+         back at the next sign-in. If the two ever differ, the clinician sees
+         the real one now rather than a month from now. */
+      loadMyLayouts(res.d.layouts);
+      var name = S.myLayouts && S.myLayouts[type];
+      if (name && TEMPLATES[name]) {
+        setTemplate(name, true);
+        renderLayoutEditRow();
+        if (S.note) render(S.note);
+      }
+      btn.disabled = false;
+      closeBuilder();
+    } catch (err) {
+      builderSays('The save could not be sent. Check the connection — nothing was changed.', true);
+      btn.disabled = false;
+    }
+  }
+
+  async function forgetLayout() {
+    if (!builderOpen()) return;
+    if (!window.confirm('Delete your saved layout for ' +
+        (consultLabel(S.consultType) || 'this appointment type') +
+        '? The three built-in layouts are unaffected.')) return;
+    var btn = $('lb-forget');
+    btn.disabled = true;
+    builderSays('Deleting…', false);
+    var type = S.consultType;
+    try {
+      var res = await postLayout({ type: type, layout: null });
+      if (!res.r.ok) { builderSays(layoutSaveMessage(res), true); btn.disabled = false; return; }
+      // Rebuilt from the server's answer, so the picker and the store agree.
+      loadMyLayouts(res.d.layouts);
+      if (!(S.myLayouts && S.myLayouts[type])) {
+        delete TEMPLATES[CUSTOM_PREFIX + type];
+        /* renderTemplatePicker drops a selection that is no longer offered, but
+           the note on screen is still laid out the old way until it is redrawn. */
+        renderTemplatePicker();
+        if (!TEMPLATES[S.template]) setTemplate(templateFor(type), false);
+        renderLayoutEditRow();
+        if (S.note) render(S.note);
+      }
+      btn.disabled = false;
+      closeBuilder();
+    } catch (err) {
+      builderSays('That could not be sent. Check the connection — nothing was changed.', true);
+      btn.disabled = false;
+    }
   }
 
   // Every template must lay out every field AND every block exactly once, or
@@ -1714,6 +2259,9 @@ label.pmpr input { margin-top: 4px; }
     template: 'clinical',    // layout only; see TEMPLATES
     templatePicked: false,   // the clinician chose the layout themselves, so
                              // changing the consult type must not move it
+    myLayouts: {},           // consult type -> the name of their saved layout
+    canSaveLayouts: false,   // an account session; a passcode one cannot save
+    builder: null,           // the layout builder's working copy, while open
     edited: false,    // the clinician has changed the draft in place
     paused: false,
     pausedAt: 0,      // when the current pause began
@@ -1837,6 +2385,13 @@ label.pmpr input { margin-top: 4px; }
     // on the button you pressed in a section that is now hidden: a screen
     // reader announces nothing, and a keyboard user tabs from nowhere.
     if (!changed) return;
+    /* Unless a dialog is open over it (4 November 2026). The draft arrives in
+       two steps — working, then draft — and either can land while the layout
+       builder is open, which took focus out of the dialog and put it on the
+       page behind. A modal that loses focus to the background is a modal in
+       appearance only: the next Tab walks the note, which is editable. Found
+       by a test that opened the builder a few milliseconds early. */
+    if (builderOpen()) return;
     var el = $(name);
     try {
       el.focus({ preventScroll: true });
@@ -2143,6 +2698,8 @@ label.pmpr input { margin-top: 4px; }
       if (!S.templatePicked) setTemplate(templateFor(pair[0]), false);
       // "Mine" is per consult type, so which buttons exist changes with it.
       renderTemplatePicker();
+      // So is a layout, so Rearrange has nothing to edit until a type is chosen.
+      renderLayoutEditRow();
       refreshStart();
       loadChecklist(pair[0]);
     });
@@ -2155,6 +2712,37 @@ label.pmpr input { margin-top: 4px; }
   $('consent').addEventListener('change', function (e) {
     S.consent = e.target.checked;
     refreshStart();
+  });
+
+  /* ---- the layout builder's controls (4 November 2026) ---- */
+  $('layout-edit').addEventListener('click', function () { resetIdle(); openBuilder(); });
+  $('lb-cancel').addEventListener('click', function () { resetIdle(); closeBuilder(); });
+  $('lb-add').addEventListener('click', addSection);
+  $('lb-save').addEventListener('click', saveBuilder);
+  $('lb-forget').addEventListener('click', forgetLayout);
+  /* A click on the backdrop is NOT a cancel. On a tablet, with a panel full of
+     small arrows, a mis-tap at the edge would throw the arrangement away with
+     no warning. Cancel and Escape are the two ways out, and both are explicit. */
+  $('layout-builder').addEventListener('click', function (e) { if (e.target === $('layout-builder')) resetIdle(); });
+  /* Modal in the sense that matters: Escape closes it, and Tab cannot leave it.
+     Without the trap, tabbing out lands on the note behind — which is editable,
+     so the next keystroke would go into a clinical record while a dialog is
+     open over it. */
+  document.addEventListener('keydown', function (e) {
+    if (!builderOpen()) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeBuilder(); return; }
+    if (e.key !== 'Tab') return;
+    // .hidden is how this page hides things, and it is what the filter reads.
+    // offsetParent is deliberately not consulted: it is null for everything in
+    // jsdom, so a layout-based check would leave this untested and inert.
+    var stops = [].filter.call(
+      $('layout-builder').querySelectorAll('button, input'),
+      function (el) { return !el.disabled && !el.classList.contains('hidden'); });
+    if (!stops.length) return;
+    var first = stops[0], last = stops[stops.length - 1];
+    var at = stops.indexOf(document.activeElement);
+    if (e.shiftKey && (at === 0 || at === -1)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (at === stops.length - 1 || at === -1)) { e.preventDefault(); first.focus(); }
   });
 
   function refreshStart() {
@@ -2212,7 +2800,7 @@ label.pmpr input { margin-top: 4px; }
       sessionSeconds = d.authenticated ? d.expiresIn : 0;
       renderWho(d.authenticated ? d.who : null);
       // Rides along with this check rather than costing a request of its own.
-      loadMyLayouts(d.authenticated ? d.layouts : null);
+      applyAccount(d);
     } catch (err) {
       sessionSeconds = null; // unknown; do not block on a network blip
     }
@@ -7127,6 +7715,12 @@ label.pmpr input { margin-top: 4px; }
     // The layout the clinician picked is forgotten here and only here: wipe()
     // is the next patient.
     S.templatePicked = false;
+
+    /* A half-finished rearrangement is not carried into the next patient, and
+       a dialog must never be left open over a cleared page. The SAVED layouts
+       stay: they belong to the clinician, not to the consultation. */
+    if (!$('layout-builder').classList.contains('hidden')) closeBuilder();
+    S.builder = null;
 
     clearConsultation();
 

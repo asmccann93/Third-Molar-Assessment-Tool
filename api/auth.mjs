@@ -134,11 +134,20 @@ export default async function handler(req, res) {
         if (me && me.layouts && typeof me.layouts === 'object') layouts = me.layouts;
       } catch { layouts = null; }
     }
+    /* Whether this session could save a layout at all (4 November 2026).
+       `layouts` cannot answer that: null means BOTH "a passcode session, which
+       has no account to save onto" and "an account session that has saved
+       nothing yet". The page offers Rearrange on the strength of this, so a
+       clinician on the shared practice code is not shown a Save button that
+       POST /api/layouts will refuse with 409 no_account. The store being down
+       is deliberately not folded in here — that is transient, and the save
+       route reports it. */
     return res.status(200).json({
       authenticated: !!session,
       who: session ? session.who : null,
       admin: !!(session && session.admin),
       expiresIn: session ? secondsRemaining(token) : 0,
+      canSaveLayouts: !!(session && session.via === 'account'),
       layouts
     });
   }

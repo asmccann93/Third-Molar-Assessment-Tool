@@ -3291,6 +3291,7 @@ await testPerTypeDefaultLayout();
 await testReviewAids();
 await testMyLayouts();
 await testLayoutCannotRelabelDictation();
+await testLayoutBuilder();
 await testNotApplicableIsNotMissing();
 testStoresNothing();
 await testFriendlier();
@@ -6509,11 +6510,423 @@ async function testLayoutCannotRelabelDictation() {
       !/Options offered \(dictated\)/.test(copied), copied.slice(0, 500));
   }
 
-  /* repairLayout() also normalises the flag on the way in, so the layout the
-     page HOLDS states the truth rather than merely being overruled at render.
-     That has no witness here — nothing reads it — and an assertion with no
-     witness is an assertion that cannot fail. It is checked where it does show:
-     in what the builder sends back on Save, in testLayoutBuilder below. */
+  /* repairLayout() also drops the stored flag on the way in, so the layout the
+     page HOLDS carries no claim at all rather than merely being overruled at
+     render. That has no witness here — nothing reads it — and an assertion with
+     no witness is an assertion that cannot fail. It is checked where it does
+     show: in what the builder sends back on Save, in testLayoutBuilder below. */
+}
+
+/**
+ * THE LAYOUT BUILDER (4 November 2026). Stage two: how a layout gets saved.
+ *
+ * The guarantee that matters is that a field cannot be lost. There is no
+ * remove — only up and down, crossing into the neighbouring section at the
+ * ends — so losing one is meant to be structurally impossible rather than
+ * prevented by a check. These tests move things about, delete sections, and
+ * then count: every field and block must still be placed, exactly once.
+ *
+ * The second thing that matters is that a refused save changes nothing. A
+ * clinician who hits the write throttle must not be left with a note laid out
+ * one way on screen and another in the store.
+ */
+async function testLayoutBuilder() {
+  section('Rearranging the note, and saving it on the account');
+
+  const ALL_KEYS = [
+    'reasonForAttendance', 'medicalHistory', 'proposed', 'alternatives', 'risks', 'benefits',
+    'costs', 'patientQuestions', 'patientFactors', 'informationGiven', 'decision', 'nextStep',
+    'examination', 'radiographicFindings', 'treatmentToday', 'plan',
+    '@bpe', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'
+  ];
+
+  /* Every save the page makes, and what it sent. The transcribe and extract
+     stubs are not optional dressing: without them /api/extract answers {} and
+     there is no note, so every assertion about how the NOTE is laid out passes
+     vacuously against an empty #fields. The first draft of this test did
+     exactly that, and "the note on screen is exactly as it was" compared one
+     empty string with another. */
+  function bootBuilder({ layouts = null, canSave = true, save, note } = {}) {
+    const posts = [];
+    const ctx = boot({
+      onFetch: async (e, opts) => {
+        if (e.url.includes('/api/auth') && e.method === 'GET') {
+          return json200({ authenticated: true, who: 'AM', admin: false, expiresIn: 40000,
+            canSaveLayouts: canSave, layouts });
+        }
+        if (e.url.includes('/api/transcribe') && e.method === 'POST') {
+          return json200({ status: 'done', turns: DEFAULT_TURNS });
+        }
+        if (e.url.includes('/api/extract')) {
+          return json200({ status: 'done', note: note || note27({ sources: {} }) });
+        }
+        if (e.url.includes('/api/layouts') && e.method === 'POST') {
+          const body = JSON.parse(opts.body);
+          posts.push(body);
+          if (save) return save(body);
+          // The server stores what repair() gives it, which is what comes back.
+          const stored = body.layout === null ? {} : { [body.type]: { sections: body.layout.sections } };
+          return json200({ ok: true, layouts: stored });
+        }
+        return null;
+      }
+    });
+    return ctx.then((c) => ({ ...c, posts }));
+  }
+
+  const rows = (doc) => [...$(doc, 'lb-sections').querySelectorAll('.lb-sec')].map((sec) => [
+    sec.querySelector('input').value,
+    [...sec.querySelectorAll('.lb-row')].map((r) => r.dataset.key)
+  ]);
+  const placed = (doc) => rows(doc).flatMap((s) => s[1]);
+  const upBtn = (doc, key) => $(doc, 'lb-up-' + key);
+  const dnBtn = (doc, key) => $(doc, 'lb-dn-' + key);
+  const heads = (doc) => [...$(doc, 'fields').children]
+    .filter((el) => el.classList.contains('section-heading')).map((el) => el.textContent);
+
+  /* ON SCREEN, not merely "its own class is not .hidden". Rearrange sits in the
+     draft card next to the layout picker it edits, and that whole card is
+     display:none until there is a note — so reading one class said the button
+     was offered when nothing in it could even take focus. jsdom has no layout,
+     so this walks for a hidden ancestor, which is how this page hides things. */
+  const onScreen = (el) => {
+    for (let n = el; n && n.classList; n = n.parentElement) if (n.classList.contains('hidden')) return false;
+    return true;
+  };
+
+  /* A draft on screen, with the builder reachable — which is the only state a
+     clinician can open it from. Every case below goes through here rather than
+     clicking a button inside a hidden card. */
+  async function onDraft(opts = {}, type = /^Third molar/) {
+    const ctx = await bootBuilder(opts);
+    const { doc, win } = ctx;
+    await waitFor(() => [...$(doc, 'template-picker').querySelectorAll('button')].length >= 3, 'the picker');
+    armStart(doc, win, type);
+    if (opts.pickMine) {
+      await waitFor(() => [...$(doc, 'template-picker').querySelectorAll('button')].some((b) => b.textContent === 'Mine'),
+        'the saved layout to be offered');
+      click([...$(doc, 'template-picker').querySelectorAll('button')].find((b) => b.textContent === 'Mine'));
+    }
+    click($(doc, 'start'));
+    await tick(60);
+    click($(doc, 'stop'));
+    /* Not just "the draft is visible": the draft arrives as working -> draft,
+       and settle() returns on the first of those. Opening the builder in the
+       gap let the second view change pull focus out of the dialog, which is a
+       real defect and is now fixed in show() — but this still waits for the
+       page to be quiet, so these tests are about the builder and not about
+       that race. */
+    await settle(doc, () => !$(doc, 'draft').classList.contains('hidden') &&
+      $(doc, 'working').classList.contains('hidden'), 'the draft, with the working view gone');
+    return ctx;
+  }
+
+  async function openOn(ctx) {
+    click($(ctx.doc, 'layout-edit'));
+    await waitFor(() => !$(ctx.doc, 'layout-builder').classList.contains('hidden'), 'the builder to open');
+  }
+
+  /* ---- 1. offered only where it can work ---- */
+  {
+    const { doc } = await onDraft({ canSave: false });
+    ok('a passcode session is not offered Rearrange, because it has nowhere to save it',
+      !onScreen($(doc, 'layout-edit')));
+  }
+  {
+    const { doc } = await bootBuilder({});
+    await waitFor(() => [...$(doc, 'template-picker').querySelectorAll('button')].length >= 3, 'the picker');
+    click(typeButtons(doc).find((b) => /^Third molar/.test(b.textContent)));
+    await tick(30);
+    /* It lives in the draft card, beside the picker it edits, so it is reachable
+       when there is a note to rearrange and not before. */
+    ok('and it is not reachable before there is a note to rearrange',
+      !onScreen($(doc, 'layout-edit')));
+  }
+  {
+    const ctx = await onDraft({});
+    const { doc, win } = ctx;
+    ok('with a note on screen and an account session, Rearrange is there',
+      onScreen($(doc, 'layout-edit')));
+
+    /* ---- 2. it opens on the layout showing, not a blank slate ---- */
+    await openOn(ctx);
+    ok('seeded from the layout on screen — a third molar opens in the consent record',
+      rows(doc).map((s) => s[0]).join('|') === 'The discussion|The patient|Treatment|Context|Next',
+      rows(doc).map((s) => s[0]).join('|'));
+    ok('and every field and block is in it exactly once, so there is nothing to lose',
+      placed(doc).length === ALL_KEYS.length && ALL_KEYS.every((k) => placed(doc).includes(k)),
+      JSON.stringify({ placed: placed(doc).length, of: ALL_KEYS.length }));
+    ok('it says which type and which layout it started from',
+      /Third molar/.test($(doc, 'lb-sub').textContent) && /Consent record/.test($(doc, 'lb-sub').textContent),
+      $(doc, 'lb-sub').textContent);
+    ok('with no Delete offered, because nothing is saved for this type yet',
+      $(doc, 'lb-forget').classList.contains('hidden'));
+
+    /* ---- 3. a field moves, and crosses into the next section at the end ---- */
+    const before = rows(doc);
+    ok('costs starts at the end of the discussion', before[0][1][before[0][1].length - 1] === 'costs',
+      JSON.stringify(before[0][1]));
+    click(upBtn(doc, 'costs'));
+    await tick(20);
+    ok('up one place moves it within its section',
+      rows(doc)[0][1].indexOf('costs') === before[0][1].length - 2, JSON.stringify(rows(doc)[0][1]));
+    // Back down, then down again: off the end of the section and into the next.
+    click(dnBtn(doc, 'costs'));
+    await tick(20);
+    click(dnBtn(doc, 'costs'));
+    await tick(20);
+    ok('and off the end it joins the top of the next section, rather than stopping',
+      rows(doc)[0][1].indexOf('costs') === -1 && rows(doc)[1][1][0] === 'costs',
+      JSON.stringify(rows(doc).slice(0, 2)));
+    ok('nothing is lost or duplicated by a move',
+      placed(doc).length === ALL_KEYS.length && new Set(placed(doc)).size === ALL_KEYS.length);
+    ok('the arrow keeps focus, so the next press does not hunt for it',
+      doc.activeElement === dnBtn(doc, 'costs'),
+      doc.activeElement ? (doc.activeElement.id || doc.activeElement.tagName) : 'none');
+    ok('the very first field cannot be moved up out of the note',
+      upBtn(doc, rows(doc)[0][1][0]).disabled);
+    const lastSec = rows(doc)[rows(doc).length - 1][1];
+    ok('nor the very last one down out of it', dnBtn(doc, lastSec[lastSec.length - 1]).disabled);
+
+    /* ---- 4. a section is removed, and what was in it is not ---- */
+    const sectionCount = rows(doc).length;
+    const wasIn = rows(doc)[2][1].slice();
+    click($(doc, 'lb-sdel-2'));
+    await tick(20);
+    ok('removing a section removes the section', rows(doc).length === sectionCount - 1);
+    ok('and moves what was in it into the one above, rather than deleting it',
+      wasIn.every((k) => rows(doc)[1][1].includes(k)), JSON.stringify({ wasIn, now: rows(doc)[1][1] }));
+    ok('so after a removal every field is still placed exactly once',
+      placed(doc).length === ALL_KEYS.length && ALL_KEYS.every((k) => placed(doc).includes(k)),
+      JSON.stringify({ placed: placed(doc).length }));
+
+    /* ---- 5. a new section, and the refusal to save it empty ---- */
+    click($(doc, 'lb-add'));
+    await tick(20);
+    ok('a section can be added', rows(doc).length === sectionCount &&
+      rows(doc)[rows(doc).length - 1][0] === 'New section', JSON.stringify(rows(doc).map((s) => s[0])));
+    click($(doc, 'lb-save'));
+    await tick(40);
+    ok('saving with an empty section is refused, and says what to do about it',
+      /New section/.test($(doc, 'lb-msg').textContent) && /nothing in it/.test($(doc, 'lb-msg').textContent),
+      $(doc, 'lb-msg').textContent);
+    // ctx.posts, not a property of the window: `win.__posts === undefined` was
+    // the first version of this line and it could never have failed.
+    ok('and nothing was sent', ctx.posts.length === 0, JSON.stringify(ctx.posts));
+  }
+
+  /* ---- 6. a bad heading is refused before anything is sent ---- */
+  {
+    const ctx = await onDraft({});
+    const { doc, posts } = ctx;
+    await openOn(ctx);
+    const h = $(doc, 'lb-h-0');
+    h.value = '<img onerror=x>';
+    h.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
+    click($(doc, 'lb-save'));
+    await tick(40);
+    ok('a heading that is not plain text is refused on the page, not just by the server',
+      /cannot be a heading/.test($(doc, 'lb-msg').textContent) && posts.length === 0,
+      $(doc, 'lb-msg').textContent + ' / posts=' + posts.length);
+    h.value = '   ';
+    h.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
+    click($(doc, 'lb-save'));
+    await tick(40);
+    ok('and so is an empty one', /needs a heading/.test($(doc, 'lb-msg').textContent) && posts.length === 0,
+      $(doc, 'lb-msg').textContent);
+  }
+
+  /* ---- 7. WHAT IS SENT: keys and headings, and nothing else ----
+     Seeded from a layout saved in the old ['key', dictated] shape, so this is
+     also where the discarding of that flag is observable: the builder reads
+     the layout the page holds, and what it sends back must carry no claim
+     about what was dictated. */
+  {
+    const LEGACY = { 'third-molar': { sections: [
+      ['Mine', ALL_KEYS.map((k) => [k, k === 'risks'])]
+    ] } };
+    const ctx = await onDraft({ layouts: LEGACY, pickMine: true });
+    const { doc, posts } = ctx;
+    await openOn(ctx);
+    ok('a saved layout can be edited, and the Delete is offered for it',
+      onScreen($(doc, 'lb-forget')));
+    click($(doc, 'lb-save'));
+    await waitFor(() => posts.length > 0, 'the save to be sent');
+    const sent = posts[0];
+    ok('the save names the consult type', sent.type === 'third-molar', JSON.stringify(sent.type));
+    ok('and sends sections of KEYS, with no flag saying what was dictated',
+      sent.layout.sections.every((sec) => Array.isArray(sec[1]) && sec[1].every((e) => typeof e === 'string')),
+      JSON.stringify(sent.layout.sections[0][1].slice(0, 3)));
+    ok('with every field still in it',
+      sent.layout.sections.flatMap((s) => s[1]).length === ALL_KEYS.length,
+      String(sent.layout.sections.flatMap((s) => s[1]).length));
+    await waitFor(() => $(doc, 'layout-builder').classList.contains('hidden'), 'the builder to close after saving');
+    ok('a successful save closes the builder', $(doc, 'layout-builder').classList.contains('hidden'));
+  }
+
+  /* ---- 8. the note follows what the SERVER stored, not the working copy ---- */
+  {
+    // The server answers with a DIFFERENT arrangement from the one sent. The
+    // page must show the stored one: that is what will come back tomorrow.
+    const ctx = await onDraft({
+      save: () => json200({ ok: true, layouts: { 'third-molar': { sections: [
+        ['What the store actually holds', ALL_KEYS.slice()]
+      ] } } })
+    });
+    const { doc } = ctx;
+    await openOn(ctx);
+    click($(doc, 'lb-save'));
+    await waitFor(() => $(doc, 'layout-builder').classList.contains('hidden'), 'the save to finish');
+    ok('the note is relaid out from what the server stored, not from what was sent',
+      heads(doc).join('|') === 'What the store actually holds', heads(doc).join('|'));
+    ok('and the saved layout is the one selected',
+      $(doc, 'template-picker').querySelector('button.on').textContent === 'Mine');
+  }
+
+  /* ---- 9. A REFUSED SAVE CHANGES NOTHING ---- */
+  {
+    const ctx = await onDraft({
+      save: () => ({ ok: false, status: 429, json: async () => ({ error: 'write_limit' }) })
+    });
+    const { doc } = ctx;
+    const headsBefore = heads(doc).join('|');
+    ok('there is a note on screen to compare against, so this is not two empty strings',
+      headsBefore.length > 0, headsBefore);
+    await openOn(ctx);
+    click(dnBtn(doc, 'costs'));
+    await tick(20);
+    click($(doc, 'lb-save'));
+    await waitFor(() => /lot of saves/.test($(doc, 'lb-msg').textContent), 'the refusal to be reported');
+    ok('a throttled save says so in the clinician\'s words',
+      /lot of saves/.test($(doc, 'lb-msg').textContent) && /nothing was saved/.test($(doc, 'lb-msg').textContent),
+      $(doc, 'lb-msg').textContent);
+    ok('the builder stays open, so the arrangement is not lost',
+      !$(doc, 'layout-builder').classList.contains('hidden'));
+    ok('Save is usable again rather than stuck disabled', !$(doc, 'lb-save').disabled);
+    ok('the picker does not offer a layout that was never stored',
+      ![...$(doc, 'template-picker').querySelectorAll('button')].some((b) => b.textContent === 'Mine'),
+      [...$(doc, 'template-picker').querySelectorAll('button')].map((b) => b.textContent).join('|'));
+    const headsAfter = heads(doc).join('|');
+    ok('and the note on screen is exactly as it was', headsAfter === headsBefore,
+      headsBefore + ' -> ' + headsAfter);
+
+    /* Cancel after a failed save, then reopen: the discarded working copy must
+       not come back. */
+    click($(doc, 'lb-cancel'));
+    await tick(20);
+    await openOn(ctx);
+    ok('Cancel discards the working copy — reopening starts from the note again',
+      rows(doc)[0][1][rows(doc)[0][1].length - 1] === 'costs', JSON.stringify(rows(doc)[0][1]));
+  }
+
+  /* ---- 10. the dialog behaves like one ---- */
+  {
+    const ctx = await onDraft({});
+    const { doc, win } = ctx;
+    await openOn(ctx);
+    ok('focus starts inside the dialog', doc.activeElement === $(doc, 'lb-h-0'),
+      doc.activeElement ? (doc.activeElement.id || doc.activeElement.tagName) : 'none');
+    /* A mis-tap on the backdrop must not throw the arrangement away: this is
+       used on a tablet with a panel full of small arrows. */
+    click($(doc, 'layout-builder'));
+    await tick(20);
+    ok('a tap on the backdrop does not discard it', !$(doc, 'layout-builder').classList.contains('hidden'));
+
+    // Tab must not escape onto the note behind, which is editable.
+    const stops = [...$(doc, 'layout-builder').querySelectorAll('button, input')]
+      .filter((el) => !el.disabled && !el.classList.contains('hidden'));
+    stops[stops.length - 1].focus();
+    doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    await tick(20);
+    ok('Tab off the end comes back to the start of the dialog, not onto the note',
+      doc.activeElement === stops[0],
+      doc.activeElement ? (doc.activeElement.id || doc.activeElement.className) : 'none');
+    stops[0].focus();
+    doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
+    await tick(20);
+    ok('and Shift+Tab off the start wraps to the end',
+      doc.activeElement === stops[stops.length - 1]);
+
+    doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await tick(20);
+    ok('Escape closes it', $(doc, 'layout-builder').classList.contains('hidden'));
+    ok('and puts focus back on the button that opened it', doc.activeElement === $(doc, 'layout-edit'),
+      doc.activeElement ? (doc.activeElement.id || doc.activeElement.tagName) : 'none');
+  }
+
+  /* ---- 10b. a view change behind the dialog does not take focus from it ----
+     The draft arrives as working -> draft, and a redraft does it again. Either
+     can land while the builder is open, and show() moved focus to the view
+     container that had just appeared — out of the dialog and onto the note
+     behind, which is editable, so the next keystroke would have gone into a
+     clinical record. */
+  {
+    const ctx = await onDraft({});
+    const { doc } = ctx;
+    await openOn(ctx);
+    const inside = () => $(doc, 'layout-builder').contains(doc.activeElement);
+    ok('focus is in the dialog to begin with', inside(),
+      doc.activeElement ? (doc.activeElement.id || doc.activeElement.tagName) : 'none');
+    // A redraft, which is the ordinary way the view changes under the dialog.
+    click([...doc.querySelectorAll('.length-picker:not(#template-picker) button')]
+      .find((b) => b.dataset.length === 'brief'));
+    await waitFor(() => $(doc, 'working').classList.contains('hidden'), 'the redraft to come back');
+    ok('a redraft behind the dialog leaves focus inside it', inside(),
+      doc.activeElement ? (doc.activeElement.id || doc.activeElement.tagName) : 'none');
+    ok('and the dialog is still open, with the working copy intact',
+      !$(doc, 'layout-builder').classList.contains('hidden') && placed(doc).length === ALL_KEYS.length,
+      String(placed(doc).length));
+
+    /* The three pill rows in the draft head must stay distinguishable: the
+       suites pick the level-of-detail row out by class, and Rearrange sharing
+       it would have widened every one of those selectors. */
+    const detail = [...doc.querySelectorAll('.length-picker:not(#template-picker) button')];
+    ok('the level-of-detail selector still matches only the three detail buttons',
+      detail.length === 3 && detail.every((b) => !!b.dataset.length),
+      detail.map((b) => b.dataset.length || b.id).join('|'));
+  }
+
+  /* ---- 11. the next patient does not inherit a half-finished rearrangement ---- */
+  {
+    const ctx = await onDraft({});
+    const { doc } = ctx;
+    await openOn(ctx);
+    click(dnBtn(doc, 'costs'));
+    await tick(20);
+    ok('the builder is open with an edit in it', !$(doc, 'layout-builder').classList.contains('hidden'));
+    click($(doc, 'clear'));
+    await tick(60);
+    ok('clearing for the next patient closes the builder',
+      $(doc, 'layout-builder').classList.contains('hidden'));
+  }
+
+  /* ---- 12. deleting a saved layout ---- */
+  {
+    const SAVED = { 'third-molar': { sections: [['Mine', ALL_KEYS.slice()]] } };
+    const ctx = await onDraft({
+      layouts: SAVED,
+      pickMine: true,
+      save: (body) => json200({ ok: true, layouts: body.layout === null ? {} : SAVED })
+    });
+    const { doc, posts } = ctx;
+    ok('the saved layout is laid out', heads(doc).join('|') === 'Mine', heads(doc).join('|'));
+    await openOn(ctx);
+    click($(doc, 'lb-forget'));
+    await waitFor(() => posts.length > 0, 'the delete to be sent');
+    ok('deleting sends a null layout for that type, not an empty one',
+      posts[0].layout === null && posts[0].type === 'third-molar', JSON.stringify(posts[0]));
+    await waitFor(() => $(doc, 'layout-builder').classList.contains('hidden'), 'the builder to close');
+    ok('Mine is gone from the picker',
+      ![...$(doc, 'template-picker').querySelectorAll('button')].some((b) => b.textContent === 'Mine'),
+      [...$(doc, 'template-picker').querySelectorAll('button')].map((b) => b.textContent).join('|'));
+    ok('and the note is relaid out in a built-in layout rather than left on a deleted one',
+      heads(doc).length > 0 && heads(doc).indexOf('Mine') === -1, heads(doc).join('|'));
+    ok('every field is still in the note after the layout was deleted',
+      ALL_KEYS.filter((k) => k.charAt(0) !== '@').every((k) =>
+        !!$(doc, 'fields').querySelector('.field[data-key="' + k + '"]') ||
+        ['examination', 'radiographicFindings', 'treatmentToday', 'plan'].includes(k)),
+      [...$(doc, 'fields').querySelectorAll('.field[data-key]')].map((f) => f.dataset.key).join(','));
+  }
 }
 
 async function testNotApplicableIsNotMissing() {

@@ -1599,6 +1599,19 @@ async function testMultiUser() {
   body = await askWho('');
   ok('and no session reports neither', body?.authenticated === false && body?.who === null, JSON.stringify(body));
 
+  /* Whether a layout can be saved at all (4 November 2026). `layouts` cannot
+     answer it — null means both "a passcode session, which has no account"
+     and "an account session that has saved nothing yet" — and the page decides
+     whether to offer Rearrange on this. Without it, a clinician on the shared
+     practice code is shown a Save button that /api/layouts refuses with 409. */
+  body = await askWho('ai_notes_session=' + (await mintToken(S, 3600, 'SM')));
+  ok('a passcode session is told it cannot save a layout, even though it has initials',
+    body?.canSaveLayouts === false, JSON.stringify(body));
+  body = await askWho('');
+  ok('and nor can no session at all', body?.canSaveLayouts === false, JSON.stringify(body));
+  // The positive case needs a real account behind it, so it sits with the
+  // other v3 session checks, below.
+
   // Passcode parsing — a malformed entry must be dropped, never half-accepted.
   ok('per-user passcodes parse', parseUsers('AM:longenough1,MM:alsolongenough').length === 2);
   {
@@ -2297,6 +2310,13 @@ async function testAccountFlows() {
     ok('and the API', (await gate('/api/transcribe', { cookie: amCookie, accept: 'application/json' })) === undefined);
     ok('the session check reports who, and that AM is an admin',
       JSON.stringify(await status(amCookie)).includes('"authenticated":true,"who":"AM","admin":true'), JSON.stringify(await status(amCookie)));
+    /* And that this one could save a note layout (4 November 2026). `layouts`
+       cannot answer that — null means both "no account to save onto" and "an
+       account that has saved nothing yet" — and the page offers Rearrange on
+       the strength of it, so without this a clinician on the practice passcode
+       is shown a Save button that /api/layouts refuses with 409. */
+    ok('and that an account session can save a layout',
+      (await status(amCookie))?.canSaveLayouts === true, JSON.stringify(await status(amCookie)));
     ok('transcribe and extract accept it', (await transcribeAs(amCookie)) === 200 && (await extractAs(amCookie)) === 400);
     ok('a session from an older epoch is refused', (await gate('/ai-notes/', { cookie: await cookieFor('AM', 0) }))?.status === 401);
     ok('and one from an epoch the account has not reached', (await gate('/ai-notes/', { cookie: await cookieFor('AM', 7) }))?.status === 401);
