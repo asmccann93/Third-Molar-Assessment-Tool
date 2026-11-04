@@ -3323,33 +3323,55 @@ async function testSept27b() {
       ok('every field and block is placeable', keys.length === pm.FIELDS.length + pm.DICTATED_FIELDS.length + pm.BLOCK_KEYS.length &&
         keys.includes('@diagnoses') && keys.includes('risks'), String(keys.length));
 
-      const full = { sections: [['A', keys.slice(0, 5).map((k) => [k, false])],
-                                ['B', keys.slice(5).map((k) => [k, false])]] };
+      const full = { sections: [['A', keys.slice(0, 5)], ['B', keys.slice(5)]] };
       ok('a complete arrangement is valid', L.validate(full, keys).ok, JSON.stringify(L.validate(full, keys).problems));
-      ok('an unknown field is refused', !L.validate({ sections: [['A', [['nope', false]]]] }, keys).ok);
+      ok('an unknown field is refused', !L.validate({ sections: [['A', ['nope']]] }, keys).ok);
       ok('the same field twice is refused',
-        L.validate({ sections: [['A', [['risks', false], ['risks', false]]]] }, keys).problems.some((p2) => /twice/.test(p2)));
+        L.validate({ sections: [['A', ['risks', 'risks']]] }, keys).problems.some((p2) => /twice/.test(p2)));
       ok('a heading that is not plain text is refused',
-        !L.validate({ sections: [['<img onerror=x>', [['risks', false]]]] }, keys).ok);
+        !L.validate({ sections: [['<img onerror=x>', ['risks']]] }, keys).ok);
       ok('and so is something that is not a layout at all',
         !L.validate(null, keys).ok && !L.validate({ sections: [] }, keys).ok && !L.validate([], keys).ok);
+      ok('an entry that is not a name at all is refused',
+        !L.validate({ sections: [['A', [{ key: 'risks' }]]] }, keys).ok &&
+        !L.validate({ sections: [['A', [['risks']]]] }, keys).ok);
+
+      /* A LAYOUT STATES ORDER AND HEADINGS, NOT WHAT WAS DICTATED (4 November
+         2026). For one day a section held ['key', dictated] pairs, and the page
+         read that flag for whether a field appeared at all, for the "Dictated"
+         tag, and for the "(dictated)" suffix in the pasted record. A stored
+         arrangement could therefore contradict the field: ['risks', true]
+         dropped the material risks out of a consent record on every
+         appointment with no dictation.
+
+         The pair shape is still accepted, because layouts saved on 3 November
+         are in it — and its second element is DISCARDED, not corrected. These
+         two assertions are the contract: the key survives, the claim does not. */
+      const legacy = { sections: [['Mine', [['risks', true], ['examination', false], ['@options', true]]]] };
+      ok('a layout saved in the pair shape is still read', L.validate(legacy, keys).ok,
+        JSON.stringify(L.validate(legacy, keys).problems));
+      const relaid = L.repair(legacy, keys);
+      ok('and comes back as keys, with nothing left to say what was dictated',
+        relaid.sections[0][1].slice(0, 3).join(',') === 'risks,examination,@options' &&
+        relaid.sections.every((sec) => sec[1].every((e) => typeof e === 'string')),
+        JSON.stringify(relaid.sections[0][1].slice(0, 3)));
 
       /* THE ONE THAT MATTERS. A layout saved before a field existed must not
          lose it: three blocks were added in the week before this was built. */
-      const stale = { sections: [['Mine', keys.filter((k) => k !== '@diagnoses' && k !== 'costs').map((k) => [k, false])]] };
+      const stale = { sections: [['Mine', keys.filter((k) => k !== '@diagnoses' && k !== 'costs')]] };
       const fixed = L.repair(stale, keys);
-      const placed = fixed.sections.flatMap((sec) => sec[1].map((e) => e[0]));
+      const placed = fixed.sections.flatMap((sec) => sec[1]);
       ok('a field added after the layout was saved is appended, never dropped',
         fixed.added.join(',') === 'costs,@diagnoses' && placed.length === keys.length &&
         keys.every((k) => placed.includes(k)),
         JSON.stringify({ added: fixed.added, placed: placed.length, of: keys.length }));
       ok('and it says so, under a heading that explains itself',
         fixed.sections[fixed.sections.length - 1][0] === 'Added since you saved this');
-      const gone = L.repair({ sections: [['Mine', [['risks', false], ['wasRemoved', false]]]] }, keys);
+      const gone = L.repair({ sections: [['Mine', ['risks', 'wasRemoved']]] }, keys);
       ok('a field the tool no longer has is removed, and reported',
-        gone.removed.join(',') === 'wasRemoved' && !gone.sections.flatMap((x) => x[1]).some((e) => e[0] === 'wasRemoved'));
+        gone.removed.join(',') === 'wasRemoved' && !gone.sections.flatMap((x) => x[1]).includes('wasRemoved'));
 
-      const u = L.usable({ 'exam-recall': full, 'not-a-type': full, perio: { sections: [['A', [['nope', false]]]] } },
+      const u = L.usable({ 'exam-recall': full, 'not-a-type': full, perio: { sections: [['A', ['nope']]] } },
         keys, Object.keys(pm.CONSULT_TYPES));
       ok('only layouts for real types, in a shape we can use, survive',
         Object.keys(u.out).join(',') === 'exam-recall' && u.dropped.sort().join(',') === 'not-a-type,perio',

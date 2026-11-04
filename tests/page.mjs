@@ -3290,6 +3290,7 @@ await testBlocksFollowTheLayout();
 await testPerTypeDefaultLayout();
 await testReviewAids();
 await testMyLayouts();
+await testLayoutCannotRelabelDictation();
 await testNotApplicableIsNotMissing();
 testStoresNothing();
 await testFriendlier();
@@ -6271,6 +6272,14 @@ async function testReviewAids() {
 async function testMyLayouts() {
   section('A layout saved on the account, and what happens when the tool moves on');
 
+  /* DELIBERATELY IN THE OLD ['key', dictated] SHAPE. That is what a layout
+     saved on 3 November 2026 holds, and layouts have stated keys alone since
+     the 4th (see the comment on TEMPLATES in the page). Leaving this test in
+     the pair shape is how backward compatibility stays proved: if someone
+     "tidies" these into plain keys, nothing checks that a layout already in
+     the store can still be read. The flag's VALUE is meaningless here and is
+     discarded on the way in — testLayoutCannotRelabelDictation is where that
+     is asserted. */
   const LAYOUT = {
     'exam-recall': { sections: [
       ['What I found', [['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
@@ -6383,6 +6392,128 @@ async function testMyLayouts() {
     /BLOCK_KEYS = \['@bpe', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'\]/
       .test(readFileSync(new URL('../api/_prompt.mjs', import.meta.url), 'utf8')) &&
     /'@bpe':[\s\S]*'@la':[\s\S]*'@sedation':[\s\S]*'@implant':[\s\S]*'@options':[\s\S]*'@planitems':[\s\S]*'@diagnoses':/.test(src));
+}
+
+/**
+ * A SAVED LAYOUT MUST NOT BE ABLE TO SAY WHAT WAS DICTATED (4 November 2026).
+ *
+ * The layout format carries a flag per entry — [key, dictated] — and until now
+ * the page READ it: for visibility (a dictated field appears only when there is
+ * something in it or Dictate was pressed), for the "Dictated" tag on screen
+ * ("said by you after the patient left, not to the patient"), and for the
+ * "(dictated)" suffix in the pasted record.
+ *
+ * So a stored arrangement could make two false statements about a consultation:
+ *
+ *   ['risks', true]        the material risks vanish from a consent record
+ *                          whenever nothing was dictated, and when they do
+ *                          appear they are labelled as not said to the patient
+ *   ['examination', false] dictated findings read as part of the conversation
+ *
+ * Both are claims about what the patient was told, in the fields a Montgomery
+ * claim turns on, produced by an order somebody chose weeks earlier. The flag
+ * is now derived from the field in all three places and the stored one is
+ * ignored. This test uses a layout that states both lies.
+ */
+async function testLayoutCannotRelabelDictation() {
+  section('A saved layout cannot change what the record claims was said');
+
+  // Every key, so the layout is complete and nothing is appended by repair;
+  // then the two deliberate lies. Built from the list rather than typed out, so
+  // a key added later lands here too instead of silently changing the subject.
+  const ALL = [
+    'reasonForAttendance', 'medicalHistory', 'proposed', 'alternatives', 'risks', 'benefits',
+    'costs', 'patientQuestions', 'patientFactors', 'informationGiven', 'decision', 'nextStep',
+    'examination', 'radiographicFindings', 'treatmentToday', 'plan',
+    '@bpe', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'
+  ];
+  const LIES = {
+    'third-molar': { sections: [['Everything', ALL.map((k) => [k, k === 'risks' || k === '@options'])]] }
+  };
+
+  const bootWith = (note) => boot({
+    onFetch: async (e) => {
+      if (e.url.includes('/api/auth') && e.method === 'GET') {
+        return json200({ authenticated: true, who: 'AM', admin: false, expiresIn: 40000, layouts: LIES });
+      }
+      if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns: DEFAULT_TURNS });
+      if (e.url.includes('/api/extract')) return json200({ status: 'done', note });
+      return null;
+    }
+  });
+
+  const pickMine = async (doc) => {
+    await waitFor(() => [...$(doc, 'template-picker').querySelectorAll('button')].some((b) => b.textContent === 'Mine'),
+      'the saved layout to be offered');
+    click([...$(doc, 'template-picker').querySelectorAll('button')].find((b) => b.textContent === 'Mine'));
+  };
+
+  /* ---- 1. no dictation: an empty consent field must still be on screen ----
+     This is the assertion that dies if the visibility filter goes back to
+     reading the layout. risks is EMPTY here on purpose: with the flag read from
+     the layout and no dictation, the field was dropped from the note
+     altogether — no heading, no "Not captured", nothing to say it was missing. */
+  {
+    const { doc, win } = await bootWith(note27({ risks: null, sources: {} }));
+    armStart(doc, win, /^Third molar/);
+    await pickMine(doc);
+    click($(doc, 'start'));
+    await tick(60);
+    click($(doc, 'stop'));
+    await settle(doc);
+    const keys = [...$(doc, 'fields').querySelectorAll('.field[data-key]')].map((f) => f.dataset.key);
+    ok('an empty consent field the layout called dictated is still in the note',
+      keys.includes('risks'), keys.join(','));
+    const risks = $(doc, 'fields').querySelector('.field[data-key="risks"]');
+    ok('and still says it was not captured, which is the claim that matters',
+      !!risks && risks.classList.contains('is-gap'), risks ? risks.className : 'absent');
+  }
+
+  /* ---- 2. with dictation: the tags and the paste come from the field ---- */
+  {
+    const { doc, win } = await bootWith(note27({
+      risks: 'Swelling, bruising, altered sensation.',
+      examination: 'Grossly carious LL8, partially erupted.',
+      sources: {}
+    }));
+    armStart(doc, win, /^Third molar/);
+    await pickMine(doc);
+    click($(doc, 'start'));
+    await tick(60);
+    click($(doc, 'dictate'));
+    await tick(30);
+    click($(doc, 'stop'));
+    await settle(doc);
+
+    const field = (k) => $(doc, 'fields').querySelector('.field[data-key="' + k + '"]');
+    ok('the dictation was registered, or the rest of this proves nothing',
+      !!field('examination'), [...$(doc, 'fields').querySelectorAll('.field[data-key]')].map((f) => f.dataset.key).join(','));
+    ok('a consent field the layout called dictated carries no Dictated tag',
+      !!field('risks') && !field('risks').querySelector('.dictated-tag'),
+      field('risks') ? field('risks').className : 'absent');
+    ok('and a dictated field the layout called conversation still carries one',
+      !!field('examination') && !!field('examination').querySelector('.dictated-tag'));
+
+    let copied = '';
+    win.navigator.clipboard.writeText = async (t) => { copied = t; };
+    click($(doc, 'copy-all'));
+    await waitFor(() => !!copied, 'the copy reaching the clipboard');
+    ok('the pasted record does not call the risks discussion dictated',
+      !/Material risks named, per option \(dictated\)/.test(copied), copied.slice(0, 400));
+    ok('and does call the examination dictated',
+      /Examination findings \(dictated\)/.test(copied), copied.slice(0, 400));
+
+    /* The blocks have always taken this from BLOCKS rather than the layout, and
+       must keep doing so: @options is flagged `true` in the layout above. */
+    ok('a block the layout called dictated is not relabelled either',
+      !/Options offered \(dictated\)/.test(copied), copied.slice(0, 500));
+  }
+
+  /* repairLayout() also normalises the flag on the way in, so the layout the
+     page HOLDS states the truth rather than merely being overruled at render.
+     That has no witness here — nothing reads it — and an assertion with no
+     witness is an assertion that cannot fail. It is checked where it does show:
+     in what the builder sends back on Save, in testLayoutBuilder below. */
 }
 
 async function testNotApplicableIsNotMissing() {

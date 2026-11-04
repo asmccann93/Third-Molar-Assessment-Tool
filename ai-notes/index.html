@@ -1095,7 +1095,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-11-03.1';
+  var BUILD = '2026-11-04.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1385,51 +1385,67 @@ label.pmpr input { margin-top: 4px; }
            Object.prototype.hasOwnProperty.call(BLOCKS, key);
   }
 
-  // How the note READS, which is not the order the fields are extracted in.
-  // A template is a LAYOUT: which fields and blocks appear, in what order,
-  // under what headings. It never changes what was extracted, so switching
-  // between them is instant and cannot alter the content of the note.
-  //   [key, dictated?] — a key beginning '@' is a block, see BLOCKS above
+  /* How the note READS, which is not the order the fields are extracted in.
+     A template is a LAYOUT: which fields and blocks appear, in what order,
+     under what headings. It never changes what was extracted, so switching
+     between them is instant and cannot alter the content of the note.
+
+     A section is [heading, [key, key, ...]]. A key beginning '@' is a block,
+     see BLOCKS above.
+
+     IT USED TO BE [key, dictated] (until 4 November 2026), and that second
+     element was a SECOND COPY of something the field already knows. The page
+     read it — for whether a field appears at all, for the "Dictated" tag, and
+     for the "(dictated)" suffix in the pasted record — so an arrangement could
+     contradict the field and make the record claim the patient was not told
+     something they were told, or was told something they were not. On a
+     consent record, with ['risks', true] and no dictation, the material risks
+     left the note entirely.
+
+     A duplicated fact that can disagree is a defect waiting to be shipped, so
+     the duplicate is gone rather than guarded: dictatedFor() is the only
+     answer, and a layout cannot state one. Stored layouts in the old shape are
+     still read — repairLayout() takes the key and drops the flag. */
   var TEMPLATES = {
     clinical: {
       label: 'Clinical note',
       hint: 'Chronological. What brought them in, what was found, what was discussed, what was decided.',
       sections: [
-        ['Presentation', [['reasonForAttendance', false], ['medicalHistory', false]]],
-        ['Findings',     [['examination', true], ['radiographicFindings', true], ['@bpe', false], ['@diagnoses', false]]],
-        ['Discussion',   [['proposed', false], ['alternatives', false], ['@options', false], ['patientFactors', false],
-                          ['risks', false], ['benefits', false], ['costs', false], ['patientQuestions', false]]],
+        ['Presentation', ['reasonForAttendance', 'medicalHistory']],
+        ['Findings',     ['examination', 'radiographicFindings', '@bpe', '@diagnoses']],
+        ['Discussion',   ['proposed', 'alternatives', '@options', 'patientFactors',
+                          'risks', 'benefits', 'costs', 'patientQuestions']],
         // Chronological inside the section too: sedated, anaesthetised, treated.
-        ['Treatment',    [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true]]],
-        ['Outcome',      [['decision', false], ['@planitems', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
+        ['Treatment',    ['treatmentToday', '@sedation', '@la', '@implant']],
+        ['Outcome',      ['decision', '@planitems', 'informationGiven', 'nextStep', 'plan']]
       ]
     },
     consent: {
       label: 'Consent record',
       hint: 'Montgomery order: what was proposed, what alternatives were offered, what risks were named, what was decided.',
       sections: [
-        ['The discussion', [['proposed', false], ['alternatives', false], ['@options', false], ['risks', false],
-                            ['benefits', false], ['patientFactors', false], ['costs', false]]],
-        ['The patient',    [['patientQuestions', false], ['informationGiven', false], ['decision', false]]],
-        ['Treatment',      [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true]]],
-        ['Context',        [['reasonForAttendance', false], ['medicalHistory', false],
-                            ['examination', true], ['radiographicFindings', true], ['@bpe', false],
-                            ['@diagnoses', false]]],
-        ['Next',           [['@planitems', false], ['nextStep', false], ['plan', true]]]
+        ['The discussion', ['proposed', 'alternatives', '@options', 'risks',
+                            'benefits', 'patientFactors', 'costs']],
+        ['The patient',    ['patientQuestions', 'informationGiven', 'decision']],
+        ['Treatment',      ['treatmentToday', '@sedation', '@la', '@implant']],
+        ['Context',        ['reasonForAttendance', 'medicalHistory',
+                            'examination', 'radiographicFindings', '@bpe',
+                            '@diagnoses']],
+        ['Next',           ['@planitems', 'nextStep', 'plan']]
       ]
     },
     soap: {
       label: 'SOAP',
       hint: 'Subjective, objective, assessment, plan.',
       sections: [
-        ['Subjective', [['reasonForAttendance', false], ['medicalHistory', false], ['patientQuestions', false], ['patientFactors', false]]],
-        ['Objective',  [['examination', true], ['radiographicFindings', true], ['@bpe', false]]],
+        ['Subjective', ['reasonForAttendance', 'medicalHistory', 'patientQuestions', 'patientFactors']],
+        ['Objective',  ['examination', 'radiographicFindings', '@bpe']],
         // The diagnosis leads the Assessment because in SOAP that is what an
         // assessment is; what is proposed for it follows.
-        ['Assessment', [['@diagnoses', false], ['proposed', false], ['alternatives', false], ['@options', false],
-                        ['risks', false], ['benefits', false]]],
-        ['Plan',       [['treatmentToday', true], ['@sedation', true], ['@la', true], ['@implant', true],
-                        ['decision', false], ['@planitems', false], ['costs', false], ['informationGiven', false], ['nextStep', false], ['plan', true]]]
+        ['Assessment', ['@diagnoses', 'proposed', 'alternatives', '@options',
+                        'risks', 'benefits']],
+        ['Plan',       ['treatmentToday', '@sedation', '@la', '@implant',
+                        'decision', '@planitems', 'costs', 'informationGiven', 'nextStep', 'plan']]
       ]
     }
   };
@@ -1498,6 +1514,26 @@ label.pmpr input { margin-top: 4px; }
       .concat(Object.keys(BLOCKS));
   }
 
+  /* Whether a key holds DICTATION — said to the record after the patient left,
+     not to the patient. A fact about the field or the block, and the ONLY place
+     the answer comes from (4 November 2026). No layout states it; see the
+     comment on TEMPLATES for what happened when one could. */
+  function dictatedFor(key) {
+    if (isBlock(key)) return !!BLOCKS[key].dictated;
+    var spec = fieldSpec(key);
+    return !!(spec && spec.dictated);
+  }
+
+  /* One entry of a stored section, as a key. Accepts the ['key', dictated]
+     pairs that layouts saved on 3 November 2026 hold, and returns the key
+     alone: the flag those pairs carry is discarded, not corrected, because
+     nothing reads it any more. */
+  function layoutKeyOf(entry) {
+    if (typeof entry === 'string') return entry;
+    if (Array.isArray(entry) && typeof entry[0] === 'string') return entry[0];
+    return null;
+  }
+
   function repairLayout(sections, allKeys) {
     var known = {}, seen = {}, out = [], added = [];
     allKeys.forEach(function (k) { known[k] = true; });
@@ -1505,16 +1541,16 @@ label.pmpr input { margin-top: 4px; }
       if (!Array.isArray(sec) || sec.length !== 2 || !Array.isArray(sec[1])) return;
       var keep = [];
       sec[1].forEach(function (e) {
-        if (!Array.isArray(e) || typeof e[0] !== 'string') return;
-        if (!known[e[0]] || seen[e[0]]) return;
-        seen[e[0]] = true;
-        keep.push([e[0], !!e[1]]);
+        var key = layoutKeyOf(e);
+        if (!key || !known[key] || seen[key]) return;
+        seen[key] = true;
+        keep.push(key);
       });
       if (keep.length) out.push([String(sec[0]).slice(0, 40), keep]);
     });
-    allKeys.forEach(function (k) { if (!seen[k]) added.push([k, false]); });
-    if (added.length) out.push(['Added since you saved this', added]);
-    return { sections: out, added: added.map(function (a2) { return a2[0]; }) };
+    allKeys.forEach(function (k) { if (!seen[k]) added.push(k); });
+    if (added.length) out.push(['Added since you saved this', added.slice()]);
+    return { sections: out, added: added };
   }
 
   /* Merge what came back from the session check. One layout per consult type,
@@ -1604,8 +1640,22 @@ label.pmpr input { margin-top: 4px; }
       // anything new is appended. Running this check over it would report a
       // layout saved last month as broken when it is merely out of date.
       if (TEMPLATES[name].mine) return;
-      var keys = [];
-      TEMPLATES[name].sections.forEach(function (sec) { sec[1].forEach(function (k) { keys.push(k[0]); }); });
+      var keys = [], shaped = [];
+      TEMPLATES[name].sections.forEach(function (sec) {
+        sec[1].forEach(function (k) {
+          keys.push(layoutKeyOf(k));
+          /* A section holds KEYS since 4 November 2026. A pair left behind by
+             a half-finished edit would still render — layoutKeyOf takes the
+             key — but it would also carry a dictated flag that nothing reads,
+             which is how the old defect looked to a reviewer. So it is a
+             reported fault, not a silent one. */
+          if (typeof k !== 'string') shaped.push(String(layoutKeyOf(k)));
+        });
+      });
+      if (shaped.length) {
+        console.error('AI Notes: template "' + name + '" still lists entries as [key, dictated] pairs. ' +
+          'A section holds keys; what is dictated comes from the field.', shaped);
+      }
       var sorted = keys.slice().sort();
       if (sorted.join(',') !== all.join(',')) {
         console.error('AI Notes: template "' + name + '" does not lay out every field and block exactly once.',
@@ -3556,12 +3606,12 @@ label.pmpr input { margin-top: 4px; }
 
       // A section with nothing in it is omitted entirely. Most consultations
       // have no dictation, so Findings usually does not appear at all.
-      var visible = keys.filter(function (k) {
+      var visible = keys.filter(function (key) {
         // A block decides for itself whether it has anything to show, so a
         // section holding only empty blocks is omitted like a section of empty
         // fields. Asked before fieldSpec, which knows nothing about blocks.
-        if (isBlock(k[0])) return BLOCKS[k[0]].has(note);
-        var spec = fieldSpec(k[0]);
+        if (isBlock(key)) return BLOCKS[key].has(note);
+        var spec = fieldSpec(key);
         if (!spec) return false;
         // Dictated fields appear when there is something in them, and also
         // whenever Dictate was pressed — otherwise a field the model left
@@ -3574,13 +3624,18 @@ label.pmpr input { margin-top: 4px; }
         // reading. The LA block below is offered without a dictation because it
         // renders as a table with an Add button: an affordance, not an
         // accusation.
-        if (k[0] === 'treatmentToday') return hasText(note[k[0]]) || (noteDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1);
+        if (key === 'treatmentToday') return hasText(note[key]) || (noteDictation() && TREATMENT_TYPES.indexOf(S.consultType) !== -1);
         // The radiograph report: offered empty on an exam, to fill in by hand.
-        if (k[0] === 'radiographicFindings') return hasText(note[k[0]]) || xrayAny(note.radiographs) || noteDictation() || S.consultType === 'exam-recall';
-        if (k[1]) return hasText(note[k[0]]) || noteDictation();
+        if (key === 'radiographicFindings') return hasText(note[key]) || xrayAny(note.radiographs) || noteDictation() || S.consultType === 'exam-recall';
+        /* spec.dictated — a fact about the FIELD. A layout no longer carries a
+           dictated flag at all (4 November 2026); when it did, and this read
+           it, a stored arrangement saying ['risks', true] dropped the material
+           risks out of a consent record on every appointment with no
+           dictation. See the comment on TEMPLATES. */
+        if (spec.dictated) return hasText(note[key]) || noteDictation();
         return true;                            // consent fields always show, gap or not
       });
-      var pmprHere = PMPR_TYPES.indexOf(S.consultType) !== -1 && keys.some(function (k) { return k[0] === 'treatmentToday'; });
+      var pmprHere = PMPR_TYPES.indexOf(S.consultType) !== -1 && keys.indexOf('treatmentToday') !== -1;
       if (!visible.length && !pmprHere) return;
 
       var hd = document.createElement('h3');
@@ -3588,19 +3643,19 @@ label.pmpr input { margin-top: 4px; }
       hd.textContent = title;
       host.appendChild(hd);
 
-      keys.forEach(function (k) {
+      keys.forEach(function (key) {
         // In the layout's order; the PMPR tick sits where the treatment does,
         // whether or not the treatment field is shown.
-        if (visible.indexOf(k) === -1) {
-          if (pmprHere && k[0] === 'treatmentToday') host.appendChild(pmprBlock());
+        if (visible.indexOf(key) === -1) {
+          if (pmprHere && key === 'treatmentToday') host.appendChild(pmprBlock());
           return;
         }
         // A block renders itself, in the layout's position. Its own heading is
         // the one inside it ("BPE", "Sedation given"); the section's heading is
         // already on screen above, which is why the renderers no longer append
         // a section heading of their own.
-        if (isBlock(k[0])) { BLOCKS[k[0]].render(note, host); return; }
-        var key = k[0], isDictated = k[1], spec = fieldSpec(key);
+        if (isBlock(key)) { BLOCKS[key].render(note, host); return; }
+        var spec = fieldSpec(key), isDictated = spec.dictated;
         var heading = spec.label, isCore = spec.core;
         var value = note[key];
         var isGap = !hasText(value);
@@ -5825,12 +5880,12 @@ label.pmpr input { margin-top: 4px; }
     sections().forEach(function (section) {
       var title = section[0], keys = section[1];
       var lines = [];
-      keys.forEach(function (k) {
+      keys.forEach(function (key) {
         // A block is laid out where the template puts it, labelled like a
         // field, so the pasted note reads in the order on screen. Empty blocks
         // are left out, as empty fields are.
-        if (isBlock(k[0])) {
-          var b = BLOCKS[k[0]];
+        if (isBlock(key)) {
+          var b = BLOCKS[key];
           var bt = b.text(note);
           if (bt && String(bt).trim()) {
             lines.push(b.label + (b.dictated && noteDictation() ? ' (dictated)' : ''));
@@ -5839,8 +5894,11 @@ label.pmpr input { margin-top: 4px; }
           }
           return;
         }
-        var key = k[0], isDictated = k[1], spec = fieldSpec(key);
+        // From the field, like the blocks just above, which have always taken
+        // it from BLOCKS rather than from the layout entry.
+        var spec = fieldSpec(key);
         if (!spec) return;
+        var isDictated = spec.dictated;
         var body = key === 'radiographicFindings' ? xrayText(note) : (hasText(note[key]) ? String(note[key]).trim() : '');
         if (body) {
           lines.push(spec.label + (isDictated && noteDictation() ? ' (dictated)' : ''));

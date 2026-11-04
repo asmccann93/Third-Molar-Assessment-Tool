@@ -33,6 +33,20 @@
 // key that did not exist when the layout was saved is APPENDED by repair()
 // rather than lost. A field must never disappear from a note because of the
 // order someone chose last month.
+//
+// KEYS, AND NOTHING ELSE (4 November 2026). A section was [heading, [[key,
+// dictated], ...]] for one day. That second element was a second copy of
+// something the field already knows, and the page READ it — for whether a
+// field appeared at all, for the "Dictated" tag, and for the "(dictated)"
+// suffix in the pasted record. So an arrangement could contradict the field
+// and make a record claim the patient had not been told something they were
+// told: ['risks', true] on a consent layout dropped the material risks out of
+// the note entirely on every appointment with no dictation.
+//
+// A layout therefore states ORDER AND HEADINGS AND NOTHING ELSE. A section is
+// [heading, [key, key, ...]]. The pair shape is still READ, so a layout saved
+// on 3 November keeps working, and repair() writes the key-only shape back.
+// Nothing downstream is told what is dictated by a layout, ever.
 
 /* The canonical set is supplied by the caller rather than imported, because
    the server knows FIELDS and BLOCKS from different modules than the page
@@ -44,6 +58,16 @@ export const MAX_HEADING = 40;
 export const MAX_LAYOUTS = 16;
 
 const HEADING_OK = /^[A-Za-z0-9 ,.'()\/&-]{1,40}$/;
+
+/* One entry of a section, as a key. A plain string is the shape a layout is
+   saved in; a ['key', dictated] pair is the shape layouts saved on 3 November
+   2026 hold, and its second element is DISCARDED rather than corrected,
+   because nothing reads it any more. null means the entry is not an entry. */
+export function keyOf(entry) {
+  if (typeof entry === 'string') return entry;
+  if (Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string') return entry[0];
+  return null;
+}
 
 /* Is this a layout we are willing to store or use at all? Shape only: whether
    it covers the right keys is repair()'s business, because a layout that is
@@ -69,10 +93,9 @@ export function validate(layout, allKeys) {
     }
     if (!Array.isArray(keys)) { problems.push(`section "${heading}" has no key list`); continue; }
     for (const entry of keys) {
-      if (!Array.isArray(entry) || entry.length !== 2) { problems.push('an entry is not [key, dictated]'); continue; }
-      const [key, dictated] = entry;
-      if (typeof key !== 'string' || !known.has(key)) { problems.push(`unknown key ${JSON.stringify(String(key).slice(0, 40))}`); continue; }
-      if (typeof dictated !== 'boolean') problems.push(`key ${key} does not say whether it is dictated`);
+      const key = keyOf(entry);
+      if (key === null) { problems.push('an entry is not a field or block name'); continue; }
+      if (!known.has(key)) { problems.push(`unknown key ${JSON.stringify(String(key).slice(0, 40))}`); continue; }
       if (seen.indexOf(key) !== -1) problems.push(`key ${key} appears twice`);
       seen.push(key);
     }
@@ -99,11 +122,13 @@ export function repair(layout, allKeys, { addedHeading = 'Added since you saved 
   for (const sec of layout.sections) {
     const [heading, keys] = sec;
     const out = [];
-    for (const [key, dictated] of keys) {
+    for (const entry of keys) {
+      const key = keyOf(entry);
+      if (key === null) continue;          // validate() rejects this; repair is forgiving
       if (!known.has(key)) { removed.push(key); continue; }
-      if (seen.has(key)) continue;         // validate() rejects this; repair is forgiving
+      if (seen.has(key)) continue;
       seen.add(key);
-      out.push([key, !!dictated]);
+      out.push(key);                       // keys only; see the header
     }
     if (out.length) kept.push([heading, out]);
   }
@@ -114,7 +139,7 @@ export function repair(layout, allKeys, { addedHeading = 'Added since you saved 
        else's arrangement is worse than putting it somewhere obvious and
        saying so: they can move it, and until they do it is visible rather
        than missing. */
-    kept.push([addedHeading, added.map((k) => [k, false])]);
+    kept.push([addedHeading, added.slice()]);
   }
 
   return { sections: kept, added, removed, changed: added.length > 0 || removed.length > 0 };
