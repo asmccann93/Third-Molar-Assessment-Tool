@@ -8049,6 +8049,28 @@ async function testPrintCarriesOnlyWhatTheCopyDoes() {
   section('The printed record carries only what the copy does');
   const printCss = (html.match(/@media print \{[\s\S]*?\n\}/) || [''])[0];
   ok('the guidance lines are hidden on paper', /\.bpe-note,/.test(printCss), printCss.slice(0, 500));
+
+  /* The per-field source check (4 November 2026). Found by printing a real
+     note to PDF, not by reading the rules — which is how the two before it
+     were missed too. Tied to a real element rather than asserted off the
+     stylesheet alone: a rule naming a class nothing renders is not a rule. */
+  {
+    const src = await runType(() => note27({
+      risks: 'Numbness of the lip and chin was discussed.',
+      sources: { risks: ['will I be numb forever'] }
+    }), { type: /Third molar/, dictate: false });
+    const panels = [...$(src.doc, 'fields').querySelectorAll('.src')];
+    ok('a drafted note really does carry per-field source panels', panels.length > 0,
+      String(panels.length));
+    ok('and at least one of them is screen guidance, not record',
+      panels.some((p) => /Read it against|came back/.test(p.textContent)),
+      panels.map((p) => p.textContent.slice(0, 60)).join(' // '));
+    ok('so .src is hidden on paper, like every other line the copy omits',
+      /^\s*\.src,\s*$/m.test(printCss), printCss.slice(0, 900));
+    const copied = await src.copy();
+    ok('and the copy omits it, which is the rule the print follows',
+      !/Read it against|No sources came back/.test(copied), copied.slice(0, 300));
+  }
   // Joined by .field.is-na on 31 October 2026, so the declaration now closes
   // on that selector rather than on .print-none.
   ok('and so is a block that has nothing to copy',
