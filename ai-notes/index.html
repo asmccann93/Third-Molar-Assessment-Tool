@@ -1211,7 +1211,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-11-04.3';
+  var BUILD = '2026-11-04.4';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1681,7 +1681,24 @@ label.pmpr input { margin-top: 4px; }
      resting on this paragraph. */
   function applyAccount(d) {
     S.canSaveLayouts = !!(d && d.authenticated && d.canSaveLayouts);
-    loadMyLayouts(d && d.authenticated ? d.layouts : null);
+    /* A CHECK THAT CARRIES NO LAYOUTS IS NOT A CHECK THAT SAYS THERE ARE NONE
+       (4 November 2026). api/auth.mjs sends `layouts: null` for three different
+       things: a passcode session, an account with nothing saved, and a Global
+       Config store it could not read — the last being the condition this whole
+       project is built around being survivable.
+
+       This check runs at load AND before every recording, so a single store
+       blip at Start would have dropped a clinician's saved layout for the rest
+       of the session: the Mine button would vanish, the picker would fall back
+       to 'clinical', and the note would be laid out a different way with
+       nothing on screen to say why. In the middle of a list.
+
+       So layouts are only ever replaced by an answer that HAS them, or dropped
+       when the session has gone. The authoritative answers — a save and a
+       delete — come back from POST /api/layouts and always carry an object,
+       including the empty one that means "you have none now". */
+    if (!d || !d.authenticated) loadMyLayouts(null);
+    else if (d.layouts && typeof d.layouts === 'object') loadMyLayouts(d.layouts);
     renderLayoutEditRow();
   }
 
@@ -1689,8 +1706,23 @@ label.pmpr input { margin-top: 4px; }
      registered under a prefixed name so it can never collide with a built-in
      one, and so a stored key cannot overwrite 'clinical'. */
   function loadMyLayouts(layouts) {
+    /* Forget the ones registered last time FIRST, and redraw at the end on
+       every path (4 November 2026). This used to empty S.myLayouts and then
+       return early when called with nothing — without redrawing the picker and
+       without unregistering the layouts in TEMPLATES. So when a session ended,
+       the page forgot the clinician's layouts and went on offering them: the
+       Mine button stayed on screen and still worked, because the entry it
+       pointed at was still there. Found by a test for the session ending. */
+    /* Unregistering has no separate witness — renderTemplatePicker offers only
+       what S.myLayouts names, so a stale entry left in TEMPLATES cannot be
+       chosen anyway, and a mutation test confirmed removing this line breaks
+       nothing. It stays because `sections()` falls back to the clinical layout
+       only when the entry is GONE, and a test that proves that would have to
+       reach a state the picker prevents. Said plainly rather than wrapped in
+       an assertion that could not fail. */
+    Object.keys(S.myLayouts || {}).forEach(function (type) { delete TEMPLATES[CUSTOM_PREFIX + type]; });
     S.myLayouts = {};
-    if (!layouts || typeof layouts !== 'object') return;
+    if (!layouts || typeof layouts !== 'object') { renderTemplatePicker(); return; }
     var keys = layoutAllKeys();
     Object.keys(layouts).forEach(function (type) {
       var l = layouts[type];
@@ -2173,10 +2205,9 @@ label.pmpr input { margin-top: 4px; }
       // Rebuilt from the server's answer, so the picker and the store agree.
       loadMyLayouts(res.d.layouts);
       if (!(S.myLayouts && S.myLayouts[type])) {
-        delete TEMPLATES[CUSTOM_PREFIX + type];
-        /* renderTemplatePicker drops a selection that is no longer offered, but
-           the note on screen is still laid out the old way until it is redrawn. */
-        renderTemplatePicker();
+        /* loadMyLayouts has already unregistered it and redrawn the picker,
+           which drops a selection no longer offered — but the note on screen
+           is still laid out the old way until it is redrawn here. */
         if (!TEMPLATES[S.template]) setTemplate(templateFor(type), false);
         renderLayoutEditRow();
         if (S.note) render(S.note);

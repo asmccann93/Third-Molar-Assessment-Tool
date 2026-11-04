@@ -7036,6 +7036,76 @@ async function testLayoutBuilder() {
       $(ctx2.doc, 'lb-sub').textContent);
   }
 
+  /* ---- 10f. a store blip does not take the clinician's layout away ----
+     The session check runs at load AND before every recording, and
+     api/auth.mjs sends `layouts: null` for a Global Config store it could not
+     read just as it does for an account with nothing saved. So one blip at
+     Start would have dropped the saved layout for the rest of the session:
+     the Mine button gone, the picker fallen back to clinical, the note laid
+     out a different way with nothing on screen to say why, in the middle of a
+     list. */
+  {
+    const SAVED = { 'third-molar': { sections: [['Mine', ALL_KEYS.slice()]] } };
+    let blip = false;
+    const ctx = await boot({
+      onFetch: async (e) => {
+        if (e.url.includes('/api/auth') && e.method === 'GET') {
+          // The second check — the one Start makes — comes back empty-handed.
+          const layouts = blip ? null : SAVED;
+          blip = true;
+          return json200({ authenticated: true, who: 'AM', admin: false, expiresIn: 40000,
+            canSaveLayouts: true, layouts });
+        }
+        if (e.url.includes('/api/transcribe') && e.method === 'POST') return json200({ status: 'done', turns: DEFAULT_TURNS });
+        if (e.url.includes('/api/extract')) return json200({ status: 'done', note: note27({ sources: {} }) });
+        return null;
+      }
+    });
+    const { doc, win } = ctx;
+    const names = () => [...$(doc, 'template-picker').querySelectorAll('button')].map((b) => b.textContent);
+    armStart(doc, win, /^Third molar/);
+    await waitFor(() => names().includes('Mine'), 'the saved layout at load');
+    click([...$(doc, 'template-picker').querySelectorAll('button')].find((b) => b.textContent === 'Mine'));
+    click($(doc, 'start'));          // this makes the second session check
+    await tick(60);
+    click($(doc, 'stop'));
+    await settle(doc, () => !$(doc, 'draft').classList.contains('hidden') &&
+      $(doc, 'working').classList.contains('hidden'), 'the draft');
+    ok('a session check that could not read the store leaves the layout alone',
+      names().includes('Mine'), names().join('|'));
+    ok('and the note is still laid out the clinician\'s way',
+      heads(doc).join('|') === 'Mine', heads(doc).join('|'));
+    ok('and the picker still has it selected',
+      $(doc, 'template-picker').querySelector('button.on').textContent === 'Mine');
+  }
+
+  /* ---- 10g. but a session that has gone does drop them ---- */
+  {
+    let signedOut = false;
+    const ctx = await boot({
+      onFetch: async (e) => {
+        if (e.url.includes('/api/auth') && e.method === 'GET') {
+          const out = signedOut;
+          signedOut = true;
+          return json200(out
+            ? { authenticated: false, who: null, admin: false, expiresIn: 0, canSaveLayouts: false, layouts: null }
+            : { authenticated: true, who: 'AM', admin: false, expiresIn: 40000, canSaveLayouts: true,
+                layouts: { 'third-molar': { sections: [['Mine', ALL_KEYS.slice()]] } } });
+        }
+        return null;
+      }
+    });
+    const { doc, win } = ctx;
+    const names = () => [...$(doc, 'template-picker').querySelectorAll('button')].map((b) => b.textContent);
+    armStart(doc, win, /^Third molar/);
+    await waitFor(() => names().includes('Mine'), 'the saved layout at load');
+    click($(doc, 'start'));
+    await waitFor(() => !names().includes('Mine'), 'the layout to go with the session');
+    ok('a signed-out check does drop them, because they are not this session\'s',
+      !names().includes('Mine'), names().join('|'));
+    ok('and Rearrange goes with them', !onScreen($(doc, 'layout-edit')));
+  }
+
   /* ---- 11. the next patient does not inherit a half-finished rearrangement ---- */
   {
     const ctx = await onDraft({});
