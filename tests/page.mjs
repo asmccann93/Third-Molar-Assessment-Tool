@@ -6938,6 +6938,97 @@ async function testLayoutBuilder() {
       detail.map((b) => b.dataset.length || b.id).join('|'));
   }
 
+  /* ---- 10c. a cancelled rearrangement leaves the built-in layout alone ----
+     The builder splices the arrays it is given, and it is seeded from one of
+     the three built-in layouts, which every consultation in the session
+     shares. A shallow copy would mean a rearrangement the clinician then
+     CANCELLED changed how every later note reads, with nothing on screen to
+     say so. */
+  {
+    const ctx = await onDraft({});
+    const { doc } = ctx;
+    const before = heads(doc).join('|');
+    const order = () => [...$(doc, 'fields').querySelectorAll('.field[data-key]')].map((f) => f.dataset.key).join(',');
+    const orderBefore = order();
+    await openOn(ctx);
+    // Pull something right across a section boundary, then throw it away.
+    click(dnBtn(doc, 'costs'));
+    await tick(20);
+    click(dnBtn(doc, 'costs'));
+    await tick(20);
+    click($(doc, 'lb-sdel-1'));
+    await tick(20);
+    click($(doc, 'lb-cancel'));
+    await tick(30);
+    ok('the note is exactly as it was before the builder was opened',
+      heads(doc).join('|') === before && order() === orderBefore,
+      before + ' -> ' + heads(doc).join('|'));
+    /* And the layout itself, not just this render: switching away and back
+       would show a mutated built-in. */
+    click([...$(doc, 'template-picker').querySelectorAll('button')].find((b) => b.textContent === 'Clinical'));
+    await tick(30);
+    click([...$(doc, 'template-picker').querySelectorAll('button')].find((b) => b.textContent === 'Consent'));
+    await tick(30);
+    /* ORDER as well as headings. Comparing headings alone passed while the
+       working copy shared the built-in's key arrays: splicing a field from one
+       section into another leaves every heading exactly where it was, and
+       moves the field for every consultation afterwards. */
+    ok('and the built-in layout itself is untouched, not merely this render',
+      heads(doc).join('|') === before && order() === orderBefore,
+      before + ' / ' + orderBefore + '\n -> ' + heads(doc).join('|') + ' / ' + order());
+  }
+
+  /* ---- 10d. the arrows do not drop focus at the ends ----
+     The arrow pressed is disabled once a section reaches an end, and a
+     disabled control cannot take focus — so focus fell to the body exactly
+     when the clinician had finished moving something. */
+  {
+    const ctx = await onDraft({});
+    const { doc } = ctx;
+    await openOn(ctx);
+    click($(doc, 'lb-sup-1'));            // second section to the top
+    await tick(20);
+    ok('moving a section to the top keeps focus in the dialog',
+      $(doc, 'layout-builder').contains(doc.activeElement),
+      doc.activeElement ? (doc.activeElement.id || doc.activeElement.tagName) : 'none');
+    const n = rows(doc).length;
+    click($(doc, 'lb-sdn-' + (n - 2)));   // and to the bottom
+    await tick(20);
+    ok('and moving one to the bottom does too',
+      $(doc, 'layout-builder').contains(doc.activeElement),
+      doc.activeElement ? (doc.activeElement.id || doc.activeElement.tagName) : 'none');
+    click($(doc, 'lb-sdel-1'));
+    await tick(20);
+    ok('and so does removing a section',
+      $(doc, 'layout-builder').contains(doc.activeElement),
+      doc.activeElement ? (doc.activeElement.id || doc.activeElement.tagName) : 'none');
+  }
+
+  /* ---- 10e. a layout the tool has moved past says so in the builder ----
+     repairLayout appends a field the layout never heard of under its own
+     heading. Without a word about it here, the clinician saves and keeps a
+     section called "Added since you saved this" permanently, which by then
+     means nothing. */
+  {
+    const SHORT = { 'third-molar': { sections: [['Mine', ALL_KEYS.filter((k) => k !== '@diagnoses')]] } };
+    const ctx = await onDraft({ layouts: SHORT, pickMine: true });
+    const { doc } = ctx;
+    await openOn(ctx);
+    ok('the builder says a field was added since the layout was saved',
+      /added since you saved this/i.test($(doc, 'lb-sub').textContent) &&
+      /move them where you want them/i.test($(doc, 'lb-sub').textContent),
+      $(doc, 'lb-sub').textContent);
+    ok('and the field really is in the builder, not merely mentioned',
+      placed(doc).includes('@diagnoses') && placed(doc).length === ALL_KEYS.length,
+      String(placed(doc).length));
+    // A layout that is up to date says nothing of the sort.
+    const ctx2 = await onDraft({});
+    await openOn(ctx2);
+    ok('a layout that is up to date is not told anything was added',
+      !/added since you saved this/i.test($(ctx2.doc, 'lb-sub').textContent),
+      $(ctx2.doc, 'lb-sub').textContent);
+  }
+
   /* ---- 11. the next patient does not inherit a half-finished rearrangement ---- */
   {
     const ctx = await onDraft({});
