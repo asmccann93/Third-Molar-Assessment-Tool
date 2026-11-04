@@ -4778,7 +4778,14 @@ async function testCoveredElsewhere() {
   click($(doc, 'clear'));
   await tick(20);
   await toDraft(ctx);
-  for (let i = 0; i < 30 && lis().length !== 2; i++) await tick(100);
+  /* waitFor, not a bare poll. The loop here fell through silently when the
+     list never refilled, so the assertion below reported "2 !== 1" and nothing
+     about WHY — and this is one of the two assertions that have flaked on a
+     loaded container. It still flakes or it does not; what changes is that a
+     timeout now says what never happened instead of leaving the next person to
+     guess. (The two fixed sleeps suspected of causing it were measured on 4
+     November and have their full budget spare, so they are not the cause.) */
+  await waitFor(() => lis().length === 2, 'the uncovered list to refill for the next patient');
   ok('the next consultation starts with nothing marked', lis().length === 2 && !$(doc, 'covered-block'));
 
   // The "could not be applied" warning is not an item.
