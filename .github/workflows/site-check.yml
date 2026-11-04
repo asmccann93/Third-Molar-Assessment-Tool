@@ -93,6 +93,19 @@ jobs:
       - name: Implant tool, in jsdom, and the viewer on a phantom
         run: node tests/implant.mjs
 
+      # NOT RUN HERE, and worth knowing about: tests/print-check.cjs asks the
+      # question jsdom cannot — "is this element actually on the paper". It
+      # needs Chromium, which this runner does not have, so it is run by hand:
+      #
+      #   npm install playwright --no-save && node tests/print-check.cjs
+      #
+      # The suites above check the print rules by reading the stylesheet, which
+      # is a different question, and the difference has cost three defects:
+      # .bpe-note, .field.is-na and (4 November 2026) .src, the last of which
+      # put the patient's own words under every heading of a printed record.
+      # Run it after anything that touches the draft, the patient documents or
+      # the print rules.
+
       - name: Cache names must move when a tool changes
         env:
           # The tip of main before this push; all zeros when the branch is new.
