@@ -58,12 +58,25 @@ jobs:
       - name: API handlers
         run: node tests/integration.mjs
 
-      # Note: tests/prompt-eval.paste.js is generated, not committed. This step
-      # proves the template and fixtures still produce a valid evaluator; it
-      # cannot check a file in the repo, because there isn't one. Regenerate
-      # locally before pasting it into the console.
+      # tests/prompt-eval.paste.js IS committed — the comment here said it was
+      # not, and said this step could not check a file that does not exist. It
+      # does exist, it has been tracked since 2 November 2026, and it is what
+      # gets pasted into the console. An out-of-date copy sitting in the repo is
+      # worse than no copy: it runs, it looks like evidence, and it tests the
+      # prompt as it was. So the step now regenerates it and fails if what is
+      # committed differs from what the fixtures and tests/eval-assert.mjs
+      # produce.
       - name: Prompt evaluator builds and self-tests
         run: node tests/build-eval.mjs
+
+      - name: The committed evaluator matches the fixtures it claims to run
+        run: |
+          if ! git diff --exit-code -- tests/prompt-eval.paste.js; then
+            echo "FAIL  tests/prompt-eval.paste.js is out of date."
+            echo "      Run: node tests/build-eval.mjs   and commit the result."
+            exit 1
+          fi
+          echo "ok    the committed evaluator is the one these fixtures produce"
 
       # jsdom is PINNED. Unpinned, CI resolved whatever was newest at run time,
       # so somebody else's publish could turn this red with no commit of ours —

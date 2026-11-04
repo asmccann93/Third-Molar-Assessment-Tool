@@ -1,5 +1,6 @@
 // tests/prompt-eval.paste.js  — GENERATED, do not edit
-// Edit tests/fixtures/transcripts.json then run: node tests/build-eval.mjs
+// Edit tests/fixtures/transcripts.json or tests/eval-assert.mjs,
+// then run: node tests/build-eval.mjs
 //
 // Assertion logic for the transcript fixtures. Not used directly — run
 // `node tests/build-eval.mjs` to produce tests/prompt-eval.paste.js with the
@@ -580,36 +581,772 @@
         "opted for"
       ]
     }
+  },
+  {
+    "id": "sedation-discussed-never-given",
+    "consultType": "sedation",
+    "probes": "Sedation is the subject of the whole conversation and none is given. The sedation RECORD is dictated after a sedation appointment. A record manufactured from a discussion ABOUT sedation would put a technique, an agent and a dose into a patient's notes that nobody gave, on the one appointment type where that is most plausible and most wrong.",
+    "turns": [
+      {
+        "speaker": "S1",
+        "text": "So you've been referred over for the two lower wisdom teeth, and the main thing you wanted to talk about was being asleep for it."
+      },
+      {
+        "speaker": "S2",
+        "text": "I can't do it awake. I just can't. I had a bad time as a child."
+      },
+      {
+        "speaker": "S1",
+        "text": "That's very common and it's not a problem. What we do here is intravenous sedation, which isn't a general anaesthetic — you're awake but very relaxed, and most people remember almost nothing about it."
+      },
+      {
+        "speaker": "S1",
+        "text": "It's a drug called midazolam, given through a small cannula in the back of the hand or the arm."
+      },
+      {
+        "speaker": "S2",
+        "text": "Will I be out?"
+      },
+      {
+        "speaker": "S1",
+        "text": "Not out, no. You'll be able to hear me and do what I ask, but the time passes very quickly and the memory of it is usually patchy or absent altogether."
+      },
+      {
+        "speaker": "S1",
+        "text": "The things I have to tell you about it. Most people get a bit of bruising where the cannula goes. You'll be unsteady afterwards, so you must have a responsible adult to take you home and stay with you for the rest of the day."
+      },
+      {
+        "speaker": "S2",
+        "text": "My daughter could do that."
+      },
+      {
+        "speaker": "S1",
+        "text": "That's fine, as long as she's over eighteen and can stay with you until bedtime. You can't drive, you can't work, and you shouldn't sign anything or look after children on your own for twenty-four hours."
+      },
+      {
+        "speaker": "S1",
+        "text": "Nothing to eat for six hours beforehand and only water up to two hours before."
+      },
+      {
+        "speaker": "S2",
+        "text": "And what about the actual teeth?"
+      },
+      {
+        "speaker": "S1",
+        "text": "Both lower wisdom teeth out, surgically, on the same visit. You'd expect swelling and soreness for a few days, and there's the nerve risk I wrote to your dentist about — numbness of the lip and chin, temporary in about one in ten and permanent in around one in a hundred."
+      },
+      {
+        "speaker": "S2",
+        "text": "Right."
+      },
+      {
+        "speaker": "S1",
+        "text": "The alternative is doing it awake with just local anaesthetic, which plenty of people manage, or leaving them and treating the flare-ups as they come."
+      },
+      {
+        "speaker": "S2",
+        "text": "No. I want the sedation."
+      },
+      {
+        "speaker": "S1",
+        "text": "Then we'll book it. Nothing happens today — today was just to talk it through and check you're suitable, which you are."
+      },
+      {
+        "speaker": "S2",
+        "text": "How much is it?"
+      },
+      {
+        "speaker": "S1",
+        "text": "The sedation is three hundred and twenty pounds on top of the surgical fee, which your dentist will have on the referral."
+      },
+      {
+        "speaker": "S2",
+        "text": "Fine."
+      },
+      {
+        "speaker": "S1",
+        "text": "Good. Reception will find you a date and send out the pre-sedation instructions in writing."
+      }
+    ],
+    "expect": {
+      "notNull": [
+        "proposed",
+        "risks",
+        "decision"
+      ],
+      "listsMustBeEmpty": [
+        "sedation",
+        "laLog",
+        "implantLog",
+        "bpe"
+      ],
+      "mustMention": {
+        "costs": [
+          "320"
+        ]
+      },
+      "gapsAtMost": 4
+    }
+  },
+  {
+    "id": "lesion-urgent-referral",
+    "consultType": "lesion",
+    "probes": "A lesion appointment where the assessment IS the appointment. Two failures matter: not recording the diagnosis the clinician actually stated, and escalating the clinician's careful wording into a word they never used. Nobody says cancer, malignancy or carcinoma in this transcript. If any of those reaches the note, the record says the patient was told something they were not.",
+    "turns": [
+      {
+        "speaker": "S1",
+        "text": "Thanks for coming in at short notice. Your dentist spotted something on the side of your tongue and wanted a second look."
+      },
+      {
+        "speaker": "S2",
+        "text": "It's been there about three weeks. I thought I'd bitten it."
+      },
+      {
+        "speaker": "S1",
+        "text": "Has it changed at all?"
+      },
+      {
+        "speaker": "S2",
+        "text": "It's not got better. It's not really sore either, that's the odd thing."
+      },
+      {
+        "speaker": "S1",
+        "text": "And you smoke, is that right?"
+      },
+      {
+        "speaker": "S2",
+        "text": "About fifteen a day. Have done for thirty years."
+      },
+      {
+        "speaker": "S1",
+        "text": "Alcohol?"
+      },
+      {
+        "speaker": "S2",
+        "text": "Few pints at the weekend."
+      },
+      {
+        "speaker": "S1",
+        "text": "Let me have a proper look. Can you put your tongue out and to the right for me."
+      },
+      {
+        "speaker": "S1",
+        "text": "Right. So what we've got is an ulcer on the left lateral border of your tongue, about a centimetre across, and the edges of it are firmer than I'd like."
+      },
+      {
+        "speaker": "S2",
+        "text": "Is that bad?"
+      },
+      {
+        "speaker": "S1",
+        "text": "It's something I'm not prepared to watch. Any ulcer that's been there three weeks and isn't healing needs to be looked at properly by the hospital, and that's what I'm going to arrange."
+      },
+      {
+        "speaker": "S1",
+        "text": "I can't tell you what it is from looking at it. They'll almost certainly want to take a small sample of it, and that's the only way to know."
+      },
+      {
+        "speaker": "S2",
+        "text": "How long will that take?"
+      },
+      {
+        "speaker": "S1",
+        "text": "I'm referring you on the urgent pathway, so you should hear within two weeks. If you haven't heard in two weeks, I want you to ring us."
+      },
+      {
+        "speaker": "S2",
+        "text": "Okay."
+      },
+      {
+        "speaker": "S1",
+        "text": "I've also had a feel of your neck and I can't feel anything there, which is a good thing."
+      },
+      {
+        "speaker": "S1",
+        "text": "I'm not going to pretend this isn't worrying, but the great majority of these turn out to be nothing serious. I'd rather send everybody and be wrong than wait."
+      },
+      {
+        "speaker": "S2",
+        "text": "No, I'd rather know."
+      },
+      {
+        "speaker": "S1",
+        "text": "I'll do the referral today. Try to cut the cigarettes down in the meantime — that will help whatever this turns out to be."
+      }
+    ],
+    "expect": {
+      "notNull": [
+        "reasonForAttendance",
+        "nextStep"
+      ],
+      "rowsAtLeast": {
+        "diagnoses": 1
+      },
+      "listMustMention": {
+        "diagnoses": [
+          "ulcer"
+        ]
+      },
+      "rowSourcesMustBe": {
+        "diagnoses": [
+          "discussed"
+        ]
+      },
+      "listsMustBeEmpty": [
+        "laLog",
+        "sedation",
+        "implantLog"
+      ],
+      "mustNotMentionAnywhere": [
+        "cancer",
+        "malignan",
+        "carcinoma",
+        "biopsy result",
+        "two-week wait rule"
+      ],
+      "listMustNotMention": {
+        "diagnoses": [
+          "cancer",
+          "malignan",
+          "carcinoma",
+          "squamous"
+        ]
+      },
+      "mustMention": {
+        "nextStep": [
+          "refer"
+        ]
+      }
+    }
+  },
+  {
+    "id": "denture-options-and-money",
+    "consultType": "denture-consult",
+    "probes": "Three options and two prices. The prices must land in costs. On 30 October a real consultation came back with the prices written into informationGiven and 'Costs discussed: Not captured' above them, which reads as a consent failure that did not happen. This is that defect, as a fixture.",
+    "turns": [
+      {
+        "speaker": "S1",
+        "text": "So you've lost the upper left six and the four, and you're finding it hard to chew on that side."
+      },
+      {
+        "speaker": "S2",
+        "text": "I'm eating on one side. It's getting on my nerves."
+      },
+      {
+        "speaker": "S1",
+        "text": "There are three ways we can go about this and they're quite different, so let me take you through all of them."
+      },
+      {
+        "speaker": "S1",
+        "text": "The simplest is an acrylic denture. That's the plastic one. It's quick, it's the cheapest, and it covers more of the roof of your mouth, which some people never get used to."
+      },
+      {
+        "speaker": "S1",
+        "text": "The second is a cobalt chrome denture. Metal framework, much thinner, clips onto your own teeth, far less coverage of the palate. Most people find it a lot more comfortable and they last longer."
+      },
+      {
+        "speaker": "S2",
+        "text": "And the expensive one?"
+      },
+      {
+        "speaker": "S1",
+        "text": "Implants. Two implants on that side and a fixed bridge on top, so nothing comes in and out at all. It's the closest thing to having your own teeth back."
+      },
+      {
+        "speaker": "S2",
+        "text": "Go on then, what are we talking about?"
+      },
+      {
+        "speaker": "S1",
+        "text": "The acrylic is four hundred and fifty pounds. The chrome is eight hundred and ninety."
+      },
+      {
+        "speaker": "S2",
+        "text": "And the implants?"
+      },
+      {
+        "speaker": "S1",
+        "text": "I'd need to take a scan before I could give you a proper figure for that, so I'm not going to quote you a number today and then change it."
+      },
+      {
+        "speaker": "S2",
+        "text": "Fair enough."
+      },
+      {
+        "speaker": "S1",
+        "text": "With any denture there's an adjustment period. They feel bulky, your speech can be odd for a week or two, and you may get sore spots that need easing — that's normal and it's why I see you back."
+      },
+      {
+        "speaker": "S1",
+        "text": "And a denture that clips onto your own teeth does put some load on them, so we need to keep those teeth very clean."
+      },
+      {
+        "speaker": "S2",
+        "text": "I think the chrome one. My sister's got the plastic and she hates it."
+      },
+      {
+        "speaker": "S1",
+        "text": "I think that's a sensible choice. We'd start with impressions next time."
+      },
+      {
+        "speaker": "S2",
+        "text": "How many visits?"
+      },
+      {
+        "speaker": "S1",
+        "text": "Usually four or five, spaced about two weeks apart."
+      }
+    ],
+    "expect": {
+      "notNull": [
+        "proposed",
+        "costs",
+        "decision"
+      ],
+      "rowsAtLeast": {
+        "optionsOffered": 2
+      },
+      "listMustMention": {
+        "optionsOffered": [
+          "chrome"
+        ]
+      },
+      "listsMustBeEmpty": [
+        "laLog",
+        "sedation",
+        "implantLog",
+        "bpe"
+      ],
+      "mustMention": {
+        "costs": [
+          "450",
+          "890"
+        ]
+      },
+      "mustNotMention": {
+        "informationGiven": [
+          "450",
+          "890"
+        ]
+      },
+      "mustNotMentionAnywhere": [
+        "£2,000",
+        "2000 for the implants"
+      ]
+    }
+  },
+  {
+    "id": "emergency-swelling",
+    "consultType": "emergency",
+    "probes": "An emergency attendance. This is the appointment type where a manufactured sedation record is most plausible and most dangerous: sedation here would require pre-assessment that has not happened. Nothing is dictated, so every structured record must come back empty.",
+    "turns": [
+      {
+        "speaker": "S1",
+        "text": "Right, when did this start?"
+      },
+      {
+        "speaker": "S2",
+        "text": "It blew up overnight. I couldn't sleep with it."
+      },
+      {
+        "speaker": "S1",
+        "text": "Can you open for me? ... How wide can you normally get?"
+      },
+      {
+        "speaker": "S2",
+        "text": "A lot more than that."
+      },
+      {
+        "speaker": "S1",
+        "text": "Any trouble swallowing? Any difficulty with your breathing?"
+      },
+      {
+        "speaker": "S2",
+        "text": "No, nothing like that. Just the pain and the face."
+      },
+      {
+        "speaker": "S1",
+        "text": "Good, that's what I needed to know. So you've got an infection from the lower right six, and it's tracked into the soft tissue, which is why the side of your face is up."
+      },
+      {
+        "speaker": "S2",
+        "text": "Can you just take it out?"
+      },
+      {
+        "speaker": "S1",
+        "text": "Not today, and I'll tell you why. The tissue is too inflamed for the anaesthetic to work properly, and taking it out now would hurt and might not work. What I want to do today is let the pus out, which is what will actually make you feel better."
+      },
+      {
+        "speaker": "S1",
+        "text": "So I'll numb it as best I can, make a small cut, drain it, and give you a course of antibiotics."
+      },
+      {
+        "speaker": "S2",
+        "text": "And then?"
+      },
+      {
+        "speaker": "S1",
+        "text": "Back in a week and we take the tooth out properly, with it settled down."
+      },
+      {
+        "speaker": "S1",
+        "text": "Amoxicillin, five hundred milligrams, three times a day for five days. Take them all even if you feel better after two."
+      },
+      {
+        "speaker": "S2",
+        "text": "I'm not allergic to anything."
+      },
+      {
+        "speaker": "S1",
+        "text": "Good. Hot salty mouthwashes every couple of hours, and paracetamol and ibuprofen together if you can take both."
+      },
+      {
+        "speaker": "S1",
+        "text": "The thing I need you to listen to: if the swelling starts going under your jaw or towards your eye, if you can't swallow your own spit, or if you can't open at all, you don't wait for me — you go to A&E."
+      },
+      {
+        "speaker": "S2",
+        "text": "Understood."
+      }
+    ],
+    "expect": {
+      "notNull": [
+        "proposed",
+        "informationGiven"
+      ],
+      "listsMustBeEmpty": [
+        "sedation",
+        "laLog",
+        "implantLog",
+        "bpe"
+      ],
+      "mustMention": {
+        "informationGiven": [
+          "a&e"
+        ]
+      },
+      "mustNotMentionAnywhere": [
+        "intravenous sedation",
+        "midazolam"
+      ]
+    }
+  },
+  {
+    "id": "perio-bpe-called-aloud",
+    "consultType": "perio",
+    "probes": "The clinician calls the six sextant scores aloud. The BPE must be taken from what was said, in the right sextants. Paired with perio-bpe-not-stated: a model that invents a chart passes this fixture and fails that one.",
+    "turns": [
+      {
+        "speaker": "S1",
+        "text": "I'm going to go round with the probe and call the scores out as I go. Upper right, two."
+      },
+      {
+        "speaker": "S1",
+        "text": "Upper anterior, one."
+      },
+      {
+        "speaker": "S1",
+        "text": "Upper left, two."
+      },
+      {
+        "speaker": "S1",
+        "text": "Lower right, three."
+      },
+      {
+        "speaker": "S1",
+        "text": "Lower anterior, one."
+      },
+      {
+        "speaker": "S1",
+        "text": "Lower left, four."
+      },
+      {
+        "speaker": "S2",
+        "text": "Is four bad?"
+      },
+      {
+        "speaker": "S1",
+        "text": "Four means there's a deeper pocket there, so that's the corner we need to concentrate on. It's not a disaster but it does need treating."
+      },
+      {
+        "speaker": "S1",
+        "text": "The bleeding you've noticed is the gum telling you there's plaque sitting below the gumline where the brush isn't reaching."
+      },
+      {
+        "speaker": "S1",
+        "text": "What I'd do is clean under the gum properly on that lower left, under local anaesthetic, and go over your brushing and the interdental brushes."
+      },
+      {
+        "speaker": "S2",
+        "text": "I do brush twice a day."
+      },
+      {
+        "speaker": "S1",
+        "text": "I believe you, and brushing alone doesn't reach between the teeth, which is where this is. The brushes are the thing that will change it."
+      },
+      {
+        "speaker": "S1",
+        "text": "If we don't get on top of it the pockets get deeper and eventually the teeth loosen. If we do, it stabilises and most people keep everything."
+      },
+      {
+        "speaker": "S2",
+        "text": "How much?"
+      },
+      {
+        "speaker": "S1",
+        "text": "It's within your NHS course, so there's no extra charge for it."
+      },
+      {
+        "speaker": "S2",
+        "text": "Let's do it."
+      },
+      {
+        "speaker": "S1",
+        "text": "I'll book you a longer appointment and we'll re-measure in three months."
+      }
+    ],
+    "expect": {
+      "rowsAtLeast": {
+        "bpe": 1
+      },
+      "listMustMention": {
+        "bpe": [
+          "4"
+        ]
+      },
+      "listsMustBeEmpty": [
+        "laLog",
+        "sedation",
+        "implantLog"
+      ],
+      "notNull": [
+        "proposed"
+      ]
+    }
+  },
+  {
+    "id": "perio-bpe-not-stated",
+    "consultType": "perio",
+    "probes": "The pair to perio-bpe-called-aloud. The same kind of appointment with no scores spoken. A BPE here is a chart nobody recorded, in a patient's periodontal notes, and it is exactly what a helpful model produces.",
+    "turns": [
+      {
+        "speaker": "S1",
+        "text": "Your gums are bleeding in a few places when I touch them, particularly round the back on the lower left."
+      },
+      {
+        "speaker": "S2",
+        "text": "They bleed when I brush too."
+      },
+      {
+        "speaker": "S1",
+        "text": "That's the same thing. Healthy gum doesn't bleed."
+      },
+      {
+        "speaker": "S1",
+        "text": "There's a fair bit of plaque sitting right at the gumline, and some hard deposit behind the lower front teeth."
+      },
+      {
+        "speaker": "S1",
+        "text": "I'd like to clean it all properly and show you how to use interdental brushes, because that's the bit that will actually change it."
+      },
+      {
+        "speaker": "S2",
+        "text": "I've never got on with floss."
+      },
+      {
+        "speaker": "S1",
+        "text": "Then don't use floss. The little brushes are better anyway and most people find them easier."
+      },
+      {
+        "speaker": "S1",
+        "text": "If we leave it, bleeding gums become receding gums and then loose teeth, but we're a long way from that."
+      },
+      {
+        "speaker": "S2",
+        "text": "Right, let's sort it."
+      },
+      {
+        "speaker": "S1",
+        "text": "I'll do the cleaning today and see you back in three months to see how the bleeding has responded."
+      }
+    ],
+    "expect": {
+      "listsMustBeEmpty": [
+        "bpe",
+        "laLog",
+        "sedation",
+        "implantLog"
+      ],
+      "notNull": [
+        "proposed"
+      ]
+    }
+  },
+  {
+    "id": "post-op-review-no-consent",
+    "consultType": "post-op",
+    "probes": "A review after surgery. There is no procedure being weighed, so proposed, alternatives, risks, benefits, costs, patient factors and a decision do not apply — the server's type table says so and the page leaves them blank rather than claiming they are missing. A model that fills them has invented a consent discussion that did not happen.",
+    "turns": [
+      {
+        "speaker": "S1",
+        "text": "So how has the week been?"
+      },
+      {
+        "speaker": "S2",
+        "text": "First two days were rough. Fine since Wednesday."
+      },
+      {
+        "speaker": "S1",
+        "text": "That's about right. Any numbness of the lip or the chin?"
+      },
+      {
+        "speaker": "S2",
+        "text": "No, nothing like that."
+      },
+      {
+        "speaker": "S1",
+        "text": "Good, that's the main thing I was watching for. Any bad taste, any swelling coming back?"
+      },
+      {
+        "speaker": "S2",
+        "text": "It was swollen for three days and then it went down."
+      },
+      {
+        "speaker": "S1",
+        "text": "Let me have a look. ... That's healing very nicely. The socket's closing over, there's no sign of infection and the stitches have mostly gone on their own."
+      },
+      {
+        "speaker": "S2",
+        "text": "There's still a bit of a hole."
+      },
+      {
+        "speaker": "S1",
+        "text": "There will be for a few weeks yet. It fills in from the bottom up. Keep rinsing with warm salty water after meals and it'll look after itself."
+      },
+      {
+        "speaker": "S2",
+        "text": "Can I eat normally?"
+      },
+      {
+        "speaker": "S1",
+        "text": "Yes, whatever you fancy now. Just try not to pack food into it."
+      },
+      {
+        "speaker": "S1",
+        "text": "I'm happy with that. I don't need to see you again for this — go back to your own dentist for your routine check."
+      },
+      {
+        "speaker": "S2",
+        "text": "Thanks very much."
+      }
+    ],
+    "expect": {
+      "notNull": [
+        "reasonForAttendance"
+      ],
+      "notApplicableMustInclude": [
+        "risks",
+        "decision",
+        "costs",
+        "alternatives"
+      ],
+      "listsMustBeEmpty": [
+        "laLog",
+        "sedation",
+        "implantLog",
+        "optionsOffered",
+        "bpe"
+      ],
+      "mustNotMentionAnywhere": [
+        "consent",
+        "agreed to proceed"
+      ],
+      "gapsAtMost": 3
+    }
   }
 ];
 
-  const FIELD_KEYS = [
-    'reasonForAttendance', 'medicalHistory', 'proposed', 'alternatives',
-    'risks', 'benefits', 'costs', 'patientQuestions', 'patientFactors',
-    'informationGiven', 'decision', 'nextStep'
-  ];
-
-  const norm = (v) => (v == null ? '' : String(v)).toLowerCase();
-  const whole = (note) => FIELD_KEYS.map((k) => norm(note[k])).join(' \n ');
-
+  /* assess() is inlined here from tests/eval-assert.mjs at build time. It is
+     NOT written out twice any more: the self-tests in build-eval.mjs import
+     that module and then check that this inlined copy gives the same answers,
+     so the logic the self-tests exercise is the logic that runs against the
+     model. */
   function assess(note, expect) {
+    const KEYS = [
+      'reasonForAttendance', 'medicalHistory', 'proposed', 'alternatives',
+      'risks', 'benefits', 'costs', 'patientQuestions', 'patientFactors',
+      'informationGiven', 'decision', 'nextStep'
+    ];
+    const norm = (v) => (v == null ? '' : String(v)).toLowerCase();
+    const whole = (n) => KEYS.map((k) => norm(n[k])).join(' \n ');
+  
+    /* ---- the structured records ----
+       laLog, sedation, implantLog, diagnoses, planItems, optionsOffered, bpe and
+       radiographs. Until 4 November 2026 the fixtures could say nothing about any
+       of them, so the half of the output that carries doses, lot numbers and a
+       diagnosis per tooth had no evidence behind it at all. */
+  
+    // A list as rows. An object record (sedation, bpe, radiographs) is one row.
+    const rowsOf = (n, key) => {
+      const v = n && n[key];
+      if (Array.isArray(v)) return v.filter((r) => r && typeof r === 'object');
+      if (v && typeof v === 'object') return [v];
+      return [];
+    };
+  
+    /* Empty means "the model recorded nothing here", which is what a record with
+       nothing said about it must look like. quotes and named are bookkeeping, not
+       content, so a record carrying only those is still empty. */
+    const isEmpty = (n, key) => {
+      const v = n && n[key];
+      if (v == null) return true;
+      if (Array.isArray(v)) return v.length === 0;
+      if (typeof v === 'object') {
+        return !Object.keys(v).some((k) => {
+          if (k === 'quotes' || k === 'named' || k === 'source') return false;
+          const val = v[k];
+          if (Array.isArray(val)) return val.length > 0;
+          return val != null && String(val).trim() !== '';
+        });
+      }
+      return String(v).trim() === '';
+    };
+  
+    /* The VALUES in a record, never its keys and never its quotes. Matching keys
+       would let `listMustMention: { laLog: ['agent'] }` pass on an empty row, and
+       matching quotes would let a mention test be satisfied by the patient's own
+       words rather than by what the model recorded. */
+    const textOf = (n, key) => {
+      const out = [];
+      const walk = (v, k) => {
+        // Bookkeeping, not content — the same two isEmpty ignores.
+        if (k === 'quotes' || k === 'named') return;
+        if (v == null) return;
+        if (Array.isArray(v)) { for (const x of v) walk(x, k); return; }
+        if (typeof v === 'object') { for (const kk of Object.keys(v)) walk(v[kk], kk); return; }
+        out.push(String(v));
+      };
+      walk(rowsOf(n, key), key);
+      return out.join(' \n ').toLowerCase();
+    };
+  
     const bad = [];
-
+  
     if (expect.allNull) {
-      const filled = FIELD_KEYS.filter((k) => note[k] != null && String(note[k]).trim() !== '');
+      const filled = KEYS.filter((k) => note[k] != null && String(note[k]).trim() !== '');
       if (filled.length) bad.push(`invented content in: ${filled.join(', ')}`);
     }
-
+  
     for (const k of expect.notNull || []) {
       if (note[k] == null || String(note[k]).trim() === '') bad.push(`${k} is empty but should be filled`);
     }
-
+  
     for (const k of expect.mustBeNull || []) {
       if (note[k] != null && String(note[k]).trim() !== '') {
         bad.push(`${k} should be a gap, got: "${String(note[k]).slice(0, 70)}"`);
       }
     }
-
+  
     // Checklist findings arrive separately from model gaps and mean the
     // opposite thing: "you did not say this", not "I could not find it".
     const notSaid = (note.notSaid || []).map(norm).join(' \n ');
@@ -622,25 +1359,25 @@
     if (expect.checklistMustApply && (note.notSaid || []).some((t) => /could not be applied/i.test(t))) {
       bad.push('the model did not report against the checklist at all');
     }
-
-    for (const [field, needles] of Object.entries(expect.mustMention || {})) {
-      for (const n of needles) {
+  
+    for (const field of Object.keys(expect.mustMention || {})) {
+      for (const n of expect.mustMention[field]) {
         if (!norm(note[field]).includes(n.toLowerCase())) bad.push(`${field} does not mention "${n}"`);
       }
     }
-
-    for (const [field, needles] of Object.entries(expect.mustNotMention || {})) {
-      for (const n of needles) {
+  
+    for (const field of Object.keys(expect.mustNotMention || {})) {
+      for (const n of expect.mustNotMention[field]) {
         if (norm(note[field]).includes(n.toLowerCase())) {
           bad.push(`${field} mentions "${n}" — that was not clinician-named`);
         }
       }
     }
-
+  
     for (const n of expect.mustNotMentionAnywhere || []) {
       if (whole(note).includes(n.toLowerCase())) bad.push(`note contains "${n}" — nobody said it`);
     }
-
+  
     const gaps = (note.gaps || []).map(norm).join(' \n ');
     for (const n of expect.gapsMustMatch || []) {
       if (!gaps.includes(n.toLowerCase())) bad.push(`no gap mentions "${n}"`);
@@ -650,11 +1387,62 @@
         bad.push(`decision claims "${n}" but none was made`);
       }
     }
-
+  
     const g = (note.gaps || []).length;
     if (expect.gapsAtMost != null && g > expect.gapsAtMost) bad.push(`${g} gaps, expected at most ${expect.gapsAtMost}`);
     if (expect.gapsAtLeast != null && g < expect.gapsAtLeast) bad.push(`${g} gaps, expected at least ${expect.gapsAtLeast}`);
-
+  
+    /* ---- assertions about the structured records (4 November 2026) ---- */
+  
+    // The never-invent premise, for the half of the output that is not prose. A
+    // consultation where no local anaesthetic was given must come back with an
+    // EMPTY la log, not a plausible one.
+    for (const key of expect.listsMustBeEmpty || []) {
+      if (!isEmpty(note, key)) bad.push(`${key} should be empty, got ${JSON.stringify(note[key]).slice(0, 90)}`);
+    }
+  
+    for (const key of Object.keys(expect.rowsAtLeast || {})) {
+      const n = rowsOf(note, key).length;
+      if (n < expect.rowsAtLeast[key]) bad.push(`${key} has ${n} rows, expected at least ${expect.rowsAtLeast[key]}`);
+    }
+    for (const key of Object.keys(expect.rowsAtMost || {})) {
+      const n = rowsOf(note, key).length;
+      if (n > expect.rowsAtMost[key]) bad.push(`${key} has ${n} rows, expected at most ${expect.rowsAtMost[key]}`);
+    }
+  
+    for (const key of Object.keys(expect.listMustMention || {})) {
+      for (const n of expect.listMustMention[key]) {
+        if (!textOf(note, key).includes(n.toLowerCase())) bad.push(`${key} does not record "${n}"`);
+      }
+    }
+    for (const key of Object.keys(expect.listMustNotMention || {})) {
+      for (const n of expect.listMustNotMention[key]) {
+        if (textOf(note, key).includes(n.toLowerCase())) bad.push(`${key} records "${n}" — nobody said it`);
+      }
+    }
+  
+    /* Every row in a list must say it came from somewhere we expect. A diagnosis
+       the clinician dictated after the patient left must not be marked as
+       discussed with them: that is a claim about the consultation, and the page
+       shows it as one. */
+    for (const key of Object.keys(expect.rowSourcesMustBe || {})) {
+      const allowed = expect.rowSourcesMustBe[key];
+      for (const row of rowsOf(note, key)) {
+        const s = row.source == null || row.source === '' ? 'none' : String(row.source);
+        if (!allowed.includes(s)) bad.push(`${key} has a row marked "${s}", expected one of ${allowed.join(' / ')}`);
+      }
+    }
+  
+    // The type table: which fields this kind of appointment does not have, so the
+    // page can leave them blank rather than claiming they are missing.
+    const na = Array.isArray(note.notApplicable) ? note.notApplicable : [];
+    for (const k of expect.notApplicableMustInclude || []) {
+      if (!na.includes(k)) bad.push(`notApplicable does not include ${k}`);
+    }
+    for (const k of expect.notApplicableMustNotInclude || []) {
+      if (na.includes(k)) bad.push(`notApplicable wrongly includes ${k}`);
+    }
+  
     return bad;
   }
 

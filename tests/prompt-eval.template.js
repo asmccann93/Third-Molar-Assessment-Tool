@@ -11,80 +11,12 @@
 (async function () {
   const FIXTURES = __FIXTURES__;
 
-  const FIELD_KEYS = [
-    'reasonForAttendance', 'medicalHistory', 'proposed', 'alternatives',
-    'risks', 'benefits', 'costs', 'patientQuestions', 'patientFactors',
-    'informationGiven', 'decision', 'nextStep'
-  ];
-
-  const norm = (v) => (v == null ? '' : String(v)).toLowerCase();
-  const whole = (note) => FIELD_KEYS.map((k) => norm(note[k])).join(' \n ');
-
-  function assess(note, expect) {
-    const bad = [];
-
-    if (expect.allNull) {
-      const filled = FIELD_KEYS.filter((k) => note[k] != null && String(note[k]).trim() !== '');
-      if (filled.length) bad.push(`invented content in: ${filled.join(', ')}`);
-    }
-
-    for (const k of expect.notNull || []) {
-      if (note[k] == null || String(note[k]).trim() === '') bad.push(`${k} is empty but should be filled`);
-    }
-
-    for (const k of expect.mustBeNull || []) {
-      if (note[k] != null && String(note[k]).trim() !== '') {
-        bad.push(`${k} should be a gap, got: "${String(note[k]).slice(0, 70)}"`);
-      }
-    }
-
-    // Checklist findings arrive separately from model gaps and mean the
-    // opposite thing: "you did not say this", not "I could not find it".
-    const notSaid = (note.notSaid || []).map(norm).join(' \n ');
-    for (const n of expect.notSaidMustMatch || []) {
-      if (!notSaid.includes(n.toLowerCase())) bad.push(`nothing in notSaid mentions "${n}"`);
-    }
-    for (const n of expect.notSaidMustNotMatch || []) {
-      if (notSaid.includes(n.toLowerCase())) bad.push(`notSaid wrongly flags "${n}" as unsaid`);
-    }
-    if (expect.checklistMustApply && (note.notSaid || []).some((t) => /could not be applied/i.test(t))) {
-      bad.push('the model did not report against the checklist at all');
-    }
-
-    for (const [field, needles] of Object.entries(expect.mustMention || {})) {
-      for (const n of needles) {
-        if (!norm(note[field]).includes(n.toLowerCase())) bad.push(`${field} does not mention "${n}"`);
-      }
-    }
-
-    for (const [field, needles] of Object.entries(expect.mustNotMention || {})) {
-      for (const n of needles) {
-        if (norm(note[field]).includes(n.toLowerCase())) {
-          bad.push(`${field} mentions "${n}" — that was not clinician-named`);
-        }
-      }
-    }
-
-    for (const n of expect.mustNotMentionAnywhere || []) {
-      if (whole(note).includes(n.toLowerCase())) bad.push(`note contains "${n}" — nobody said it`);
-    }
-
-    const gaps = (note.gaps || []).map(norm).join(' \n ');
-    for (const n of expect.gapsMustMatch || []) {
-      if (!gaps.includes(n.toLowerCase())) bad.push(`no gap mentions "${n}"`);
-    }
-    for (const n of expect.decisionMustNotMatch || []) {
-      if (norm(note.decision).includes(n.toLowerCase())) {
-        bad.push(`decision claims "${n}" but none was made`);
-      }
-    }
-
-    const g = (note.gaps || []).length;
-    if (expect.gapsAtMost != null && g > expect.gapsAtMost) bad.push(`${g} gaps, expected at most ${expect.gapsAtMost}`);
-    if (expect.gapsAtLeast != null && g < expect.gapsAtLeast) bad.push(`${g} gaps, expected at least ${expect.gapsAtLeast}`);
-
-    return bad;
-  }
+  /* assess() is inlined here from tests/eval-assert.mjs at build time. It is
+     NOT written out twice any more: the self-tests in build-eval.mjs import
+     that module and then check that this inlined copy gives the same answers,
+     so the logic the self-tests exercise is the logic that runs against the
+     model. */
+  __ASSESS__
 
   const results = [];
   console.log(`\nRunning ${FIXTURES.length} fixtures against /api/extract\n`);
