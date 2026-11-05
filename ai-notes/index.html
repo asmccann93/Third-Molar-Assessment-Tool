@@ -386,7 +386,12 @@ button:disabled { opacity: .45; cursor: default; }
   font: inherit; font-size: .9375rem;
 }
 #idle-warn {
-  position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 40;
+  /* 100, above the layout builder (4 November 2026). At 40 it appeared BEHIND
+     an open builder, so a clinician who opened the dialog and was called away
+     never saw the one warning that lets them keep the consultation — and the
+     wipe took it anyway. Below #mask on purpose: with the tab in the
+     background there is nobody to warn. */
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 100;
   max-width: min(520px, calc(100vw - 32px));
   display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
   padding: 12px 16px; border-radius: 10px;
@@ -732,7 +737,12 @@ label.pmpr input { margin-top: 4px; }
 
 /* ---- privacy mask ---- */
 #mask {
-  position: fixed; inset: 0; z-index: 90;
+  /* 200, above everything (4 November 2026). It was 90, which was "above the
+     page" and fine until the layout builder arrived at 95 and floated over the
+     curtain. Nothing in the builder is patient content — field labels and the
+     clinician's own headings — but a privacy cover with a dialog sitting on
+     top of it is not a privacy cover. */
+  position: fixed; inset: 0; z-index: 200;
   display: grid; place-items: center;
   background: color-mix(in srgb, var(--page-bg) 92%, transparent);
   backdrop-filter: blur(14px);
@@ -818,7 +828,7 @@ label.pmpr input { margin-top: 4px; }
 
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-  z-index: 95; padding: 12px 20px; border-radius: 999px;
+  z-index: 100; padding: 12px 20px; border-radius: 999px;
   background: var(--ink); color: #fff; font-size: .875rem; font-weight: 500;
   box-shadow: 0 4px 16px rgb(0 0 0 / .18);
 }

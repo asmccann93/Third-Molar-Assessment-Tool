@@ -41,7 +41,7 @@
 // someone holding a live token hears anything more specific (a password too
 // short), and that person is the colleague it was made for.
 
-import { storeState, loadUsers, cachedUsers, userKey } from './_store.mjs';
+import { storeState, loadUsers, cachedUsers, userKey, accountRecord } from './_store.mjs';
 import {
   INVITE_TOKEN_RE, sha256, hexEqual, passwordProblem, hashPassword, writeItems, writesConfigured,
   makeThrottle, clientKey, readJsonBody, nextEpoch
@@ -119,10 +119,11 @@ export default async function handler(req, res) {
   const problem = passwordProblem(password, user.email);
   if (problem) return res.status(400).json({ error: problem });
 
-  const value = {
-    email: user.email,
-    initials: user.initials,
-    role: user.role,
+  /* accountRecord carries forward everything the record already holds — the
+     clinician's saved note layouts above all. This used to be a hand-written
+     list of eight fields, so choosing a new password after a forgotten one
+     silently deleted the layouts they had built. */
+  const value = accountRecord(user, {
     status: 'active',
     pw: await hashPassword(password),
     invite: null,
@@ -131,7 +132,7 @@ export default async function handler(req, res) {
     // that count.
     epoch: nextEpoch(user.epoch),
     createdAt: user.createdAt || new Date(now).toISOString().slice(0, 10)
-  };
+  });
   try {
     await writeItems([{ operation: 'update', key: userKey(user.initials), value }]);
   } catch (err) {

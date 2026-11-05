@@ -1028,6 +1028,37 @@ async function testStyles() {
   const undeclared = [...new Set(bare)].filter((v) => !declared.has(v));
   ok('every CSS variable used without a fallback is declared', undeclared.length === 0, undeclared.join(', '));
 
+  /* WHAT COVERS WHAT (4 November 2026). Computed from the stylesheet, not read
+     out of it: these are an ORDER, and the numbers are free to change as long
+     as the order does not.
+
+     The layout builder arrived at z-index 95 and quietly out-ranked two things
+     it had no business out-ranking. The privacy cover, at 90, no longer covered
+     it when the tab went to the background. And the idle warning, at 40,
+     appeared BEHIND it — so a clinician who opened the dialog and was called
+     away never saw the one prompt that lets them keep the consultation, and
+     the wipe took it anyway. */
+  {
+    const zdom = new JSDOM(src, { pretendToBeVisual: true });
+    const zw = zdom.window, zd = zw.document;
+    const z = (sel) => {
+      let el = zd.querySelector(sel);
+      if (!el) { el = zd.createElement('div'); el.className = sel.replace(/^\./, ''); zd.body.appendChild(el); }
+      const v = parseInt(zw.getComputedStyle(el).zIndex, 10);
+      return Number.isFinite(v) ? v : NaN;
+    };
+    const mask = z('#mask'), builder = z('#layout-builder'), warn = z('#idle-warn'), toast = z('.toast');
+    ok('all four overlays declare a stacking order', [mask, builder, warn, toast].every(Number.isFinite),
+      JSON.stringify({ mask, builder, warn, toast }));
+    ok('the privacy cover sits above the layout builder, or it is not a cover',
+      mask > builder, `mask ${mask} vs builder ${builder}`);
+    ok('the idle warning sits above the builder, so it can still be answered',
+      warn > builder, `warn ${warn} vs builder ${builder}`);
+    ok('and below the cover, because a backgrounded tab has nobody to warn',
+      warn < mask, `warn ${warn} vs mask ${mask}`);
+    ok('a toast is not buried by the builder either', toast > builder, `toast ${toast} vs builder ${builder}`);
+  }
+
   // The recording view is used one-handed, chairside, possibly gloved.
   ok('the four recording controls do not stay in one row on a phone',
     /@media \(max-width: 480px\) \{[\s\S]{0,400}\.record-row \{ flex-wrap: wrap; \}/.test(css));

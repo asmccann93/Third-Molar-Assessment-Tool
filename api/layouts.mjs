@@ -16,7 +16,7 @@
 // is dictated. No clinical content, nothing about any patient, nothing about
 // a consultation. The premise the DPIA rests on is untouched.
 
-import { resolveSession, storeState, loadUsers, userKey, storeBytes } from './_store.mjs';
+import { resolveSession, storeState, loadUsers, userKey, storeBytes, accountRecord } from './_store.mjs';
 import { readCookie } from './_session.mjs';
 import { writeItems, writesConfigured, makeThrottle, sameOrigin, readJsonBody } from './_accounts.mjs';
 import { layoutKeys, CONSULT_TYPES } from './_prompt.mjs';
@@ -97,9 +97,9 @@ export default async function handler(req, res) {
     if (Object.keys(layouts).length > MAX_LAYOUTS) return res.status(409).json({ error: 'too_many' });
   }
 
-  const base = { email: me.email, initials: me.initials, role: me.role, status: me.status,
-                 pw: me.pw, invite: me.invite, epoch: me.epoch, createdAt: me.createdAt };
-  const value = Object.keys(layouts).length ? { ...base, layouts } : base;
+  /* undefined removes the key, so an empty map stores nothing rather than an
+     empty object. Everything else the record carries comes with it. */
+  const value = accountRecord(me, { layouts: Object.keys(layouts).length ? layouts : undefined });
 
   // What the store would grow to, measured as users.mjs measures it.
   const grown = bytesOf(layouts) - bytesOf(existing);

@@ -175,8 +175,67 @@ export function normaliseUser(key, v) {
     // design, say) is dropped here and never used.
     pw: typeof v.pw === 'string' && v.pw ? v.pw : null,
     invite: v.invite && typeof v.invite === 'object' && typeof v.invite.hash === 'string' ? v.invite : null,
-    createdAt: typeof v.createdAt === 'string' ? v.createdAt : null
+    createdAt: typeof v.createdAt === 'string' ? v.createdAt : null,
+    /* The clinician's own note layouts.
+
+       ADDED HERE ON 4 NOVEMBER, a day after the feature that writes them.
+       Until then this function dropped them — as its comment above says it
+       drops anything it does not name — and the consequence was that the
+       whole feature was inert in production:
+
+         GET /api/auth read me.layouts from a record this function had already
+         stripped, so it always answered `layouts: null` and the clinician's
+         layout never came back. The Mine button could not appear.
+
+         POST /api/layouts read `existing` the same way, so it was always {}.
+         Saving a layout for a second consult type DELETED the first.
+
+       Nothing caught it because every test stubbed the boundary it breaks at:
+       the page tests feed layouts straight into the auth response, and the
+       _layouts.mjs tests exercise validate() and repair() on their own. There
+       is now a test that puts a record in the store and reads it back out
+       through loadUsers, which is the only shape of test that could have.
+
+       Kept as an object and nothing more. WHICH types it holds, and whether
+       each arrangement is usable, is decided by api/_layouts.mjs against the
+       fields that exist at the time — not here.
+
+       ABSENT, not null, when there are none: unlike pw and invite, where null
+       means something, a record with no layouts should not grow a key saying
+       so. accountRecord() skips undefined, so the stored shape of an account
+       that has never saved one is exactly what it was before this existed. */
+    ...(v.layouts && typeof v.layouts === 'object' && !Array.isArray(v.layouts) ? { layouts: v.layouts } : {})
   };
+}
+
+/* ---------- what an account record IS ----------
+
+   Three routes write a user record — account.mjs (setting a password),
+   users.mjs (invite, disable, re-enable, change role) and layouts.mjs — and
+   each rebuilt it from its own hand-written list of fields. A field a writer's
+   list did not mention was not preserved; it was DELETED, because the store
+   takes the whole value.
+
+   That is how `layouts` came to be dropped by an admin disabling and
+   re-enabling an account, or by a clinician resetting their own password. The
+   fix is not to add it to three lists. It is to have one list. */
+export const ACCOUNT_FIELDS = [
+  'email', 'initials', 'role', 'status', 'pw', 'invite', 'epoch', 'createdAt', 'layouts'
+];
+
+/* The record to write: everything `existing` carries, with `changes` applied.
+   A key given as undefined in `changes` REMOVES that field — which is how
+   layouts.mjs drops the key entirely rather than storing an empty object. A
+   key given as null is kept as null, because `pw: null` and `invite: null`
+   both mean something. */
+export function accountRecord(existing = {}, changes = {}) {
+  const out = {};
+  for (const k of ACCOUNT_FIELDS) {
+    const given = Object.prototype.hasOwnProperty.call(changes, k);
+    const v = given ? changes[k] : (existing ? existing[k] : undefined);
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
 }
 
 async function fetchUsers(cfg) {

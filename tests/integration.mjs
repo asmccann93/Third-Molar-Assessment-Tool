@@ -2317,6 +2317,76 @@ async function testAccountFlows() {
        is shown a Save button that /api/layouts refuses with 409. */
     ok('and that an account session can save a layout',
       (await status(amCookie))?.canSaveLayouts === true, JSON.stringify(await status(amCookie)));
+
+    /* A LAYOUT IN THE STORE MUST COME BACK OUT OF IT (4 November 2026).
+
+       It did not. normaliseUser() drops anything it does not name, and it did
+       not name `layouts`, so every read stripped them: GET /api/auth always
+       answered null and the Mine button could never appear, and POST
+       /api/layouts always read `existing` as {}, so saving a layout for a
+       second consult type deleted the first. The feature was inert in
+       production for a day and nothing noticed, because every test stubbed
+       the boundary it breaks at — the page tests feed layouts straight into
+       the auth response, and the _layouts.mjs tests exercise validate() and
+       repair() on their own.
+
+       This is the shape of test that could have caught it: a record in the
+       store, read back through the real path. It runs against a user of its
+       own, because disabling and re-enabling moves an epoch and would kill
+       cookies the tests after this one still use. */
+    {
+      const LAY = { 'third-molar': { sections: [['Mine', ['risks', 'proposed']]] } };
+      await seed(store, 'LX');
+      store.items.user_LX = { ...store.items.user_LX, layouts: LAY };
+      St._resetStore();
+      const lxCookie = await cookieFor('LX', store.items.user_LX.epoch);
+      const body = await status(lxCookie);
+      ok('a layout written to the store comes back from it',
+        body?.layouts && body.layouts['third-molar'] &&
+        JSON.stringify(body.layouts['third-molar'].sections) === JSON.stringify(LAY['third-molar'].sections),
+        JSON.stringify(body?.layouts));
+
+      /* And every writer preserves it. Each route used to rebuild the record
+         from its own hand-written list of fields, and the store takes the
+         WHOLE value — so a field a list did not mention was not preserved, it
+         was deleted. An admin disabling and re-enabling an account, or a
+         clinician choosing a new password after forgetting one, wiped the
+         layouts they had built. */
+      const layoutsNow = () => JSON.stringify((store.items.user_LX || {}).layouts);
+      ok('the layout is on the record to begin with', layoutsNow() === JSON.stringify(LAY), layoutsNow());
+      for (const [what, action, extra] of [
+        ['changing their role', 'role', { role: 'admin' }],
+        ['changing it back', 'role', { role: 'clinician' }],
+        ['disabling them', 'disable', {}],
+        ['re-enabling them', 'enable', {}],
+        ['sending a new setup link', 'reset', {}]
+      ]) {
+        resetAll();
+        const r2 = await admin(amCookie, { action, initials: 'LX', ...extra });
+        ok(`${what} keeps their layouts`,
+          r2.statusCode === 200 && layoutsNow() === JSON.stringify(LAY),
+          `${r2.statusCode} ${layoutsNow()}`);
+        St._resetStore();
+      }
+
+      /* And the clinician's own password setup, which is the likeliest of the
+         lot: a forgotten password is an ordinary Tuesday. The reset above left
+         LX invited with a live link, so this is the real continuation of it. */
+      resetAll();
+      const reset = await admin(amCookie, { action: 'reset', initials: 'LX' });
+      const token = String(reset.body?.setupLink || '').split('#')[1] || '';
+      ok('the reset hands back a setup link to finish with', token.length > 20, JSON.stringify(reset.body?.setupLink));
+      St._resetStore();
+      resetAll();
+      const sr = await setup({ token, password: 'a long enough new passphrase' }, '198.51.100.91');
+      ok('and choosing a new password after forgetting one keeps them too',
+        sr.statusCode === 200 && layoutsNow() === JSON.stringify(LAY),
+        `${sr.statusCode} ${JSON.stringify(sr.body)} ${layoutsNow()}`);
+      // LX was created for this block alone; the tests after it pin the list.
+      delete store.items.user_LX;
+      St._resetStore();
+      resetAll();
+    }
     ok('transcribe and extract accept it', (await transcribeAs(amCookie)) === 200 && (await extractAs(amCookie)) === 400);
     ok('a session from an older epoch is refused', (await gate('/ai-notes/', { cookie: await cookieFor('AM', 0) }))?.status === 401);
     ok('and one from an epoch the account has not reached', (await gate('/ai-notes/', { cookie: await cookieFor('AM', 7) }))?.status === 401);

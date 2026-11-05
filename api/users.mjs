@@ -29,7 +29,8 @@
 
 import { readCookie } from './_session.mjs';
 import {
-  resolveSession, storeState, loadUsers, userKey, INITIALS_RE, ROLES, appUsersSet, storeBytes
+  resolveSession, storeState, loadUsers, userKey, INITIALS_RE, ROLES, appUsersSet, storeBytes,
+  accountRecord
 } from './_store.mjs';
 import {
   newInvite, writeItems, writesConfigured, makeThrottle, readJsonBody, sameOrigin, firstEpoch, nextEpoch
@@ -181,8 +182,11 @@ export default async function handler(req, res) {
     if (!target) return res.status(404).json({ error: 'no_such_user' });
     const self = target.initials === session.who;
     const wasActiveAdmin = target.role === 'admin' && target.status === 'active';
-    const base = { email: target.email, initials: target.initials, role: target.role, status: target.status,
-                   pw: target.pw, invite: target.invite, epoch: target.epoch, createdAt: target.createdAt };
+    /* accountRecord, not a hand-written list. A field this list did not name
+       was not preserved, it was DELETED — the store takes the whole value —
+       which is how disabling and re-enabling an account used to wipe the
+       clinician's saved note layouts. One list now, in _store.mjs. */
+    const base = accountRecord(target);
 
     if (action === 'reset') {
       // A new setup link: they choose a new password. The old one is cleared
