@@ -16,21 +16,17 @@
 // is dictated. No clinical content, nothing about any patient, nothing about
 // a consultation. The premise the DPIA rests on is untouched.
 
-import { resolveSession, storeState, loadUsers, userKey, storeBytes, accountRecord } from './_store.mjs';
+import { resolveSession, storeState, loadUsers, userKey, storeBytes, accountRecord,
+         STORE_SAFE_BYTES } from './_store.mjs';
 import { readCookie } from './_session.mjs';
 import { writeItems, writesConfigured, makeThrottle, sameOrigin, readJsonBody } from './_accounts.mjs';
 import { layoutKeys, CONSULT_TYPES } from './_prompt.mjs';
 import { validate, repair, bytesOf, MAX_LAYOUTS } from './_layouts.mjs';
 
-/* The same ceiling users.mjs uses, raised on 3 November 2026. It was 7 KB
-   because Vercel documented the store as 8 KB in older pages and 1 MB in
-   newer ones, and 7 KB was safe against the worse reading. The current limits
-   page gives 1 MB on every plan, Hobby included, so 64 KB is still only 6% of
-   it and leaves the staff list all the room it will ever need.
-
-   The guard stays because the store holds WHO MAY SIGN IN. An arrangement
-   someone chose must never crowd that out. */
-export const STORE_SAFE_BYTES = 64 * 1024;
+/* The shared ceiling, re-exported so this route's own tests can read it. It
+   was declared here AND in users.mjs, at different values, which is the
+   lockout described in _store.mjs. */
+export { STORE_SAFE_BYTES };
 
 // Saving a layout is a human pressing Save, not a loop.
 const hourly = makeThrottle({ windowMs: 60 * 60_000, max: 12 });

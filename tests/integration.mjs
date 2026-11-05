@@ -2951,11 +2951,36 @@ async function testReviewFixes() {
     resetAll();
     ok('an active record is compact (under 350 bytes serialised)', JSON.stringify({ user_AM: store.items.user_AM }).length < 350,
       String(JSON.stringify({ user_AM: store.items.user_AM }).length));
-    store.items.padding = 'x'.repeat(6600);
+    /* The ceiling comes from the constant, not from a number typed here: it
+       moved from 7 KB to 64 KB on 4 November and a hard-coded 6600 would have
+       made this test pass against a guard that no longer guards. */
+    const St2 = await import('../api/_store.mjs');
+    store.items.padding = 'x'.repeat(St2.STORE_SAFE_BYTES - 400);
     const w1 = store.writes;
     r5 = await call(users, { cookie: am, body: { action: 'add', initials: 'FU', email: 'fu@practice.example', role: 'clinician' } });
-    ok('adding someone who would take the store past 7 KB is refused', r5.statusCode === 409 && r5.body.error === 'store_full' && store.writes === w1, JSON.stringify(r5.body));
+    ok('adding someone who would take the store past the ceiling is refused',
+      r5.statusCode === 409 && r5.body.error === 'store_full' && store.writes === w1, JSON.stringify(r5.body));
     delete store.items.padding;
+
+    /* ONE CEILING, OR IT IS A LOCKOUT (4 November 2026). users.mjs guarded at
+       7 KB and layouts.mjs at 64 KB, and the layout route is the one that
+       fills the store: a layout is about 400 bytes and there are sixteen
+       consult types, so one clinician filling in a layout for each uses
+       6.6 KB — 92% of what users.mjs allowed for everything. Every save would
+       have succeeded and then adding a colleague would have failed with
+       "store_full", with nothing to connect the two. */
+    {
+      const ep2 = await import('../api/layouts.mjs');
+      ok('the layouts route and the admin route hold the same ceiling',
+        ep2.STORE_SAFE_BYTES === St2.STORE_SAFE_BYTES,
+        `layouts ${ep2.STORE_SAFE_BYTES} vs store ${St2.STORE_SAFE_BYTES}`);
+      /* And it is big enough for the feature that fills it: sixteen layouts
+         for one clinician, with room left for the staff list. */
+      const oneLayout = JSON.stringify({ sections: [['A', ['risks']], ['B', ['proposed']]] }).length;
+      ok('and leaves room for a clinician to use every consult type',
+        St2.STORE_SAFE_BYTES > 16 * 400 * 4, String(St2.STORE_SAFE_BYTES) + ' vs ~' + (16 * 400) + ' for one clinician');
+      ok('(a layout really is of that order, not kilobytes each)', oneLayout < 200, String(oneLayout));
+    }
 
     /* --- 6. other spellings of the gated paths --- */
     resetAll();

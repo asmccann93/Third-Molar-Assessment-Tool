@@ -261,6 +261,26 @@ async function fetchUsers(cfg) {
 // someone who would push it past its safety margin.
 export const storeBytes = () => cache.bytes;
 
+/* HOW BIG THE STORE MAY GET, in one place (4 November 2026).
+
+   It was in two, and they disagreed: users.mjs guarded at 7 KB and
+   layouts.mjs at 64 KB. 7 KB was a hedge from September, when Vercel
+   documented the store as 8 KB in older pages and 1 MB in newer ones; the
+   current limits page gives 1 MB on every plan, Hobby included, which is why
+   the layouts route was written against 64 KB.
+
+   Two beliefs about one limit is a lockout waiting to happen, and this one was
+   reachable. A layout is about 400 bytes and there are sixteen consult types,
+   so ONE clinician filling in a layout for each uses 6.6 KB — 92% of the
+   ceiling users.mjs enforced. The layout saves would all have succeeded, and
+   then adding a colleague would have failed with "store_full" and no hint
+   that a note layout was the reason.
+
+   64 KB is still 6% of the documented 1 MB and leaves the staff list all the
+   room it will ever need. The guard stays because the store holds WHO MAY
+   SIGN IN, and nothing a clinician arranges may crowd that out. */
+export const STORE_SAFE_BYTES = 64 * 1024;
+
 function withLocalWrites(users, now) {
   const out = new Map(users);
   for (const [key, w] of localWrites) {

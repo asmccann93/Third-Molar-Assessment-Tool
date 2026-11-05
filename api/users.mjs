@@ -30,7 +30,7 @@
 import { readCookie } from './_session.mjs';
 import {
   resolveSession, storeState, loadUsers, userKey, INITIALS_RE, ROLES, appUsersSet, storeBytes,
-  accountRecord
+  accountRecord, STORE_SAFE_BYTES
 } from './_store.mjs';
 import {
   newInvite, writeItems, writesConfigured, makeThrottle, readJsonBody, sameOrigin, firstEpoch, nextEpoch
@@ -52,9 +52,8 @@ export const _writeLimit = {
 // Tests set this to 0; in production it is Vercel's propagation delay plus a margin.
 export const _timing = { settleMs: 11_000 };
 
-// The store's size on Hobby is given as 1 MB in one place and 8 KB in older
-// ones. Stay under 7 KB, which is safe either way (about twenty staff).
-const STORE_SAFE_BYTES = 7 * 1024;
+// One ceiling for the whole store, in _store.mjs. This file used to carry its
+// own 7 KB — see that comment for what having two of them would have done.
 // What a record grows to once set up: the largest it will be.
 const SIZE_PAD = { pw: 'scrypt$16384$8$1$' + 'x'.repeat(22) + '$' + 'x'.repeat(43),
                    invite: { hash: 'x'.repeat(64), expires: '2026-01-01T00:00:00.000Z' } };
