@@ -186,13 +186,25 @@ async function runConsultation(ctx, note, turns, opts) {
    Measured on this 2-core container under load, the fixed sleeps in the
    record-more tests broke 6 runs in 10. The sleeps that remain are the ones
    waiting for something that must NOT happen, where the clock is the point. */
-async function waitFor(pred, what, budget = 6000) {
+/* `describe` is optional and is called ONLY on a timeout, to put the state at
+   that moment into the error (4 November 2026).
+
+   Added for a flake that has now failed twice on a loaded CI runner and not
+   once in roughly thirty runs here, loaded and unloaded. Three hypotheses have
+   been measured and disproved — the 400 ms in the polling scenario, the 200 ms
+   before the redraft assertion, and toDraft's 60 ms between Start and Stop,
+   all of which have their whole budget spare. Since the failure cannot be
+   reproduced where it can be examined, the next occurrence has to carry its
+   own evidence. */
+async function waitFor(pred, what, budget = 6000, describe = null) {
   for (let waited = 0; waited < budget; waited += 10) {
     if (pred()) { await tick(20); return; }
     await tick(10);
   }
+  let state = '';
+  if (describe) { try { state = '\n  state at timeout: ' + describe(); } catch (e) { state = '\n  (describe threw: ' + e.message + ')'; } }
   throw new Error('never reached ' + what + ' within ' + budget +
-    'ms — the assertions after this point would have read a half-rendered page.');
+    'ms — the assertions after this point would have read a half-rendered page.' + state);
 }
 
 async function settle(doc, until, what, budget = 6000) {
@@ -4816,7 +4828,21 @@ async function testCoveredElsewhere() {
      timeout now says what never happened instead of leaving the next person to
      guess. (The two fixed sleeps suspected of causing it were measured on 4
      November and have their full budget spare, so they are not the cause.) */
-  await waitFor(() => lis().length === 2, 'the uncovered list to refill for the next patient');
+  /* This is the one that flakes on CI. It has never flaked here, so the state
+     at the moment of failure is the only evidence anyone is going to get —
+     whether the draft arrived at all, whether the extract was even asked for
+     again, and whether an item is still marked covered from the last patient.
+     Each of those points at a different cause. */
+  await waitFor(() => lis().length === 2, 'the uncovered list to refill for the next patient', 6000,
+    () => JSON.stringify({
+      items: lis().length,
+      extractsRequested: extracts,
+      view: ['setup', 'recording', 'working', 'draft'].filter((v) => !$(doc, v).classList.contains('hidden')),
+      notSaidPanelHidden: $(doc, 'notsaid').classList.contains('hidden'),
+      somethingStillMarkedCovered: !!$(doc, 'covered-block'),
+      error: $(doc, 'error').classList.contains('hidden') ? null : $(doc, 'error-title').textContent,
+      listed: lis().map((li) => li.textContent.slice(0, 48))
+    }));
   ok('the next consultation starts with nothing marked', lis().length === 2 && !$(doc, 'covered-block'));
 
   // The "could not be applied" warning is not an item.
