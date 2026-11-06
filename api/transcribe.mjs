@@ -235,7 +235,19 @@ export const ADDITIONAL_VOCAB = [
   { content: 'subgingival' },
   { content: 'recession' },
   { content: 'sequestrum' },
-  { content: 'hypodontia' }
+  { content: 'hypodontia' },
+
+  /* ---- the BSP diagnosis statement (6 November 2026) ----
+     Three words the statement is said in that were not in the list. Not the
+     rest of it: "stage", "grade", "localised" and "generalised" are ordinary
+     English, and the documented reason the exclusion list exists (every, bite,
+     ridge, pocket, post) applies to them exactly as it does to those — biasing
+     a common word costs more in the rest of the recording than it buys here.
+     Neither spelling of localised/generalised needs help anyway: the cleaner
+     reads both. */
+  { content: 'remission' },
+  { content: 'interdental' },
+  { content: 'molar incisor' }
 ];
 
 import { readCookie, readToken, mintJobTicket, verifyJobTicket } from './_session.mjs';

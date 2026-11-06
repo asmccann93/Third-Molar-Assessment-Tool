@@ -3392,6 +3392,7 @@ testStoresNothing();
 await testFriendlier();
 await testReviewAidsHoldUp();
 await testDiagnosisItemised();
+await testPerioDiagnosisBlock();
 await testItemisedTreatment();
 await testEveryLayoutIsComplete();
 await testInjectionInEveryBlock();
@@ -6406,7 +6407,7 @@ async function testMyLayouts() {
         ['patientQuestions', false], ['patientFactors', false], ['informationGiven', false],
         ['decision', false], ['nextStep', false], ['treatmentToday', true], ['plan', true],
         ['@la', false], ['@sedation', false], ['@implant', false], ['@options', false],
-        ['@planitems', false], ['@diagnoses', false]
+        ['@planitems', false], ['@diagnoses', false], ['@periodiag', false]
       ]]
     ] }
   };
@@ -6506,7 +6507,7 @@ async function testMyLayouts() {
 
   // The block names the server validates against must match the page's.
   ok('the page and the server agree on which blocks a layout may place',
-    /BLOCK_KEYS = \['@bpe', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'\]/
+    /BLOCK_KEYS = \['@bpe', '@periodiag', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'\]/
       .test(readFileSync(new URL('../api/_prompt.mjs', import.meta.url), 'utf8')) &&
     /'@bpe':[\s\S]*'@la':[\s\S]*'@sedation':[\s\S]*'@implant':[\s\S]*'@options':[\s\S]*'@planitems':[\s\S]*'@diagnoses':/.test(src));
 }
@@ -6542,7 +6543,7 @@ async function testLayoutCannotRelabelDictation() {
     'reasonForAttendance', 'medicalHistory', 'proposed', 'alternatives', 'risks', 'benefits',
     'costs', 'patientQuestions', 'patientFactors', 'informationGiven', 'decision', 'nextStep',
     'examination', 'radiographicFindings', 'treatmentToday', 'plan',
-    '@bpe', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'
+    '@bpe', '@periodiag', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'
   ];
   const LIES = {
     'third-molar': { sections: [['Everything', ALL.map((k) => [k, k === 'risks' || k === '@options'])]] }
@@ -6653,7 +6654,7 @@ async function testLayoutBuilder() {
     'reasonForAttendance', 'medicalHistory', 'proposed', 'alternatives', 'risks', 'benefits',
     'costs', 'patientQuestions', 'patientFactors', 'informationGiven', 'decision', 'nextStep',
     'examination', 'radiographicFindings', 'treatmentToday', 'plan',
-    '@bpe', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'
+    '@bpe', '@periodiag', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'
   ];
 
   /* Every save the page makes, and what it sent. The transcribe and extract
@@ -7587,6 +7588,288 @@ async function testReviewAidsHoldUp() {
     /\.add-row, \.order-row, \.row-del, th\.row-del-h \{ display: none !important; \}/.test(printCss));
 }
 
+/**
+ * The periodontal diagnosis (6 November 2026).
+ *
+ * The block records the BSP statement — extent, disease, stage, grade,
+ * stability, risk factors — and COMPUTES NONE OF IT. That is the assertion
+ * everything here is built around: a stage read off the bone loss in the
+ * examination field, or a grade divided out of an age, would look entirely
+ * ordinary in the note and would be this tool diagnosing a patient. So one case
+ * below hands the page a draft full of the findings a stage and grade are
+ * normally worked out from, with no diagnosis in it, and requires the block to
+ * stay empty.
+ *
+ * His decisions, 6 November: the same fields on a perio appointment and on an
+ * exam or recall, with every missing part flagged on both; and one block
+ * covering gingival health and gingivitis too, with the stage, grade and
+ * stability only where periodontitis is what was stated.
+ */
+async function testPerioDiagnosisBlock() {
+  section('The periodontal diagnosis (BSP)');
+
+  const DIAG = (extra = {}) => Object.assign({
+    disease: 'periodontitis', extent: 'generalised', stage: 'III', grade: 'B',
+    stability: 'unstable', riskFactors: 'current smoker 15 a day',
+    quotes: ['generalised periodontitis stage three grade B']
+  }, extra);
+  const PERIO_TURNS = () => [
+    { speaker: 'S1', start: 20, end: 30,
+      text: 'You have generalised periodontitis stage three grade B and it is unstable at the moment.' }
+  ];
+  const block = (doc) => $(doc, 'periodiag-block');
+  const statement = (doc) => block(doc).querySelector('.perio-statement').textContent;
+  const sel = (doc, part) => block(doc).querySelector('select[data-part="' + part + '"]');
+  const notes = (doc) => [...block(doc).querySelectorAll('.bpe-note')].map((p) => p.textContent).join(' ');
+  const row = (doc, part) => sel(doc, part).closest('.perio-row');
+
+  // 1. Offered on his two types, and on nothing else that was not asked for.
+  let ctx = await runType(() => note27({ sources: {}, perioDiagnosis: DIAG(), speakers: { S1: 'clinician' } }),
+    { type: /^Perio/, turns: PERIO_TURNS() });
+  let doc = ctx.doc;
+  ok('a perio appointment is offered the block', !!block(doc));
+  ok('the statement reads in the BSP order',
+    statement(doc) === 'Generalised periodontitis; stage III, grade B; currently unstable. ' +
+      'Risk factors: current smoker 15 a day.', statement(doc));
+  let copied = await ctx.copy();
+  ok('and the copy carries that one sentence, not the form that built it',
+    /Periodontal diagnosis\nGeneralised periodontitis; stage III, grade B; currently unstable\. Risk factors: current smoker 15 a day\./
+      .test(copied), copied.slice(0, 1200));
+  ok('the block is not labelled as dictated, a diagnosis being as often said to the patient',
+    !block(doc).classList.contains('is-dictated') && !/Dictated/.test(block(doc).querySelector('.field-head').textContent),
+    block(doc).querySelector('.field-head').textContent);
+
+  // Every part is a dropdown of the published terms and nothing else, so a
+  // stage cannot be typed in as "II-III" or "early".
+  ok('each part offers exactly its published terms, plus "not stated"',
+    [['disease', ['clinical gingival health', 'gingivitis', 'periodontitis']],
+     ['extent', ['localised', 'generalised', 'molar/incisor pattern']],
+     ['stage', ['I', 'II', 'III', 'IV']],
+     ['grade', ['A', 'B', 'C']],
+     ['stability', ['stable', 'in remission', 'unstable']]]
+      .every(([part, want]) => {
+        const vals = [...sel(doc, part).options].map((o) => o.value);
+        return vals[0] === '' && vals.length === want.length + 1 && want.every((w, i) => vals[i + 1] === w);
+      }),
+    [...sel(doc, 'stage').options].map((o) => o.value).join('|'));
+  ok('and the risk factors are the clinician\'s own words, not a list to pick from',
+    !!block(doc).querySelector('.perio-risk[contenteditable="true"]') &&
+    !block(doc).querySelector('select[data-part="riskFactors"]'));
+
+  // 2. Correcting a part rewrites the statement and says it was edited.
+  const stage = sel(doc, 'stage');
+  stage.value = 'IV';
+  stage.dispatchEvent(new ctx.win.Event('change'));
+  await tick(20);
+  ok('changing a part rewrites the statement',
+    /stage IV/.test(statement(doc)) && !/stage III/.test(statement(doc)), statement(doc));
+  ok('and the block says it was edited, so the heard line is withdrawn',
+    /Edited by you/.test(notes(doc)) && !/Heard:/.test(notes(doc)), notes(doc));
+  copied = await ctx.copy();
+  ok('the copy follows the correction', /stage IV/.test(copied) && !/stage III/.test(copied), copied.slice(0, 900));
+
+  // 3. Gingivitis has no stage, grade or stability.
+  ctx = await runType(() => note27({ sources: {}, perioDiagnosis: { disease: 'gingivitis', extent: 'localised', quotes: [] } }),
+    { type: /^Perio/, turns: PERIO_TURNS() });
+  doc = ctx.doc;
+  ok('gingivitis reads as its own statement', statement(doc) === 'Localised gingivitis.', statement(doc));
+  ok('and the three staging rows are not shown for it',
+    ['stage', 'grade', 'stability'].every((p) => row(doc, p).classList.contains('hidden')),
+    ['stage', 'grade', 'stability'].map((p) => p + ':' + row(doc, p).className).join(' '));
+  ok('the extent row still is, gingivitis having an extent', !row(doc, 'extent').classList.contains('hidden'));
+
+  ctx = await runType(() => note27({ sources: {}, perioDiagnosis: { disease: 'clinical gingival health', quotes: [] } }),
+    { type: /^Perio/, turns: PERIO_TURNS() });
+  doc = ctx.doc;
+  ok('gingival health has no extent either', row(doc, 'extent').classList.contains('hidden') &&
+    statement(doc) === 'Clinical gingival health.', statement(doc) + ' | ' + row(doc, 'extent').className);
+  ok('and nothing is flagged as missing for it', !/Not stated/.test(notes(doc)), notes(doc));
+
+  /* 4. THE PAIR THAT CANNOT BOTH BE TRUE. A stage recorded against a diagnosis
+     of gingivitis is a contradiction. The statement must not assert it — that
+     would be a false record — and the block must not clear it quietly either,
+     because which of the two the clinician meant is a clinical question. */
+  ctx = await runType(() => note27({ sources: {},
+    perioDiagnosis: { disease: 'gingivitis', extent: 'generalised', stage: 'III', grade: 'B', stability: 'unstable', quotes: [] } }),
+    { type: /^Perio/, turns: PERIO_TURNS() });
+  doc = ctx.doc;
+  ok('a stage against gingivitis is left out of the statement',
+    statement(doc) === 'Generalised gingivitis.', statement(doc));
+  ok('but it is NOT cleared quietly: the block says both are there',
+    /The diagnosis is gingivitis, which has no stage or grade or stability, but they are recorded/.test(notes(doc)),
+    notes(doc));
+  ok('and the dropdowns still hold it, so the clinician decides which to change',
+    sel(doc, 'stage').value === 'III' && sel(doc, 'grade').value === 'B', sel(doc, 'stage').value);
+  copied = await ctx.copy();
+  ok('the copy carries the statement and not the contradiction',
+    /Periodontal diagnosis\nGeneralised gingivitis\./.test(copied) && !/stage III/i.test(copied), copied.slice(0, 900));
+
+  /* The same thing arrived at the other way, which is how it will actually
+     happen: a periodontitis diagnosis is drafted and the clinician corrects
+     the DIAGNOSIS to gingivitis. Clearing the stage for them at that moment
+     would be the tool deleting something they said, on a guess about which of
+     the two they meant — and it would do it silently, because the statement
+     would simply stop mentioning it.
+
+     A mutation sweep found this: with only the case above, a handler that
+     nulled the three parts whenever the diagnosis changed passed the whole
+     suite. */
+  ctx = await runType(() => note27({ sources: {}, perioDiagnosis: DIAG({ quotes: [] }) }),
+    { type: /^Perio/, turns: PERIO_TURNS() });
+  doc = ctx.doc;
+  ok('a drafted periodontitis statement is complete to begin with',
+    /Generalised periodontitis; stage III, grade B; currently unstable\./.test(statement(doc)), statement(doc));
+  const dis = sel(doc, 'disease');
+  dis.value = 'gingivitis';
+  dis.dispatchEvent(new ctx.win.Event('change'));
+  await tick(20);
+  ok('correcting the diagnosis to gingivitis does not delete the stage and grade',
+    sel(doc, 'stage').value === 'III' && sel(doc, 'grade').value === 'B' &&
+    sel(doc, 'stability').value === 'unstable',
+    ['stage', 'grade', 'stability'].map((p) => p + '=' + sel(doc, p).value).join(' '));
+  ok('the statement stops asserting them, and the block says why',
+    statement(doc) === 'Generalised gingivitis. Risk factors: current smoker 15 a day.' &&
+    /which has no stage or grade or stability, but they are recorded/.test(notes(doc)),
+    statement(doc) + ' || ' + notes(doc));
+  ok('and the copy follows the statement, carrying no stage',
+    !/stage III/i.test(await ctx.copy()), (await ctx.copy()).slice(0, 900));
+  // And putting the diagnosis back restores the whole statement, nothing having
+  // been thrown away in between.
+  dis.value = 'periodontitis';
+  dis.dispatchEvent(new ctx.win.Event('change'));
+  await tick(20);
+  ok('and putting it back restores the statement whole',
+    statement(doc) === 'Generalised periodontitis; stage III, grade B; currently unstable. ' +
+      'Risk factors: current smoker 15 a day.', statement(doc));
+
+  /* 5. NOTHING IS WORKED OUT. Everything a stage and a grade are normally
+     derived from is in this draft — bone loss to the apical third, a BPE of
+     fours, the patient's age — and no diagnosis is. The block must stay empty.
+     If this ever fails, the tool has started diagnosing patients. */
+  ctx = await runType(() => note27({ sources: {},
+    examination: 'Generalised 7 to 9 mm pockets, bleeding on probing at 40% of sites. ' +
+      'Five teeth lost to periodontal disease. Patient is 41.',
+    radiographicFindings: 'Bone loss to the apical third of the roots generally, 65% at the worst site.',
+    bpe: { UR: '4', UA: '4', UL: '4', LR: '4', LA: '3', LL: '4', named: true, quotes: [] },
+    perioDiagnosis: null }), { type: /^Perio/, turns: [
+      { speaker: 'S1', start: 20, end: 34,
+        text: 'There is bone loss to the apical third, nine millimetre pockets, bleeding at forty percent of sites, and you are forty one.' }
+    ] });
+  doc = ctx.doc;
+  ok('the block is offered on the appointment even with no diagnosis in the draft', !!block(doc));
+  ok('and every part of it is blank: no stage from the bone loss, no grade from the age',
+    ['disease', 'extent', 'stage', 'grade', 'stability'].every((p) => sel(doc, p).value === '') &&
+    !block(doc).querySelector('.perio-risk').textContent.trim(),
+    ['disease', 'extent', 'stage', 'grade', 'stability'].map((p) => p + '=' + sel(doc, p).value).join(' '));
+  ok('the block says so, and says nothing is worked out',
+    /No periodontal diagnosis came back with this draft/.test(notes(doc)) &&
+    /nothing above is worked out from the BPE, the pocket depths or the radiographs/.test(notes(doc)), notes(doc));
+  copied = await ctx.copy();
+  ok('and an empty block contributes nothing to the copy', !/Periodontal diagnosis/.test(copied), copied.slice(0, 900));
+  ok('nor to the paper', block(doc).classList.contains('print-none'), block(doc).className);
+
+  // Filled in by hand, it is for the paper and the copy again.
+  const d2 = sel(doc, 'disease');
+  d2.value = 'periodontitis';
+  d2.dispatchEvent(new ctx.win.Event('change'));
+  await tick(20);
+  ok('once a diagnosis is recorded the block is for the paper again',
+    !block(doc).classList.contains('print-none') && statement(doc) === 'Periodontitis.', statement(doc));
+  copied = await ctx.copy();
+  ok('and the copy carries it', /Periodontal diagnosis\nPeriodontitis\./.test(copied), copied.slice(0, 900));
+
+  /* 6. Every missing part flagged, on BOTH types. His decision: a stage and a
+     grade do not change at a review, so the record is where they come from and
+     a recall that leaves them blank should say so rather than look complete. */
+  for (const [type, label] of [[/^Perio/, 'a perio appointment'], [/^Exam/, 'an exam or recall']]) {
+    const c = await runType(() => note27({ sources: {},
+      perioDiagnosis: { disease: 'periodontitis', stability: 'stable', quotes: [] } }),
+      { type, turns: PERIO_TURNS() });
+    ok(`on ${label}, a periodontitis diagnosis missing its stage and grade says so`,
+      /Not stated: extent, stage, grade\b/.test(notes(c.doc)) &&
+      /A stage and grade do not change at a review, so take them from the record/.test(notes(c.doc)),
+      notes(c.doc));
+    ok(`and on ${label} the statement still carries what WAS stated`,
+      statement(c.doc) === 'Periodontitis; currently stable.', statement(c.doc));
+  }
+  ctx = await runType(() => note27({ sources: {}, perioDiagnosis: DIAG() }), { type: /^Exam/, turns: PERIO_TURNS() });
+  ok('a complete statement is flagged on neither', !/Not stated/.test(notes(ctx.doc)), notes(ctx.doc));
+
+  /* Offered on an exam or recall with NOTHING drafted, which is the half of
+     "both types" the cases above cannot show: a draft that already carries a
+     diagnosis brings the block with it on any type at all, so those would pass
+     just as well with exam-recall dropped from the list. */
+  ctx = await runType(() => note27({ sources: {}, perioDiagnosis: null }), { type: /^Exam/ });
+  ok('an exam or recall with no diagnosis drafted is still offered the block',
+    !!block(ctx.doc) && /No periodontal diagnosis came back with this draft/.test(notes(ctx.doc)),
+    block(ctx.doc) ? notes(ctx.doc) : 'no block rendered');
+
+  // 7. A type that was not asked for is not given the block.
+  ctx = await runType(() => note27({ sources: {} }), { type: /Third molar/ });
+  ok('a third molar appointment is not offered it', !block(ctx.doc));
+  ctx = await runType(() => note27({ sources: {}, perioDiagnosis: DIAG() }), { type: /Third molar/, turns: PERIO_TURNS() });
+  ok('but a diagnosis that came back on one is still shown, never dropped', !!block(ctx.doc) &&
+    /Generalised periodontitis/.test(statement(ctx.doc)), statement(ctx.doc));
+
+  // 8. A diagnosis whose words are nowhere in the recording is named in the
+  // headline check list, like every other unmatched sentence.
+  ctx = await runType(() => note27({ sources: {},
+    perioDiagnosis: DIAG({ quotes: ['words that were never said in this appointment'] }) }),
+    { type: /^Perio/, turns: PERIO_TURNS() });
+  doc = ctx.doc;
+  ok('a diagnosis that cannot be matched to the recording says so under the block',
+    /could not be found in the recording/.test(notes(doc)), notes(doc));
+  ok('and is named in the headline check list',
+    [...$(doc, 'sourcecheck-list').children].some((li) => /Periodontal diagnosis: it could not be matched/.test(li.textContent)),
+    [...$(doc, 'sourcecheck-list').children].map((li) => li.textContent.slice(0, 60)).join(' | '));
+
+  // 9. The risk factors, typed in.
+  ctx = await runType(() => note27({ sources: {}, perioDiagnosis: { disease: 'periodontitis', stage: 'II', quotes: [] } }),
+    { type: /^Perio/, turns: PERIO_TURNS() });
+  doc = ctx.doc;
+  const risk = block(doc).querySelector('.perio-risk');
+  risk.textContent = 'current smoker 10 a day; poorly controlled diabetes';
+  risk.dispatchEvent(new ctx.win.Event('input'));
+  await tick(20);
+  ok('risk factors typed in reach the statement',
+    /Risk factors: current smoker 10 a day; poorly controlled diabetes\.$/.test(statement(doc)), statement(doc));
+  copied = await ctx.copy();
+  ok('and the copy', /Risk factors: current smoker 10 a day; poorly controlled diabetes\./.test(copied), copied.slice(0, 900));
+
+  // 10. The referral is sent the RECORD, so the server validates terms rather
+  // than parsing a sentence, and both build the same wording.
+  const bodies = [];
+  ctx = await runType(() => note27({ sources: {}, perioDiagnosis: DIAG() }),
+    { type: /^Perio/, turns: PERIO_TURNS(), bodies });
+  doc = ctx.doc;
+  click($(doc, 'make-referral'));
+  await waitFor(() => bodies.some((b) => b.kind === 'referral'), 'the referral request');
+  const ref = bodies.find((b) => b.kind === 'referral');
+  ok('the referral is sent the diagnosis as the record, not as a sentence',
+    ref.note.perioDiagnosis && typeof ref.note.perioDiagnosis === 'object' &&
+    ref.note.perioDiagnosis.stage === 'III' && ref.note.perioDiagnosis.disease === 'periodontitis',
+    JSON.stringify(ref.note.perioDiagnosis));
+
+  // 11. Print: the statement, never the form.
+  const printCss = (html.match(/@media print \{[\s\S]*?\n\}/) || [''])[0];
+  ok('on paper the dropdowns are hidden', /\.perio-grid \{ display: none !important; \}/.test(printCss), printCss.slice(-500));
+  ok('and the statement is printed as plain text, not as a tinted box',
+    /\.perio-statement \{[^}]*border: none;[^}]*background: none;/.test(printCss.replace(/\s+/g, ' ')), printCss.slice(-600));
+
+  // 12. The page's term lists are the server's. A term the page does not offer
+  // could be extracted and then never shown; one the server does not accept
+  // would be cleared on the way to a letter.
+  const pm = await import('../api/_prompt.mjs');
+  ok('the page offers exactly the terms the server accepts',
+    [['PERIO_DISEASES', pm.PERIO_DISEASES], ['PERIO_EXTENTS', pm.PERIO_EXTENTS],
+     ['PERIO_STAGES', pm.PERIO_STAGES], ['PERIO_GRADES', pm.PERIO_GRADES],
+     ['PERIO_STABILITIES', pm.PERIO_STABILITIES]]
+      .every(([name, list]) => html.includes(`var ${name} = ${JSON.stringify(list).replace(/","/g, "', '").replace(/^\["/, "['").replace(/"\]$/, "']")};`)),
+    'one of the five lists has drifted from api/_prompt.mjs');
+  ok('and the same two consult types the request named',
+    /var PERIO_DIAG_TYPES = \['exam-recall', 'perio'\];/.test(html));
+}
+
 async function testDiagnosisItemised() {
   section('The diagnosis itemised: what was found, per tooth');
   const NOTE = () => note27({
@@ -7634,14 +7917,19 @@ async function testDiagnosisItemised() {
     /Diagnosis\n1\. Tooth \/ site 11, Distal buccal caries\n2\. Tooth \/ site 27, Grossly carious \(dictated\)\n3\. Tooth \/ site 34, Buccal abrasion/.test(text),
     text.slice(0, 900));
 
-  // In SOAP the diagnosis IS the assessment, so it leads that section.
+  /* In SOAP the diagnosis IS the assessment, so it leads that section. Since 6
+     November two blocks lead it: the periodontal diagnosis, which is a
+     statement about the whole mouth, then this list, which is per tooth. Same
+     order as the other two layouts, where both follow the BPE. */
   click([...doc.querySelectorAll('#template-picker button')].find((b) => b.dataset.template === 'soap'));
   await waitFor(() => !!$(doc, 'diagnoses-block'), 'the SOAP layout rendered');
   {
     const kids = [...$(doc, 'fields').children];
     const at = kids.findIndex((e) => e.classList.contains('section-heading') && e.textContent === 'Assessment');
-    ok('in SOAP it leads the Assessment', at !== -1 && kids[at + 1] && kids[at + 1].id === 'diagnoses-block',
-      kids.slice(at, at + 3).map((e) => e.id || e.textContent).join(' | '));
+    ok('in SOAP the two diagnosis blocks lead the Assessment, periodontal first',
+      at !== -1 && kids[at + 1] && kids[at + 1].id === 'periodiag-block' &&
+      kids[at + 2] && kids[at + 2].id === 'diagnoses-block',
+      kids.slice(at, at + 4).map((e) => e.id || e.textContent).join(' | '));
   }
 
   // Offered on EVERY consult type, which is what was asked for: there is no

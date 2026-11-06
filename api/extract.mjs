@@ -35,7 +35,8 @@ import { buildSystemPrompt, buildUserMessage, parseNote, FIELDS, DICTATED_FIELDS
          sedationAny, sedationAsLines, misplacedMoney,
          PLAN_ITEM_FIELDS, OPTION_ITEM_FIELDS, PLAN_ITEM_LABELS, OPTION_ITEM_LABELS,
          DIAG_ITEM_FIELDS, DIAG_ITEM_LABELS, itemAsText,
-         cleanDiagnoses, cleanPlanItems, cleanOptionItems } from './_prompt.mjs';
+         cleanDiagnoses, cleanPlanItems, cleanOptionItems,
+         cleanPerioDiagnosis, perioDiagnosisAny, perioDiagnosisAsText } from './_prompt.mjs';
 import { checklistGaps, checklistIsDraft } from './_checklists.mjs';
 import { sessionStillGood } from './_store.mjs';
 
@@ -257,6 +258,19 @@ export default async function handler(req, res) {
       if (typeof incoming.bpe === 'string' && BPE_LINE.test(incoming.bpe.trim())) {
         note.bpe = incoming.bpe.trim();
       }
+      /* The periodontal diagnosis (6 November 2026). The page sends the RECORD
+         and not its statement, so what is validated here is membership of the
+         published terms rather than the shape of a sentence — a tighter check
+         than any regex over prose — and the letter's wording is then built by
+         the same function the page and the note use. A part that is not a
+         published term is dropped by the cleaner and never reaches the letter. */
+      {
+        const rec = cleanPerioDiagnosis(incoming.perioDiagnosis);
+        if (perioDiagnosisAny(rec)) {
+          const line = perioDiagnosisAsText(rec);
+          if (line) note.perioDiagnosis = line;
+        }
+      }
       // The sedation record, as the page's own lines (26 October 2026). Same
       // strictness as the BPE line, for the same reason: this arrives from the
       // browser, so every line must be one of the block's own labels or a
@@ -460,6 +474,21 @@ export default async function handler(req, res) {
        "Dictated" tag on such a page, which is why the discussed rows are
        labelled in the text itself rather than merged in silently: an older page
        must not show something said to the patient as having been dictated. */
+    /* The periodontal diagnosis, for a page that does not know the block
+       (6 November 2026). It goes into the examination, which is the findings
+       field it belongs beside, labelled, rather than being dropped silently:
+       the diagnosis is the reason a perio appointment was recorded. */
+    if (!features.includes('periodiag')) {
+      const line = perioDiagnosisAsText(note.perioDiagnosis);
+      if (line) {
+        note.examination = [
+          typeof note.examination === 'string' ? note.examination.trim() : '',
+          `Periodontal diagnosis: ${line}`
+        ].filter(Boolean).join('\n');
+      }
+      delete note.perioDiagnosis;
+    }
+
     if (!features.includes('diagnoses')) {
       const rows = Array.isArray(note.diagnoses) ? note.diagnoses : [];
       const lines = (rs) => rs.map((r, i) => `${i + 1}. ${itemAsText(r, DIAG_ITEM_FIELDS, DIAG_ITEM_LABELS)}`)

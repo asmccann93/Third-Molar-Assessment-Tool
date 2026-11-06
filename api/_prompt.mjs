@@ -332,7 +332,7 @@ export const LA_LOG_FIELDS = ['agent', 'strength', 'amount', 'technique', 'site'
    fails if they drift, because a block missing from this list could not be
    placed in a saved layout, and a name here that the page does not know would
    be stored and then silently ignored. */
-export const BLOCK_KEYS = ['@bpe', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'];
+export const BLOCK_KEYS = ['@bpe', '@periodiag', '@la', '@sedation', '@implant', '@options', '@planitems', '@diagnoses'];
 
 /* Every key a layout may place: the prose fields, the dictated fields, and the
    blocks. The order is the order a repaired layout appends in, so it is the
@@ -768,6 +768,55 @@ them. Otherwise null.
 - Put the scores here and not also in examination: the page shows them as a grid
   and adds them to the note itself.
 
+## THE PERIODONTAL DIAGNOSIS
+
+"perioDiagnosis": the periodontal diagnosis in the terms of the BSP
+implementation of the 2017 classification, ONLY as the clinician STATED it.
+Otherwise null.
+
+  { "disease": "clinical gingival health" | "gingivitis" | "periodontitis" | null,
+    "extent": "localised" | "generalised" | "molar/incisor pattern" | null,
+    "stage": "I" | "II" | "III" | "IV" | null,
+    "grade": "A" | "B" | "C" | null,
+    "stability": "stable" | "in remission" | "unstable" | null,
+    "riskFactors": "<the risk factors, in the words used>" | null,
+    "quotes": ["<words copied exactly from the transcript>"] }
+
+EVERY PART IS TAKEN FROM WHAT WAS SAID AND NONE OF IT IS WORKED OUT. A
+periodontal diagnosis is the clinician's assessment, not a calculation from the
+findings, and deriving one here would put a diagnosis in the record that nobody
+made. Specifically:
+
+- NEVER derive the stage from bone loss, probing depths, attachment loss, a
+  radiograph or the number of teeth lost, however plainly they were described.
+  A stage is only a stage that was CALLED.
+- NEVER derive the grade. Do not divide bone loss by age, do not use the
+  patient's age at all, and do not read a grade off a rate of progression or a
+  smoking or diabetes history.
+- NEVER derive stability from bleeding scores or probing depths. "Fours that
+  bleed" is not "unstable" unless the clinician said unstable.
+- NEVER derive the diagnosis or the extent from BPE scores or from a count of
+  teeth. A BPE is a screening test and is not a diagnosis.
+- NEVER fill one part because the others are filled. A stage with no grade
+  stated is a stage and a blank grade.
+- A part the clinician did not state is null. Several nulls are expected.
+
+- stage, grade and stability: null unless the stated diagnosis is periodontitis.
+  Gingival health and gingivitis carry none of the three.
+- extent: "molar/incisor pattern" only where that pattern was called by name.
+- disease: null for a diagnosis that is not one of the three — necrotising
+  periodontal disease, a periodontal abscess, peri-implant mucositis or
+  peri-implantitis, pericoronitis. Those go in "diagnoses" instead, and never
+  come back here as "periodontitis".
+- riskFactors: the risk factors for this patient's periodontal disease as
+  stated, semicolon-separated, in the words used ("current smoker 15 a day;
+  diabetes not well controlled"). Never add one from the medical history that
+  was not named as a risk factor here, and never write "none".
+- quotes: one to three, word for word, under the same rules as SOURCES.
+- Put the diagnosis here and not also in "diagnoses" or examination: the page
+  shows it as the BSP statement and adds that to the note itself.
+- null for an appointment where no periodontal diagnosis was stated. Most are.
+
 ## TO DO
 
 "actions": the follow-up tasks for the practice that were SAID in the recording,
@@ -941,6 +990,7 @@ Every key below must appear, even where it does not apply to this appointment: u
   "gaps": string[],
   "questions": [ { "gap": string, "field": string, "ask": string } ],
   "bpe": { "UR": string | null, "UA": string | null, "UL": string | null, "LR": string | null, "LA": string | null, "LL": string | null, "named": boolean, "quotes": string[] } | null,
+  "perioDiagnosis": { "disease": string | null, "extent": string | null, "stage": string | null, "grade": string | null, "stability": string | null, "riskFactors": string | null, "quotes": string[] } | null,
   "actions": [ { "text": string, "quotes": string[] } ]
 }`;
 }
@@ -1260,6 +1310,201 @@ export function cleanBpe(raw) {
   }
   out.quotes = quotes;
   out.named = named;
+  return out;
+}
+
+/* ---- the periodontal diagnosis (6 November 2026) ----
+   The BSP implementation of the 2017 classification states a periodontal
+   diagnosis in a fixed order — extent, disease, stage, grade, stability, then
+   the risk factors — and this records that statement and nothing more.
+
+   NOTHING IS WORKED OUT HERE, AND THAT IS THE DESIGN. A stage follows from
+   interproximal bone loss at the worst site, a grade from bone loss over age,
+   stability from bleeding and probing depths. Every one of those is an
+   assessment the clinician has already made, and re-deriving it from what was
+   described on the recording would be this tool inventing a diagnosis — the one
+   thing it exists not to do. The prompt forbids each derivation by name, and
+   this cleaner accepts only the published terms: a value that is not one of them
+   is never converted, rounded or guessed at, it is left blank for the clinician.
+
+   There is a second reason not to calculate. The BSP implementation (Dietrich
+   et al, Br Dent J 2019;226:16-22) grades on bone loss over age as A <0.5,
+   B 0.5-1.0, C >1.0; the 2017 World Workshop paper it implements puts grade A
+   at <0.25. A tool that computed a grade would have to choose one and would be
+   wrong for whoever follows the other. This one holds no threshold at all, and
+   none of these figures is anywhere in the prompt.
+
+   Three further diagnoses in the same classification — necrotising periodontal
+   disease, a periodontal abscess, peri-implant disease — have no stage or grade
+   and are not this statement, so they are refused here rather than flattened
+   into "periodontitis". They belong in the itemised diagnosis list. */
+export const PERIO_DISEASES = ['clinical gingival health', 'gingivitis', 'periodontitis'];
+export const PERIO_EXTENTS = ['localised', 'generalised', 'molar/incisor pattern'];
+export const PERIO_STAGES = ['I', 'II', 'III', 'IV'];
+export const PERIO_GRADES = ['A', 'B', 'C'];
+export const PERIO_STABILITIES = ['stable', 'in remission', 'unstable'];
+
+// The parts only a periodontitis diagnosis carries. Gingival health and
+// gingivitis have no stage, no grade and no stability.
+export const PERIO_STAGED = ['stage', 'grade', 'stability'];
+export const PERIO_FIELDS = ['disease', 'extent', 'stage', 'grade', 'stability', 'riskFactors'];
+
+export const PERIO_LABELS = {
+  disease: 'Diagnosis',
+  extent: 'Extent',
+  stage: 'Stage',
+  grade: 'Grade',
+  stability: 'Stability',
+  riskFactors: 'Risk factors'
+};
+
+const PERIO_NONE = /^\s*(none|null|nil|n\/?a|not (stated|recorded|given|known))?\.?\s*$/i;
+// Other diagnoses in the same classification, which this statement is not.
+const PERIO_OTHER_DISEASE = /necroti|abscess|peri-?implant|pericoronitis/i;
+const PERIO_ROMAN = ['I', 'II', 'III', 'IV'];
+
+function perioWord(v) {
+  if (typeof v === 'number') return String(v);
+  return typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
+}
+
+function perioDisease(v) {
+  const s = perioWord(v).toLowerCase().replace(/[.,;]+$/, '');
+  if (!s || PERIO_OTHER_DISEASE.test(s)) return null;
+  // Order matters: "gingivitis on a reduced periodontium" is gingivitis, and
+  // "periodontitis" is checked first so it is not read as health.
+  if (/\bperiodontitis\b/.test(s)) return 'periodontitis';
+  if (/\bgingivitis\b/.test(s)) return 'gingivitis';
+  if (/\b(health|healthy)\b/.test(s)) return 'clinical gingival health';
+  return null;
+}
+
+function perioExtent(v) {
+  const s = perioWord(v).toLowerCase();
+  if (!s) return null;
+  if (/molar/.test(s) && /incis/.test(s)) return 'molar/incisor pattern';
+  if (/\blocali[sz]ed\b/.test(s)) return 'localised';
+  if (/\bgenerali[sz]ed\b/.test(s)) return 'generalised';
+  return null;
+}
+
+function perioStage(v) {
+  const s = perioWord(v).toUpperCase().replace(/^STAGE\s*/, '').replace(/[.,;]+$/, '').trim();
+  if (!s) return null;
+  if (PERIO_STAGES.indexOf(s) !== -1) return s;
+  // A single arabic numeral is the same stage written another way. A range
+  // ("II-III"), a word ("early") or anything else is not converted.
+  if (/^[1-4]$/.test(s)) return PERIO_ROMAN[Number(s) - 1];
+  return null;
+}
+
+function perioGrade(v) {
+  const s = perioWord(v).toUpperCase().replace(/^GRADE\s*/, '').replace(/[.,;]+$/, '').trim();
+  return PERIO_GRADES.indexOf(s) !== -1 ? s : null;
+}
+
+function perioStability(v) {
+  const s = perioWord(v).toLowerCase();
+  if (!s) return null;
+  // "not stable" could be either unstable or in remission, so it is neither:
+  // a negation is refused rather than read as the nearest term.
+  if (/\bnot\b/.test(s)) return null;
+  if (/remission/.test(s)) return 'in remission';
+  if (/\bunstable\b/.test(s)) return 'unstable';
+  if (/\bstable\b/.test(s)) return 'stable';
+  return null;
+}
+
+function perioRisk(v) {
+  if (Array.isArray(v) && v.every((x) => typeof x === 'string')) {
+    v = v.map((x) => x.trim()).filter(Boolean).join('; ');
+  }
+  if (typeof v === 'number') v = String(v);
+  if (typeof v !== 'string' || !v.trim() || PERIO_NONE.test(v)) return null;
+  return v.replace(/\s+/g, ' ').trim().slice(0, 400);
+}
+
+const PERIO_CLEAN = {
+  disease: perioDisease,
+  extent: perioExtent,
+  stage: perioStage,
+  grade: perioGrade,
+  stability: perioStability,
+  riskFactors: perioRisk
+};
+
+/**
+ * The diagnosis as the six parts, each one a published term or blank.
+ *
+ * A statement that arrives as PROSE is not taken apart into its parts: pulling
+ * "Generalised periodontitis, Stage III" into fields means parsing, a misparse
+ * is a wrong diagnosis, and anything in the sentence that is not one of the six
+ * parts would be dropped without saying so. It comes back { unreadable: true }
+ * instead, which parseNote turns into a gap, and the clinician fills the block
+ * in from what they said. Same for a shape that is not an object.
+ */
+export function cleanPerioDiagnosis(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string') return PERIO_NONE.test(raw) ? null : { unreadable: true };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { unreadable: true };
+  const out = {};
+  let any = false;
+  for (const k of PERIO_FIELDS) {
+    out[k] = PERIO_CLEAN[k](raw[k]);
+    if (out[k] !== null) any = true;
+  }
+  if (!any) {
+    // Silence is no diagnosis. Anything with content in it was something, and
+    // could not be read — never shown as "none stated".
+    const empty = (v) => v === null || v === undefined ||
+      (Array.isArray(v) && v.length === 0) ||
+      (typeof v === 'string' && PERIO_NONE.test(v));
+    const other = Object.keys(raw).filter((k) => k !== 'quotes' && !empty(raw[k]));
+    return other.length ? { unreadable: true } : null;
+  }
+  out.quotes = quoteList(raw.quotes);
+  return out;
+}
+
+export function perioDiagnosisAny(rec) {
+  if (!rec || typeof rec !== 'object' || rec.unreadable) return false;
+  return PERIO_FIELDS.some((k) => rec[k] !== null && rec[k] !== undefined && rec[k] !== '');
+}
+
+/**
+ * The statement, in the BSP's order. One wording for the block on the page, the
+ * pasted record and the referral letter, so a diagnosis cannot read one way on
+ * screen and another in a letter.
+ *
+ * Stage, grade and stability are left out where the stated diagnosis is one
+ * that does not carry them — a statement of "Gingivitis, Stage III" would be
+ * false. They are kept where no diagnosis has been stated yet, so a stage the
+ * clinician entered is never silently dropped; the page warns about the pair
+ * that cannot both be true rather than quietly choosing between them.
+ */
+export function perioDiagnosisAsText(rec) {
+  if (!perioDiagnosisAny(rec)) return '';
+  const staged = !rec.disease || rec.disease === 'periodontitis';
+  const head = rec.disease
+    ? (rec.extent ? `${rec.extent} ${rec.disease}` : rec.disease)
+    : (rec.extent || '');
+  /* Punctuated as the BSP's own worked example is — "generalised
+     periodontitis; stage IV, grade B; currently unstable" — down to the
+     lower-case stage and grade and the semicolons between the three parts.
+     This sentence is pasted into a patient's record, so it is the published
+     wording rather than a tidier one of mine. */
+  const staging = [];
+  if (staged) {
+    if (rec.stage) staging.push(`stage ${rec.stage}`);
+    if (rec.grade) staging.push(`grade ${rec.grade}`);
+  }
+  const parts = [head, staging.join(', '), staged && rec.stability ? `currently ${rec.stability}` : ''];
+  let out = parts.filter(Boolean).join('; ');
+  if (out) out = out.charAt(0).toUpperCase() + out.slice(1) + '.';
+  if (rec.riskFactors) {
+    out += (out ? ' ' : '') + `Risk factors: ${rec.riskFactors}`;
+    if (!/[.;!?]$/.test(out)) out += '.';
+  }
   return out;
 }
 
@@ -1662,6 +1907,14 @@ export function parseNote(raw, consultTypeKey) {
     // Said, but not in a form that could be read: never shown as "none heard".
     parserGaps.push('BPE scores came back in a form that could not be read. Enter them on the chart from what you recorded.');
   }
+  parsed.perioDiagnosis = cleanPerioDiagnosis(parsed.perioDiagnosis);
+  if (parsed.perioDiagnosis && parsed.perioDiagnosis.unreadable) {
+    parsed.perioDiagnosis = null;
+    // Stated, and not in a form that could be read: never shown as "none
+    // stated", because a blank periodontal block on a perio appointment reads
+    // as no diagnosis having been made.
+    parserGaps.push('A periodontal diagnosis came back in a form that could not be read. Enter it in the diagnosis block from what you said.');
+  }
   parsed.actions = cleanActions(parsed.actions);
   // Checked against the final gap list by cleanQuestions, in extract.mjs, once
   // every gap is in it. Anything that is not a list is no questions.
@@ -1977,6 +2230,14 @@ export function buildReferralUserMessage(note, context, transcriptMessage, { dic
   if (note && typeof note.bpe === 'string' && note.bpe.trim()) {
     any = true;
     parts.push(`BPE: ${note.bpe.trim()}`);
+  }
+  // The periodontal diagnosis, as the block's own statement (6 Nov 2026). A
+  // perio referral whose letter does not carry the diagnosis is most of the
+  // reason the letter is being written; it arrives already laid out by
+  // perioDiagnosisAsText, so there is one wording across note and letter.
+  if (note && typeof note.perioDiagnosis === 'string' && note.perioDiagnosis.trim()) {
+    any = true;
+    parts.push(`Periodontal diagnosis: ${note.perioDiagnosis.trim()}`);
   }
   // The sedation given, as the page's lines (26 October 2026). A referral for a
   // patient sedated today should say what they had; it arrives already laid out

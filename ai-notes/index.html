@@ -178,6 +178,16 @@ button:disabled { opacity: .45; cursor: default; }
     appearance: none; -webkit-appearance: none;
     border: none; background: none; padding: 0; font: inherit; color: inherit;
   }
+  /* The periodontal diagnosis prints as the BSP STATEMENT and not as the form
+     that built it (6 November 2026). The rule above read the other way round:
+     what the copy carries, the print carries. noteAsText() emits the one
+     sentence, so the paper does too — six labelled dropdowns, half of them
+     empty, would read as an unfinished form on a clinical record. */
+  .perio-grid { display: none !important; }
+  .perio-statement {
+    border: none; background: none; padding: 0; margin: 0;
+    border-radius: 0; font-size: inherit;
+  }
   .card { border: none; padding: 0; margin: 0 0 14pt; break-inside: avoid; }
   .card > h2 { color: #000; }
   .field { break-inside: avoid; }
@@ -630,6 +640,25 @@ table.bpe select { font: 600 1rem var(--font-mono); min-width: 58px; min-height:
   border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); }
 .bpe-note { font-size: .8125rem; color: var(--ink-muted); margin: 2px 0 0; }
 .bpe-note.warn { color: var(--warn-ink); }
+
+/* ---- the periodontal diagnosis (6 Nov 2026) ----
+   Its own class names rather than the radiograph report's, which are the same
+   shape. A shared selector is a shared fate: .length-picker reused for the
+   layout row on 4 November silently widened every test that counted buttons
+   in it. */
+.perio-grid { display: grid; gap: 6px; margin: 4px 0 8px; }
+.perio-row { display: grid; grid-template-columns: 11em 1fr; gap: 8px; align-items: center;
+  font-size: .8125rem; color: var(--ink-muted); }
+.perio-row select { min-height: 34px; font: inherit; font-size: .875rem; padding: 0 8px; color: var(--ink);
+  border: 1px solid var(--line-firm); border-radius: 6px; background: var(--paper); min-width: 0; }
+.perio-risk { font-size: .875rem; color: var(--ink); min-height: 1.5em; padding: 6px 8px;
+  border: 1px solid var(--line-firm); border-radius: 6px; background: var(--paper); }
+.perio-risk[contenteditable]:not([contenteditable="false"]):empty::before { content: attr(data-placeholder); color: var(--ink-faint); }
+.perio-risk[contenteditable]:not([contenteditable="false"]):focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.perio-statement { font-size: .9375rem; line-height: 1.5; margin: 4px 0 2px; padding: 8px 10px;
+  border-left: 3px solid var(--accent); background: var(--tint-soft);
+  border-radius: 0 var(--radius) var(--radius) 0; }
+@media (max-width: 520px) { .perio-row { grid-template-columns: 1fr; gap: 2px; } }
 
 /* ---- radiograph report and PMPR (27 Sep 2026) ---- */
 .xray { display: grid; gap: 6px; margin: 0 0 8px; }
@@ -1466,6 +1495,20 @@ label.pmpr input { margin-top: 4px; }
       render: function (note, host) { renderBpe(note, host); },
       text: function (note) { return bpeAsText(note.bpe); }
     },
+    /* The periodontal diagnosis (6 November 2026). It follows the BPE, which is
+       a screening test and not a diagnosis, and precedes the itemised diagnosis
+       list, so the record reads: this is what was screened, this is what the
+       periodontium is, this is what else was found.
+
+       Not marked `dictated`, for the reason the itemised lists are not: a
+       periodontal diagnosis is as often said to the patient — "your gums are
+       stable now" — as dictated to the record. */
+    '@periodiag': {
+      label: 'Periodontal diagnosis',
+      has: function (note) { return perioAny(note) || PERIO_DIAG_TYPES.indexOf(S.consultType) !== -1; },
+      render: function (note, host) { renderPerioDiagnosis(note, host); },
+      text: function (note) { return perioAsText(note); }
+    },
     '@la': {
       label: 'Local anaesthetic given',
       dictated: true,
@@ -1554,7 +1597,7 @@ label.pmpr input { margin-top: 4px; }
       hint: 'Chronological. What brought them in, what was found, what was discussed, what was decided.',
       sections: [
         ['Presentation', ['reasonForAttendance', 'medicalHistory']],
-        ['Findings',     ['examination', 'radiographicFindings', '@bpe', '@diagnoses']],
+        ['Findings',     ['examination', 'radiographicFindings', '@bpe', '@periodiag', '@diagnoses']],
         ['Discussion',   ['proposed', 'alternatives', '@options', 'patientFactors',
                           'risks', 'benefits', 'costs', 'patientQuestions']],
         // Chronological inside the section too: sedated, anaesthetised, treated.
@@ -1572,7 +1615,7 @@ label.pmpr input { margin-top: 4px; }
         ['Treatment',      ['treatmentToday', '@sedation', '@la', '@implant']],
         ['Context',        ['reasonForAttendance', 'medicalHistory',
                             'examination', 'radiographicFindings', '@bpe',
-                            '@diagnoses']],
+                            '@periodiag', '@diagnoses']],
         ['Next',           ['@planitems', 'nextStep', 'plan']]
       ]
     },
@@ -1584,7 +1627,11 @@ label.pmpr input { margin-top: 4px; }
         ['Objective',  ['examination', 'radiographicFindings', '@bpe']],
         // The diagnosis leads the Assessment because in SOAP that is what an
         // assessment is; what is proposed for it follows.
-        ['Assessment', ['@diagnoses', 'proposed', 'alternatives', '@options',
+        // The periodontal diagnosis leads it for the same reason, and ahead
+        // of the itemised list: it is the diagnosis the rest of a perio
+        // appointment follows from. The BPE stays in Objective, where a
+        // screening measurement belongs.
+        ['Assessment', ['@periodiag', '@diagnoses', 'proposed', 'alternatives', '@options',
                         'risks', 'benefits']],
         ['Plan',       ['treatmentToday', '@sedation', '@la', '@implant',
                         'decision', '@planitems', 'costs', 'informationGiven', 'nextStep', 'plan']]
@@ -3800,7 +3847,7 @@ label.pmpr input { margin-top: 4px; }
       var res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment', 'radiographs', 'sedation', 'items', 'diagnoses'],
+        body: JSON.stringify(withTranscript({ consultType: S.consultType, length: S.noteLength, features: ['treatment', 'radiographs', 'sedation', 'items', 'diagnoses', 'periodiag'],
                                               speakerRoles: S.speakerRoles || undefined }))
       });
       var data = await res.json().catch(function () { return {}; });
@@ -5027,6 +5074,318 @@ label.pmpr input { margin-top: 4px; }
         '. Sextants read UR UA UL, then LR LA LL: check each score.', false);
     } else if (heard === false) {
       add('The words these scores came from could not be found in the recording. Check each score.', true);
+    }
+  }
+
+  /* ---- the periodontal diagnosis (6 November 2026) ----
+     The BSP implementation of the 2017 classification states a periodontal
+     diagnosis in one fixed order — extent, disease, stage, grade, stability,
+     then the risk factors — and this block records that statement.
+
+     IT COMPUTES NOTHING, which is the whole of the design. A stage follows from
+     interproximal bone loss at the worst site, a grade from bone loss over age,
+     stability from bleeding and probing depths; each is an assessment the
+     clinician has already made, and deriving one here from what was described
+     would be this tool making a diagnosis. So every part is a dropdown of the
+     published terms, filled only from what was said, and the risk factors are
+     the clinician's own words. No threshold is encoded anywhere — which is as
+     well, since the BSP implementation (Dietrich et al, Br Dent J 2019;226:16-22)
+     grades bone loss over age at A <0.5, B 0.5-1.0, C >1.0, while the 2017 World
+     Workshop paper it implements puts grade A at <0.25. A calculator would have
+     to pick one and be wrong for whoever follows the other.
+
+     MIRRORS api/_prompt.mjs. The integration suite fails if the term lists
+     drift: a term the page does not offer could be extracted and then never
+     shown, and one the server does not accept would be cleared on the way to a
+     letter. */
+  var PERIO_DISEASES = ['clinical gingival health', 'gingivitis', 'periodontitis'];
+  var PERIO_EXTENTS = ['localised', 'generalised', 'molar/incisor pattern'];
+  var PERIO_STAGES = ['I', 'II', 'III', 'IV'];
+  var PERIO_GRADES = ['A', 'B', 'C'];
+  var PERIO_STABILITIES = ['stable', 'in remission', 'unstable'];
+  // The parts only periodontitis carries. Gingival health and gingivitis have
+  // no stage, no grade and no stability.
+  var PERIO_STAGED = ['stage', 'grade', 'stability'];
+  var PERIO_FIELDS = ['disease', 'extent', 'stage', 'grade', 'stability', 'riskFactors'];
+  var PERIO_LABELS = {
+    disease: 'Diagnosis', extent: 'Extent', stage: 'Stage',
+    grade: 'Grade', stability: 'Stability', riskFactors: 'Risk factors'
+  };
+  var PERIO_OPTIONS = {
+    disease: PERIO_DISEASES, extent: PERIO_EXTENTS, stage: PERIO_STAGES,
+    grade: PERIO_GRADES, stability: PERIO_STABILITIES
+  };
+  /* The appointments it is offered on. His own two: a perio appointment and an
+     exam or recall. Deliberately NOT BPE_TYPES, which happens to hold the same
+     two today: when the BPE grid is offered and when a periodontal diagnosis is
+     offered are two questions, and one answer standing for both would move this
+     block the next time the other list changes. */
+  var PERIO_DIAG_TYPES = ['exam-recall', 'perio'];
+
+  function perioRecord(note) {
+    var r = note && note.perioDiagnosis;
+    return r && typeof r === 'object' && !Array.isArray(r) ? r : null;
+  }
+
+  function perioBlank() {
+    var out = { quotes: [] };
+    PERIO_FIELDS.forEach(function (k) { out[k] = null; });
+    return out;
+  }
+
+  function perioValue(rec, k) {
+    if (!rec) return null;
+    var v = rec[k];
+    if (k === 'riskFactors') return hasText(v) ? String(v) : null;
+    if (typeof v !== 'string') return null;
+    return PERIO_OPTIONS[k].indexOf(v) !== -1 ? v : null;
+  }
+
+  function perioAny(note) {
+    var rec = perioRecord(note);
+    return !!rec && PERIO_FIELDS.some(function (k) { return perioValue(rec, k) !== null; });
+  }
+
+  /* The statement, in the BSP's order. The same wording the server builds for a
+     referral letter, so a diagnosis cannot read one way here and another in a
+     letter — and the only wording noteAsText() and the printed record carry.
+
+     Stage, grade and stability are left out where the stated diagnosis does not
+     carry them: "Gingivitis, Stage III" would be a false statement. They are
+     KEPT where no diagnosis has been stated yet, so a stage already entered is
+     never silently dropped. The pair that cannot both be true is warned about
+     below rather than quietly resolved here. */
+  function perioAsText(note) {
+    var rec = perioRecord(note);
+    if (!perioAny(note)) return '';
+    var g = function (k) { return perioValue(rec, k); };
+    var staged = !g('disease') || g('disease') === 'periodontitis';
+    var head = g('disease')
+      ? (g('extent') ? g('extent') + ' ' + g('disease') : g('disease'))
+      : (g('extent') || '');
+    /* Punctuated as the BSP's own worked example is — "generalised
+       periodontitis; stage IV, grade B; currently unstable" — down to the
+       lower-case stage and grade and the semicolons. It is pasted into a
+       patient's record, so it is the published wording, not a tidier one. */
+    var staging = [];
+    if (staged) {
+      if (g('stage')) staging.push('stage ' + g('stage'));
+      if (g('grade')) staging.push('grade ' + g('grade'));
+    }
+    var parts = [head, staging.join(', '), staged && g('stability') ? 'currently ' + g('stability') : ''];
+    var out = parts.filter(Boolean).join('; ');
+    if (out) out = out.charAt(0).toUpperCase() + out.slice(1) + '.';
+    if (g('riskFactors')) {
+      out += (out ? ' ' : '') + 'Risk factors: ' + g('riskFactors');
+      if (!/[.;!?]$/.test(out)) out += '.';
+    }
+    return out;
+  }
+
+  function perioEdited() {
+    var a = perioRecord(S.drafted), b = perioRecord(S.note);
+    return PERIO_FIELDS.some(function (k) { return perioValue(a, k) !== perioValue(b, k); });
+  }
+
+  // Whether the words the diagnosis was stated in are in the recording.
+  function perioHeard() {
+    var base = perioRecord(S.drafted);
+    if (!base || !perioAny(S.drafted)) return null;
+    var idx = transcriptIndex();
+    var qs = Array.isArray(base.quotes) ? base.quotes : [];
+    for (var i = 0; i < qs.length; i++) {
+      var hit = findQuote(idx, qs[i], true);
+      if (hit) return { quote: String(qs[i]), hit: hit };
+    }
+    return false;
+  }
+
+  /* Which parts are missing, for this diagnosis. His decision, 6 November: the
+     same fields on both appointment types and every missing part flagged on
+     both, so a recall restates the stage and grade from the record rather than
+     carrying a statement that looks complete and is not.
+
+     Nothing is flagged until a diagnosis has been stated: "Stage not stated" on
+     a patient whose gums are healthy is noise, and on a patient with no
+     diagnosis yet it is a question the clinician has not reached. */
+  function perioMissing(note) {
+    var rec = perioRecord(note);
+    var dis = perioValue(rec, 'disease');
+    if (!dis) return [];
+    var want = dis === 'periodontitis'
+      ? ['extent'].concat(PERIO_STAGED)
+      : (dis === 'gingivitis' ? ['extent'] : []);
+    return want.filter(function (k) { return perioValue(rec, k) === null; });
+  }
+
+  // Parts recorded that this diagnosis cannot carry. Not cleared automatically:
+  // which of the two the clinician meant is a clinical question, so the block
+  // says both are there and they resolve it.
+  function perioContradictions(note) {
+    var rec = perioRecord(note);
+    var dis = perioValue(rec, 'disease');
+    if (!dis || dis === 'periodontitis') return [];
+    return PERIO_STAGED.filter(function (k) { return perioValue(rec, k) !== null; });
+  }
+
+  function renderPerioDiagnosis(note, host) {
+    var old = $('periodiag-block');
+    if (old) old.remove();
+    if (!perioAny(note) && PERIO_DIAG_TYPES.indexOf(S.consultType) === -1) return;
+
+    // No section heading of its own; the layout provides it. See BLOCKS.
+    var wrap = document.createElement('div');
+    wrap.className = 'field';
+    wrap.id = 'periodiag-block';
+    var head = document.createElement('div');
+    head.className = 'field-head';
+    var h3 = document.createElement('h3');
+    h3.textContent = 'Periodontal diagnosis';
+    head.appendChild(h3);
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', function () {
+      var t = perioAsText(S.note);
+      if (t) writeClipboard('Periodontal diagnosis: ' + t, copy);
+    });
+    head.appendChild(copy);
+    wrap.appendChild(head);
+
+    var statement = document.createElement('p');
+    statement.className = 'perio-statement';
+    var grid = document.createElement('div');
+    grid.className = 'perio-grid';
+
+    if (!perioRecord(note)) note.perioDiagnosis = perioBlank();
+    var rec = perioRecord(note);
+
+    var rows = {};
+    var refresh = function () {
+      var text = perioAsText(S.note);
+      statement.textContent = text || 'No periodontal diagnosis recorded yet.';
+      statement.classList.toggle('print-none', !text);
+      // Stage, grade and stability only where the diagnosis carries them: the
+      // rows are hidden rather than disabled, so the block shows the parts of
+      // THIS statement and not a form with three dead rows in it.
+      var dis = perioValue(rec, 'disease');
+      var showStaged = !dis || dis === 'periodontitis';
+      PERIO_STAGED.forEach(function (k) {
+        if (rows[k]) rows[k].classList.toggle('hidden', !showStaged && perioValue(rec, k) === null);
+      });
+      if (rows.extent) rows.extent.classList.toggle('hidden', dis === 'clinical gingival health' && perioValue(rec, 'extent') === null);
+      /* No `block-stub` here, unlike the sedation block: that class lays the
+         field out as one compact row, and this block's dropdowns ARE how an
+         empty one is filled in. It stays a full block and simply does not
+         print until there is a statement to print. */
+      wrap.classList.toggle('print-none', !text);
+      wrap.classList.toggle('edited', perioEdited());
+      markPrintSections();
+      renderCheckNav();
+      renderPerioNote(wrap);
+    };
+
+    PERIO_FIELDS.forEach(function (k) {
+      var row = document.createElement('div');
+      row.className = 'perio-row';
+      rows[k] = row;
+      var lab = document.createElement('label');
+      lab.textContent = PERIO_LABELS[k];
+      lab.id = 'periodiag-lab-' + k;
+      row.appendChild(lab);
+      if (k === 'riskFactors') {
+        var val = document.createElement('div');
+        val.className = 'perio-risk';
+        val.textContent = perioValue(rec, k) || '';
+        val.dataset.placeholder = 'As you stated them — e.g. current smoker 15 a day; diabetes not well controlled';
+        val.setAttribute('contenteditable', EDITABLE);
+        val.setAttribute('role', 'textbox');
+        val.setAttribute('aria-labelledby', lab.id);
+        val.addEventListener('paste', function (e) {
+          e.preventDefault();
+          document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+        });
+        val.addEventListener('input', function () {
+          var v = editableText(val).replace(/\s+/g, ' ').trim();
+          rec[k] = v ? v.slice(0, 400) : null;
+          S.edited = true;
+          refresh();
+          resetIdle();
+        });
+        row.appendChild(val);
+      } else {
+        var sel = document.createElement('select');
+        // `for` as well as the id, so the label is a tap target: these are
+        // used one-handed on a tablet between patients, and an 11em label
+        // beside a dropdown is the easiest thing on the row to hit.
+        sel.id = 'periodiag-' + k;
+        lab.setAttribute('for', sel.id);
+        sel.setAttribute('aria-labelledby', lab.id);
+        sel.dataset.part = k;
+        var blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = '— not stated';
+        sel.appendChild(blank);
+        PERIO_OPTIONS[k].forEach(function (t) {
+          var o = document.createElement('option');
+          o.value = t;
+          o.textContent = k === 'stage' || k === 'grade' ? k.charAt(0).toUpperCase() + k.slice(1) + ' ' + t : t;
+          sel.appendChild(o);
+        });
+        sel.value = perioValue(rec, k) || '';
+        sel.addEventListener('change', function () {
+          resetIdle();
+          rec[k] = sel.value || null;
+          S.edited = true;
+          refresh();
+        });
+        row.appendChild(sel);
+      }
+      grid.appendChild(row);
+    });
+
+    wrap.appendChild(statement);
+    wrap.appendChild(grid);
+    host.appendChild(wrap);
+    refresh();
+  }
+
+  function renderPerioNote(wrap) {
+    [].forEach.call(wrap.querySelectorAll('.bpe-note'), function (el) { el.remove(); });
+    var add = function (text, warn) {
+      var p = document.createElement('p');
+      p.className = 'bpe-note' + (warn ? ' warn' : '');
+      p.textContent = text;
+      wrap.appendChild(p);
+    };
+    var label = function (k) { return PERIO_LABELS[k].toLowerCase(); };
+    if (!perioAny(S.drafted) && !perioAny(S.note)) {
+      add('No periodontal diagnosis came back with this draft. If you gave one, record it here — ' +
+        'nothing above is worked out from the BPE, the pocket depths or the radiographs.', false);
+      return;
+    }
+    var missing = perioMissing(S.note);
+    if (missing.length) {
+      add('Not stated: ' + missing.map(label).join(', ') +
+        '. A stage and grade do not change at a review, so take them from the record and state them here.', true);
+    }
+    var clash = perioContradictions(S.note);
+    if (clash.length) {
+      add('The diagnosis is ' + perioValue(perioRecord(S.note), 'disease') + ', which has no ' +
+        clash.map(label).join(' or ') + ', but ' + (clash.length === 1 ? 'one is' : 'they are') +
+        ' recorded. The statement leaves ' + (clash.length === 1 ? 'it' : 'them') +
+        ' out: change the diagnosis or clear ' + (clash.length === 1 ? 'it' : 'them') + '.', true);
+    }
+    if (perioEdited()) { add('Edited by you.', false); return; }
+    var heard = perioHeard();
+    if (heard) {
+      var turn = heard.hit.t || {};
+      add('Heard: “' + heard.quote + '” — ' + speakerName(heard.hit.part, String(turn.speaker || 'UU')) +
+        (heard.hit.dictated ? ' (dictated)' : '') + (Number.isFinite(heard.hit.at) ? ', ' + fmtTime(heard.hit.at) : '') +
+        '. Check every part against what you said.', false);
+    } else if (heard === false) {
+      add('The words this diagnosis came from could not be found in the recording. Check every part.', true);
     }
   }
 
@@ -6620,6 +6979,13 @@ label.pmpr input { margin-top: 4px; }
     var out = noteFields();
     var b = S.note && bpeAsText(S.note.bpe);
     if (b) out.bpe = b;
+    /* The periodontal diagnosis, as the RECORD and not as its statement
+       (6 November 2026). The server then validates membership of the published
+       terms — a tighter check than a regex over a sentence — and builds the
+       letter's wording with the same function this page uses, so there is one
+       wording across the block, the note and the letter. A perio referral
+       whose letter does not carry the diagnosis is most of why it is written. */
+    if (perioAny(S.note)) out.perioDiagnosis = perioRecord(S.note);
     // The radiograph report as one text, and the PMPR with the treatment.
     var x = S.note && xrayText(S.note);
     if (x) out.radiographicFindings = x;
@@ -6954,6 +7320,13 @@ label.pmpr input { margin-top: 4px; }
     }
     // The BPE, as drafted and unchanged, whose words could not be found.
     if (!bpeEdited() && bpeHeard() === false) { unmatched.push('BPE: the scores could not be matched to the recording'); total++; }
+    // The periodontal diagnosis, as drafted and unchanged, whose words could
+    // not be found. A diagnosis nobody can point to in the recording is the
+    // one thing in this block that must not pass quietly.
+    if (!perioEdited() && perioHeard() === false) {
+      unmatched.push('Periodontal diagnosis: it could not be matched to the recording');
+      total++;
+    }
     if (!total && !unchecked.length) { box.classList.add('hidden'); return; }
     box.classList.remove('hidden');
     var notChecked = unchecked.length

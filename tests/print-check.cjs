@@ -59,6 +59,27 @@ const SUMMARY = {
   whatToExpect: 'Swelling and soreness for a few days.',
   yourQuestions: 'You asked whether numbness can be permanent.'
 };
+/* The periodontal diagnosis (6 November 2026). A second pass, on a perio
+   appointment, because the block prints differently from everything else: the
+   paper carries the BSP STATEMENT and the six dropdowns that built it are
+   hidden. jsdom cannot answer that question — it has no cascade — and the three
+   print defects above were all in rules that read correctly as source text.
+
+   The examination and radiographic findings are the ones a stage and grade
+   would be derived from if anything derived them, so they are in here too: if
+   the paper ever carries a stage this note does not state, it will show up
+   as part of the statement. */
+const PERIO_NOTE = {
+  ...NOTE,
+  examination: 'Generalised 7 to 9 mm pockets, bleeding on probing at 40% of sites.',
+  radiographicFindings: 'Bone loss to the apical third of the roots generally.',
+  perioDiagnosis: {
+    disease: 'periodontitis', extent: 'generalised', stage: 'III', grade: 'B',
+    stability: 'unstable', riskFactors: 'current smoker 15 a day', quotes: []
+  },
+  bpe: { UR: '4', UA: '3', UL: '4', LR: '4', LA: '3', LL: '4', named: true, quotes: [] },
+  sources: {}
+};
 const POSTOP = {
   expect: 'Some swelling and soreness for two to three days.',
   pain: 'Paracetamol and ibuprofen together if you can take both.',
@@ -97,6 +118,7 @@ async function text(page) {
     page.on('pageerror', (e) => errors.push(String(e)));
     await page.addInitScript(() => { window.__printed = 0; window.print = () => { window.__printed++; }; });
 
+    let currentNote = NOTE;
     await page.route('**/api/auth*', (r) => r.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify({ authenticated: true, who: 'AM', expiresIn: 40000, canSaveLayouts: false, layouts: null }) }));
     await page.route('**/api/checklist*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
@@ -109,7 +131,7 @@ async function text(page) {
       try { kind = JSON.parse(r.request().postData() || '{}').kind || ''; } catch {}
       const body = kind === 'summary' ? { status: 'done', summary: SUMMARY }
         : kind === 'postop' ? { status: 'done', postop: POSTOP }
-        : { status: 'done', note: NOTE };
+        : { status: 'done', note: currentNote };
       return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     });
 
@@ -181,6 +203,53 @@ async function text(page) {
       const other = title === 'Patient summary' ? 'Post-op instructions' : 'Patient summary';
       ok(`${title}: and not the ${other.toLowerCase()}`, !sheet.includes(other));
     }
+    console.log('\nThe periodontal diagnosis on paper\n---------------------------------');
+    currentNote = PERIO_NOTE;
+    await page.goto(`http://127.0.0.1:${PORT}/ai-notes/index.html`);
+    await page.waitForTimeout(900);
+    await page.check('#consent');
+    await page.click('#types button:text-is("Perio")');
+    await page.click('#start');
+    await page.waitForTimeout(2200);
+    await page.click('#stop');
+    await page.waitForSelector('#draft:not(.hidden)', { timeout: 60000 });
+    await page.waitForTimeout(800);
+    ok('a perio draft arrives, with the diagnosis block in it',
+      await page.$eval('#periodiag-block', (e) => !!e), 'no block rendered');
+    ok('and the page raised no errors getting there',
+      errors.length === 0, errors.join(' | '));
+
+    await page.emulateMedia({ media: 'print' });
+    const perio = await text(page);
+    // Whether the dropdowns are really off the paper, asked of the layout and
+    // not of the stylesheet: a hidden element has no box.
+    const gridBoxes = await page.$$eval('.perio-grid', (els) => els.map((e) => !!e.getClientRects().length));
+    const stmtBox = await page.$eval('.perio-statement', (e) => !!e.getClientRects().length);
+    await page.emulateMedia({ media: 'screen' });
+
+    ok('the paper carries the BSP statement, in one sentence',
+      /Generalised periodontitis; stage III, grade B; currently unstable\. Risk factors: current smoker 15 a day\./.test(perio),
+      (perio.match(/.{0,40}Periodontal diagnosis.{0,170}/) || [''])[0]);
+    ok('and the form that built it has no box on the paper at all',
+      gridBoxes.length > 0 && gridBoxes.every((shown) => !shown), JSON.stringify(gridBoxes));
+    ok('while the statement does', stmtBox);
+    ok('so no empty "not stated" rows reach the record',
+      !/not stated/i.test(perio), (perio.match(/.{50}not stated.{50}/i) || [''])[0]);
+    /* The one that would be a false clinical record: a stage or grade on the
+       paper that the note does not state. Everything a stage is normally
+       derived from is in this draft. */
+    /* Case-insensitively, and counted: a stage this note does not state would
+       be a false clinical record however it were capitalised, and one extra
+       occurrence is one too many. */
+    const stages = (perio.match(/stage\s+(?:[IV]+|[1-4])\b/gi) || []).map((x) => x.toLowerCase().replace(/\s+/g, ' '));
+    const grades = (perio.match(/grade\s+[ABC]\b/gi) || []).map((x) => x.toLowerCase().replace(/\s+/g, ' '));
+    ok('the paper states no stage or grade beyond the one in the note',
+      stages.join(',') === 'stage iii' && grades.join(',') === 'grade b',
+      JSON.stringify([stages, grades]));
+    ok('and the block guidance is off it, like every other screen line',
+      !/nothing above is worked out/.test(perio) && !/Check every part/.test(perio),
+      (perio.match(/.{0,60}worked out.{0,60}/) || [''])[0]);
+
   } finally {
     await browser.close();
     stop();
