@@ -189,9 +189,8 @@ button:disabled { opacity: .45; cursor: default; }
      a real PDF: innerText cannot see an input's value at all, so a text scrape
      of this page shows the row with the drug missing and says nothing about
      how wide it printed. Ask the paper. */
-  table.la-log td[data-la] { padding: 5px 6px; }
   table.la-log td[data-la] .la-input { display: none !important; }
-  table.la-log td[data-la]::before { content: attr(data-la); }
+  table.la-log td[data-la=""]::before { content: ''; }
   /* The periodontal diagnosis prints as the BSP STATEMENT and not as the form
      that built it (6 November 2026). The rule above read the other way round:
      what the copy carries, the print carries. noteAsText() emits the one
@@ -514,12 +513,28 @@ table.la-log td[contenteditable]:not([contenteditable="false"]):focus { outline:
    are dressed to read as the cells beside them: no border, no background, the
    table's own font. Only the focus ring and the browser's list affordance
    tell them apart, which is the point — the row should still read as a row. */
-table.la-log td:has(> .la-input) { padding: 0; }
+/* An <input> is one line and CLIPS; the cells beside it wrap. "4% with
+   adrenaline 1:100,000" showed as "4% with adrenaline" in a column sized for
+   the old wrapping cell, on screen and on paper both.
+
+   So the cell DISPLAYS the value as ordinary wrapping text, taken from the
+   data-la attribute, and the input sits over it invisibly: still focusable,
+   still the tap target across the whole cell, still carrying the suggestion
+   list. On focus the text steps back and the input comes forward to be typed
+   in. Hiding the input outright instead would deadlock — a display:none input
+   cannot take focus, so :focus-within could never fire to bring it back. */
+table.la-log td[data-la] { position: relative; padding: 0; }
+table.la-log td[data-la]::before {
+  content: attr(data-la); display: block; padding: 5px 6px; min-height: 1.35em;
+}
+table.la-log td[data-la=""]::before { content: '\2014'; color: var(--ink-faint); }
 .la-input {
-  width: 100%; min-width: 4.5em; box-sizing: border-box; font: inherit; color: inherit;
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0;
+  box-sizing: border-box; font: inherit; color: inherit;
   padding: 5px 6px; border: 0; background: none; border-radius: 0;
 }
-.la-input::placeholder { color: var(--ink-faint); opacity: 1; }
+table.la-log td[data-la]:focus-within::before { visibility: hidden; }
+table.la-log td[data-la]:focus-within .la-input { opacity: 1; background: var(--paper); }
 .la-input:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
 /* The sedation record. The same editable-cell behaviour as the LA log, which is
@@ -1304,7 +1319,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-11-07.2';
+  var BUILD = '2026-11-07.3';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen

@@ -5802,6 +5802,16 @@ async function testTreatmentToday() {
       listOf(strengthOf(1)).join('|'));
     ok('and they are offered bare, so picking one cannot put the drug in twice',
       listOf(strengthOf(1)).every((v) => !/articaine/i.test(v)), listOf(strengthOf(1)).join('|'));
+    /* The cell displays the value and the input holds it, so the two must not
+       be able to diverge. An <input> is one line and CLIPS where the cells
+       beside it wrap, so the cell shows the value as wrapping text and the
+       input sits over it invisibly; if the attribute ever stopped tracking
+       the input, the row would show one drug and the record would hold
+       another, which is worse than any clipping. */
+    ok('the cell carries the value it displays, in full',
+      agentOf(1).closest('td').dataset.la === 'Articaine' &&
+      strengthOf(1).closest('td').dataset.la === strengthOf(1).value,
+      agentOf(1).closest('td').dataset.la + ' | ' + strengthOf(1).closest('td').dataset.la);
     ok('each row gets its own list, so one row\'s drug cannot aim another\'s',
       strengthOf(1).getAttribute('list') !== strengthOf(2).getAttribute('list') &&
       listOf(strengthOf(2)).join('|') === '2% with adrenaline 1:80,000',
@@ -5840,6 +5850,9 @@ async function testTreatmentToday() {
     await type(inputs(2)[0], 'Ropivacaine');
     ok('a drug that is not on the list is kept exactly as typed',
       inputs(2)[0].value === 'Ropivacaine', inputs(2)[0].value);
+    ok('and the cell follows it, so the row shows the drug the record holds',
+      inputs(2)[0].closest('td').dataset.la === 'Ropivacaine',
+      inputs(2)[0].closest('td').dataset.la);
     ok('and its strength list falls back to all of them, not to none',
       listOf(inputs(2)[1]).length === 8 &&
       listOf(inputs(2)[1]).includes('0.5% with adrenaline 1:200,000'),

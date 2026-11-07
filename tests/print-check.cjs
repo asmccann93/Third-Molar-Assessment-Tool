@@ -231,6 +231,29 @@ async function text(page) {
     ok('and the page raised no errors getting there',
       errors.length === 0, errors.join(' | '));
 
+    /* On SCREEN first, and the reason this lives in the only real-browser
+       harness there is: the LA strength input is positioned over its cell at
+       opacity 0 so the cell can show the value as wrapping text. That makes
+       the input invisible but still the tap target, and nothing in jsdom can
+       tell whether a real tap lands on it — jsdom has no layout, so an input
+       covered by its own cell and one behind it look identical there. */
+    await page.click('table.la-log td[data-la="4% with adrenaline 1:100,000"]');
+    ok('tapping the strength cell puts the cursor in its input',
+      await page.evaluate(() => document.activeElement &&
+        document.activeElement.classList.contains('la-input') &&
+        document.activeElement.value === '4% with adrenaline 1:100,000'),
+      await page.evaluate(() => document.activeElement ? document.activeElement.className : 'none'));
+    await page.fill('table.la-log td[data-la] .la-input:focus', '4% with adrenaline 1:200,000');
+    await page.waitForTimeout(200);
+    ok('and typing in it updates the value the cell shows',
+      await page.$eval('table.la-log tr:nth-child(2) td:nth-child(2)',
+        (e) => e.dataset.la === '4% with adrenaline 1:200,000'),
+      await page.$eval('table.la-log tr:nth-child(2) td:nth-child(2)', (e) => e.dataset.la));
+    // Put it back, so the print assertions below see what they expect.
+    await page.fill('table.la-log td[data-la] .la-input:focus', '4% with adrenaline 1:100,000');
+    await page.click('h1');
+    await page.waitForTimeout(200);
+
     await page.emulateMedia({ media: 'print' });
     const perio = await text(page);
     // Whether the dropdowns are really off the paper, asked of the layout and
