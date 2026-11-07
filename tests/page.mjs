@@ -196,6 +196,14 @@ async function runConsultation(ctx, note, turns, opts) {
    all of which have their whole budget spare. Since the failure cannot be
    reproduced where it can be examined, the next occurrence has to carry its
    own evidence. */
+/* A note for anyone mutation-testing this suite, learned the hard way on
+   7 November: waitFor THROWS, it does not print FAIL. A mutation that stops
+   something from ever appearing kills the run on an uncaught error, so a
+   harness that decides "caught" by grepping stdout for FAIL will report a
+   perfectly good assertion as having missed it. Judge by the EXIT CODE — the
+   runner exits 1 for a failed assertion and for a throw alike. The error
+   direction is at least the safe one (it cries uncaught when it caught), but
+   it costs an afternoon either way. */
 async function waitFor(pred, what, budget = 6000, describe = null) {
   for (let waited = 0; waited < budget; waited += 10) {
     if (pred()) { await tick(20); return; }
@@ -6749,15 +6757,98 @@ async function testLayoutBuilder() {
     ok('a passcode session is not offered Rearrange, because it has nowhere to save it',
       !onScreen($(doc, 'layout-edit')));
   }
+  /* ---- 1b. reachable before recording, from the Consult type card ----
+     Until 7 November the only Rearrange was the one in the draft card, which
+     does not exist until a recording has come back: the feature could only be
+     found by someone who already knew it was there, and he went looking and
+     could not. The second button needs nothing the first does not — a layout
+     is per consult type and the builder seeds from that type's layout — so it
+     is offered as soon as the type is picked. */
   {
-    const { doc } = await bootBuilder({});
+    const { doc, win } = await bootBuilder({});
+    await waitFor(() => [...$(doc, 'template-picker').querySelectorAll('button')].length >= 3, 'the picker');
+    ok('before a type is picked neither Rearrange is reachable, a layout being per type',
+      !onScreen($(doc, 'layout-edit')) && !onScreen($(doc, 'layout-edit-setup')));
+
+    click(typeButtons(doc).find((b) => /^Third molar/.test(b.textContent)));
+    await tick(30);
+    ok('picking the type offers Rearrange on the way in, before any recording',
+      onScreen($(doc, 'layout-edit-setup')));
+    ok('the one in the draft card is still not reachable, that card having no note in it yet',
+      !onScreen($(doc, 'layout-edit')));
+    ok('and it names the type it will rearrange',
+      /Third molar/.test($(doc, 'layout-edit-setup').getAttribute('aria-label')),
+      $(doc, 'layout-edit-setup').getAttribute('aria-label'));
+
+    click($(doc, 'layout-edit-setup'));
+    await waitFor(() => !$(doc, 'layout-builder').classList.contains('hidden'), 'the builder to open');
+    ok('it opens the same builder, on that type\'s own layout',
+      rows(doc).map((s) => s[0]).join('|') === 'The discussion|The patient|Treatment|Context|Next' &&
+      /Third molar/.test($(doc, 'lb-sub').textContent),
+      rows(doc).map((s) => s[0]).join('|') + ' || ' + $(doc, 'lb-sub').textContent);
+    ok('with every field and block in it, exactly as it opens from the draft',
+      placed(doc).length === ALL_KEYS.length && ALL_KEYS.every((k) => placed(doc).includes(k)),
+      JSON.stringify({ placed: placed(doc).length, of: ALL_KEYS.length }));
+
+    // Focus goes back to the button that opened it, not to the one in the
+    // draft card — which is inside a hidden section and cannot take it.
+    click($(doc, 'lb-cancel'));
+    await waitFor(() => $(doc, 'layout-builder').classList.contains('hidden'), 'the builder to close');
+    ok('and closing returns focus to the button that opened it',
+      doc.activeElement === $(doc, 'layout-edit-setup'),
+      doc.activeElement ? doc.activeElement.id || doc.activeElement.tagName : 'none');
+
+    // Changing the type re-aims it rather than leaving the old type's name on it.
+    click(typeButtons(doc).find((b) => /^Perio/.test(b.textContent)));
+    await tick(30);
+    ok('changing the consult type re-aims it',
+      /Perio/.test($(doc, 'layout-edit-setup').getAttribute('aria-label')) &&
+      !/Third molar/.test($(doc, 'layout-edit-setup').getAttribute('aria-label')),
+      $(doc, 'layout-edit-setup').getAttribute('aria-label'));
+  }
+  {
+    // A passcode session is offered neither, for the one reason: nowhere to save.
+    const { doc } = await bootBuilder({ canSave: false });
     await waitFor(() => [...$(doc, 'template-picker').querySelectorAll('button')].length >= 3, 'the picker');
     click(typeButtons(doc).find((b) => /^Third molar/.test(b.textContent)));
     await tick(30);
-    /* It lives in the draft card, beside the picker it edits, so it is reachable
-       when there is a note to rearrange and not before. */
-    ok('and it is not reachable before there is a note to rearrange',
-      !onScreen($(doc, 'layout-edit')));
+    ok('a passcode session is offered neither way in',
+      !onScreen($(doc, 'layout-edit-setup')) && !onScreen($(doc, 'layout-edit')));
+  }
+  /* Saved from the start screen, and used by the draft that follows: the whole
+     point of reaching it early is to set the layout up BEFORE recording, so
+     the save has to survive the recording rather than merely be accepted. */
+  {
+    const ctx = await bootBuilder({});
+    const { doc, win } = ctx;
+    await waitFor(() => [...$(doc, 'template-picker').querySelectorAll('button')].length >= 3, 'the picker');
+    click(typeButtons(doc).find((b) => /^Third molar/.test(b.textContent)));
+    await tick(30);
+    click($(doc, 'layout-edit-setup'));
+    await waitFor(() => !$(doc, 'layout-builder').classList.contains('hidden'), 'the builder to open');
+    const head = $(doc, 'lb-sections').querySelector('input');
+    head.value = 'What we discussed';
+    head.dispatchEvent(new win.Event('input'));
+    click($(doc, 'lb-save'));
+    await waitFor(() => ctx.posts.length === 1, 'the layout to be saved');
+    ok('a layout saved before recording is sent for the type that was picked',
+      ctx.posts[0].type === 'third-molar' && ctx.posts[0].layout.sections[0][0] === 'What we discussed',
+      JSON.stringify(ctx.posts[0]).slice(0, 160));
+    await waitFor(() => $(doc, 'layout-builder').classList.contains('hidden'), 'the builder to close');
+
+    click($(doc, 'start'));
+    await tick(60);
+    click($(doc, 'stop'));
+    await settle(doc, () => !$(doc, 'draft').classList.contains('hidden') &&
+      $(doc, 'working').classList.contains('hidden'), 'the draft');
+    ok('and the draft that follows reads in it',
+      heads(doc)[0] === 'What we discussed', JSON.stringify(heads(doc)));
+    /* And the hand-over between the two: the start screen is gone by now, so
+       the setup button goes with it and the draft card's takes over. Exactly
+       one of them is reachable at any moment, which is why there is one rule
+       deciding whether the pair shows at all and the screens decide which. */
+    ok('from the draft, the draft card\'s Rearrange takes over and the start screen\'s is gone',
+      onScreen($(doc, 'layout-edit')) && !onScreen($(doc, 'layout-edit-setup')));
   }
   {
     const ctx = await onDraft({});

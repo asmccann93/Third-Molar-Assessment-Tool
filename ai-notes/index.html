@@ -460,6 +460,9 @@ button:disabled { opacity: .45; cursor: default; }
 .length-picker button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .length-picker button[disabled], .edit-picker button[disabled] { opacity: .5; cursor: default; }
 #edit-hint { margin: 2px 0 14px; }
+/* The same pill, on the Consult type card rather than in a header row of
+   them, so it needs the gap the header row gets from its own layout. */
+#layout-edit-row-setup { margin: 12px 0 0; }
 .field pre.is-empty::before {
   content: attr(data-placeholder); color: var(--ink-faint); font-style: italic;
 }
@@ -960,6 +963,16 @@ label.pmpr input { margin-top: 4px; }
     <div class="card">
       <h2>Consult type</h2>
       <div class="types" id="types" role="group" aria-label="Consult type"></div>
+      <!-- The second way into the layout builder (7 November 2026). The other
+           one sits in the Draft note header, which does not exist until a
+           recording has come back — so until now the only way to find this was
+           to record something first. There is nothing to wait for: the builder
+           needs the consult type and nothing else, and it seeds from whichever
+           layout that type uses. Both buttons open the same dialog; see
+           renderLayoutEditRow. -->
+      <div class="edit-picker hidden" id="layout-edit-row-setup" role="group" aria-label="Edit this layout">
+        <button type="button" id="layout-edit-setup">Rearrange the note</button>
+      </div>
     </div>
 
     <div class="card">
@@ -1266,7 +1279,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-11-04.5';
+  var BUILD = '2026-11-07.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1909,17 +1922,30 @@ label.pmpr input { margin-top: 4px; }
   /* Offered only where it can work: a consult type is chosen (a layout is
      per type) and the session is the clinician's own account (a passcode
      session has nothing to save onto — see canSaveLayouts in api/auth.mjs). */
+  /* Two ways in, one rule (7 November 2026): the Draft note header, and the
+     Consult type card on the way in. The second exists because the first is
+     inside the draft section, which does not exist until a recording has come
+     back — so the feature could only be found by someone who already knew it
+     was there. One list, so the two can never disagree about when it shows. */
+  var LAYOUT_EDIT_BUTTONS = [
+    ['layout-edit-row', 'layout-edit'],
+    ['layout-edit-row-setup', 'layout-edit-setup']
+  ];
+
   function renderLayoutEditRow() {
-    var row = $('layout-edit-row');
-    if (!row) return;
     var can = !!S.canSaveLayouts && !!S.consultType;
-    row.classList.toggle('hidden', !can);
-    if (!can) return;
-    $('layout-edit').setAttribute('aria-label',
-      'Rearrange the note for ' + (consultLabel(S.consultType) || 'this appointment type'));
+    var label = 'Rearrange the note for ' + (consultLabel(S.consultType) || 'this appointment type');
+    LAYOUT_EDIT_BUTTONS.forEach(function (pair) {
+      var row = $(pair[0]);
+      if (!row) return;
+      row.classList.toggle('hidden', !can);
+      if (can) $(pair[1]).setAttribute('aria-label', label);
+    });
   }
 
-  function openBuilder() {
+  // `trigger` is the button pressed, so focus goes back to it on close rather
+  // than to whichever one the dialog happened to be written against first.
+  function openBuilder(trigger) {
     if (!S.canSaveLayouts || !S.consultType) return;
     /* Seeded from the layout ON SCREEN, not from a blank slate or always from
        'clinical'. "I like the consent record but costs should be higher up" is
@@ -1932,7 +1958,7 @@ label.pmpr input { margin-top: 4px; }
        later note reads. Keys are strings, so slice() copies them properly;
        that was not true of the [key, dictated] pairs this format replaced. */
     S.builder = from.sections.map(function (sec) { return [String(sec[0]), sec[1].slice()]; });
-    builderReturnTo = $('layout-edit');
+    builderReturnTo = trigger || $('layout-edit');
     /* If the tool has gained a field since this layout was saved, repairLayout
        has appended it under its own heading. Say so here as well as in the
        layout hint: otherwise the clinician saves and keeps a section called
@@ -2837,7 +2863,10 @@ label.pmpr input { margin-top: 4px; }
   });
 
   /* ---- the layout builder's controls (4 November 2026) ---- */
-  $('layout-edit').addEventListener('click', function () { resetIdle(); openBuilder(); });
+  LAYOUT_EDIT_BUTTONS.forEach(function (pair) {
+    var btn = $(pair[1]);
+    if (btn) btn.addEventListener('click', function () { resetIdle(); openBuilder(btn); });
+  });
   $('lb-cancel').addEventListener('click', function () { resetIdle(); closeBuilder(); });
   $('lb-add').addEventListener('click', addSection);
   $('lb-save').addEventListener('click', saveBuilder);
