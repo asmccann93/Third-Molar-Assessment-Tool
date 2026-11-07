@@ -5776,6 +5776,81 @@ async function testTreatmentToday() {
 
   const la = $(doc, 'la-block');
   ok('the LA given is set out as a table', !!la && la.querySelectorAll('tr').length === 5 && /AB123/.test(la.textContent));
+
+  /* ---- the suggestion lists on Agent and Strength (7 November 2026) ----
+     SUGGESTIONS, NOT A VOCABULARY, and the first case is the one that matters:
+     a drug this list has never heard of must survive untouched, because a
+     local anaesthetic that was given and is not in the record is the failure
+     this block exists to prevent. The rest is typing saved. */
+  {
+    const laInputs = (row) => [...[...la.querySelectorAll('tr')][row].querySelectorAll('.la-input')];
+    const agentOf = (row) => laInputs(row)[0];
+    const strengthOf = (row) => laInputs(row)[1];
+    const listOf = (inp) => [...$(doc, inp.getAttribute('list')).querySelectorAll('option')].map((o) => o.value);
+
+    ok('Agent and Strength are inputs with a list; the other five stay plain cells',
+      laInputs(1).length === 2 &&
+      [...[...la.querySelectorAll('tr')][1].querySelectorAll('td[contenteditable]')].length === 5,
+      laInputs(1).length + ' inputs');
+    ok('the agents offered are the ones he named, articaine among them',
+      listOf(agentOf(1)).join('|') === 'Lidocaine|Articaine|Prilocaine|Mepivacaine|Bupivacaine',
+      listOf(agentOf(1)).join('|'));
+    /* Row 1 was drafted as articaine, so its strength list is articaine's —
+       and holds no other agent's, which is the whole value of filtering. */
+    ok('the strengths offered follow the drug in that row',
+      listOf(strengthOf(1)).join('|') === '4% with adrenaline 1:100,000|4% with adrenaline 1:200,000',
+      listOf(strengthOf(1)).join('|'));
+    ok('and they are offered bare, so picking one cannot put the drug in twice',
+      listOf(strengthOf(1)).every((v) => !/articaine/i.test(v)), listOf(strengthOf(1)).join('|'));
+    ok('each row gets its own list, so one row\'s drug cannot aim another\'s',
+      strengthOf(1).getAttribute('list') !== strengthOf(2).getAttribute('list') &&
+      listOf(strengthOf(2)).join('|') === '2% with adrenaline 1:80,000',
+      strengthOf(2).getAttribute('list') + ' / ' + listOf(strengthOf(2)).join('|'));
+
+  }
+
+  /* The two cases that TYPE run in a context of their own. Done in the one
+     above, they left the drafted rows edited and the assertions after them
+     reading a fixture that had moved — and the first attempt also put a drug
+     back in the wrong row, the header being a <tr> like any other. A separate
+     draft costs a second and cannot reach anything. */
+  {
+    const c2 = await run({});
+    const la2 = $(c2.doc, 'la-block');
+    const inputs = (row) => [...[...la2.querySelectorAll('tr')][row].querySelectorAll('.la-input')];
+    const listOf = (inp) => [...$(c2.doc, inp.getAttribute('list')).querySelectorAll('option')].map((o) => o.value);
+    const type = async (inp, v) => {
+      inp.value = v;
+      inp.dispatchEvent(new c2.win.Event('input', { bubbles: true }));
+      await tick(20);
+    };
+    // Row 2 is drafted as lidocaine. Change the drug; the strengths follow it.
+    await type(inputs(2)[0], 'Prilocaine');
+    ok('changing the drug re-aims that row\'s strengths',
+      listOf(inputs(2)[1]).join('|') === '3% with felypressin 0.03 units/ml',
+      listOf(inputs(2)[1]).join('|'));
+    ok('and the other rows are untouched by it',
+      listOf(inputs(1)[1]).join('|') === '4% with adrenaline 1:100,000|4% with adrenaline 1:200,000',
+      listOf(inputs(1)[1]).join('|'));
+
+    /* THE ONE THAT MATTERS. A drug off the list is kept exactly as typed and
+       reaches the copied note. Its strength list falls back to every
+       presentation rather than to none, so the help is not withdrawn from the
+       clinician who has the most left to type. */
+    await type(inputs(2)[0], 'Ropivacaine');
+    ok('a drug that is not on the list is kept exactly as typed',
+      inputs(2)[0].value === 'Ropivacaine', inputs(2)[0].value);
+    ok('and its strength list falls back to all of them, not to none',
+      listOf(inputs(2)[1]).length === 8 &&
+      listOf(inputs(2)[1]).includes('0.5% with adrenaline 1:200,000'),
+      String(listOf(inputs(2)[1]).length));
+    let copied3 = '';
+    c2.win.navigator.clipboard.writeText = async (t) => { copied3 = t; };
+    click($(c2.doc, 'copy-all'));
+    await tick(20);
+    ok('the unlisted drug reaches the copied note untouched',
+      /LA 2: Agent Ropivacaine/.test(copied3), copied3.slice(-260));
+  }
   ok('a row not found in the dictation is named', /Row 2: found only in the conversation, not in your dictation/.test(la.textContent) && !/Row 1:/.test(la.textContent), la.textContent);
   ok('the patient\'s words after Dictate are not dictation', /Row 3: found only in the conversation/.test(la.textContent));
   ok('a batch number that is nowhere in the dictation is named', /Row 4: batch ZZ999 not found in your dictation/.test(la.textContent));
@@ -5793,7 +5868,13 @@ async function testTreatmentToday() {
     /TREATMENT\n\nTreatment carried out today \(dictated\)[\s\S]*Local anaesthetic given \(dictated\)[\s\S]*OUTCOME/.test(copied), copied.slice(0, 600));
   ok('the old trailing LOCAL ANAESTHETIC heading is gone', !/LOCAL ANAESTHETIC \(DICTATED\)/.test(copied), copied.slice(-300));
   // Emptying a row: it is not copied, and the rest are numbered as copied.
-  [...la.querySelectorAll('tr')][2].querySelectorAll('td').forEach((td) => { td.textContent = ''; td.dispatchEvent(new win.Event('input', { bubbles: true })); });
+  // Both kinds of cell: Agent and Strength are inputs, the rest contenteditable.
+  [...la.querySelectorAll('tr')][2].querySelectorAll('td').forEach((td) => {
+    const inp = td.querySelector('.la-input');
+    if (inp) { inp.value = ''; inp.dispatchEvent(new win.Event('input', { bubbles: true })); return; }
+    td.textContent = '';
+    td.dispatchEvent(new win.Event('input', { bubbles: true }));
+  });
   await tick(10);
   click($(doc, 'copy-all'));
   await tick(20);
@@ -5836,8 +5917,9 @@ async function testTreatmentToday() {
   w2.navigator.clipboard.writeText = async (t) => { copied2 = t; };
   click($(doc, 'la-block').querySelector('.add-row'));
   await tick(20);
-  const cell = $(doc, 'la-block').querySelector('td');
-  cell.textContent = 'Lidocaine 2% with adrenaline';
+  // Agent is an <input> since 7 November, for its suggestion list.
+  const cell = $(doc, 'la-block').querySelector('.la-input');
+  cell.value = 'Lidocaine 2% with adrenaline';
   cell.dispatchEvent(new w2.Event('input', { bubbles: true }));
   await tick(10);
   click($(doc, 'copy-all'));
@@ -6306,9 +6388,9 @@ async function testReviewAids() {
   ok('the sedation question too, being nothing but an affordance',
     $(ctx.doc, 'sedation-offer').classList.contains('block-stub'));
   click(la.querySelector('.add-row'));
-  await waitFor(() => !!$(ctx.doc, 'la-block').querySelector('td[contenteditable="true"]'), 'the first LA row');
-  const c = $(ctx.doc, 'la-block').querySelector('td[contenteditable="true"]');
-  c.textContent = 'Articaine';
+  await waitFor(() => !!$(ctx.doc, 'la-block').querySelector('.la-input'), 'the first LA row');
+  const c = $(ctx.doc, 'la-block').querySelector('.la-input');
+  c.value = 'Articaine';
   c.dispatchEvent(new ctx.win.Event('input', { bubbles: true }));
   await waitFor(() => !$(ctx.doc, 'la-block').classList.contains('block-stub'), 'the block opening out');
   ok('once it holds something it opens out again',
@@ -8370,11 +8452,14 @@ async function testNoDictationStillHasSomewhereToWrite() {
   // Typed in by hand, it reaches the record — and is not called dictated.
   click($(doc, 'la-block').querySelector('.add-row'));
   await tick(40);
+  // Agent and Strength are inputs (for the suggestion list), Amount onwards
+  // are contenteditable cells.
+  const agentCell = $(doc, 'la-block').querySelector('.la-input');
+  agentCell.value = 'Articaine';
+  agentCell.dispatchEvent(new win.Event('input', { bubbles: true }));
   const cells = [...$(doc, 'la-block').querySelectorAll('td[contenteditable="true"]')];
-  cells[0].textContent = 'Articaine';
+  cells[0].textContent = 'Two cartridges';
   cells[0].dispatchEvent(new win.Event('input', { bubbles: true }));
-  cells[2].textContent = 'Two cartridges';
-  cells[2].dispatchEvent(new win.Event('input', { bubbles: true }));
   await tick(30);
   const text = await ctx.copy();
   ok('a hand-entered LA is in the copied note',

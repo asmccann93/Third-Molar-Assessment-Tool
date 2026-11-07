@@ -540,6 +540,13 @@ anaesthetic given, the plan, and — for implant surgery — the implant log.
   cartridges to millilitres or milligrams, never work out or comment on a dose,
   never divide an amount between rows, and never fill in a strength or a batch
   that was not said. ONLY from the dictation. Empty array if none.
+  Put the drug's NAME ALONE in agent ("Articaine"), and its concentration with
+  any vasoconstrictor in strength ("4% with adrenaline 1:100,000"). Where the
+  dictation gives both in one breath, split them between the two keys; where it
+  gives only the name, strength is null. This is where to PUT what was said and
+  never a licence to complete it: do not add a concentration, a vasoconstrictor
+  or a ratio that was not dictated, even where the drug has only one
+  presentation.
 - implantLog: an array, one object per implant placed, with the keys site, system,
   diameter, length, lot, torque, isq, graft, notes — each a string or null. Take
   values exactly as dictated. Empty array if none.

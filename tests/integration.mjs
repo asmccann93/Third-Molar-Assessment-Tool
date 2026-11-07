@@ -4036,6 +4036,17 @@ async function testTreatmentTodayServer() {
     /NEVER from the conversation, and never from what was proposed,\s+agreed or planned/.test(sys));
   ok('the LA is taken as dictated and never calculated', /never convert\s+cartridges to millilitres or milligrams, never work out or comment on a dose/.test(sys));
   ok('both are in the output shape', /"treatmentToday": string \| null/.test(sys) && /"laLog": \[ \{ "agent"/.test(sys));
+  /* Where the drug name ends and the strength begins (7 November 2026). The
+     page offers each drug's own UK presentations in Strength, and it can only
+     do that if Agent holds the drug and nothing else. */
+  ok('the drug name goes in agent and the concentration in strength',
+    /Put the drug's NAME ALONE in agent \("Articaine"\), and its concentration with\s+any vasoconstrictor in strength/.test(sys), 'missing');
+  /* And the line that keeps that from becoming an invitation. Most UK drugs
+     here have one presentation, so "articaine" could be completed to "4% with
+     adrenaline 1:100,000" by anything inclined to be helpful — and a strength
+     nobody said would then be in a drug record. */
+  ok('but splitting them is never a licence to complete them',
+    /do not add a concentration, a vasoconstrictor\s+or a ratio that was not dictated, even where the drug has only one\s+presentation/.test(sys), 'missing');
   ok('and the treatment carries sources', /treatmentToday included/.test(sys));
 
   const base = Object.fromEntries(pm.FIELDS.map(([k]) => [k, 'Recorded.']));

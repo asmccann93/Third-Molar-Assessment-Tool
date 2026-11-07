@@ -178,6 +178,20 @@ button:disabled { opacity: .45; cursor: default; }
     appearance: none; -webkit-appearance: none;
     border: none; background: none; padding: 0; font: inherit; color: inherit;
   }
+  /* The LA Agent and Strength inputs. On paper they are the drug and its
+     strength, not two boxes to fill in — but an input is a single line that
+     CLIPS rather than wraps, and a printed PDF showed "4% with adrena" where
+     the record should read "4% with adrenaline 1:100,000". A truncated drug
+     strength in a clinical record is worse than an ugly one.
+
+     So the cell carries the value as an attribute and prints THAT, as ordinary
+     wrapping text, with the input itself taken off the page. Found by reading
+     a real PDF: innerText cannot see an input's value at all, so a text scrape
+     of this page shows the row with the drug missing and says nothing about
+     how wide it printed. Ask the paper. */
+  table.la-log td[data-la] { padding: 5px 6px; }
+  table.la-log td[data-la] .la-input { display: none !important; }
+  table.la-log td[data-la]::before { content: attr(data-la); }
   /* The periodontal diagnosis prints as the BSP STATEMENT and not as the form
      that built it (6 November 2026). The rule above read the other way round:
      what the copy carries, the print carries. noteAsText() emits the one
@@ -496,6 +510,17 @@ table.implant-log th, table.implant-log td { text-align: left; padding: 5px 6px;
 table.la-log td[contenteditable]:not([contenteditable="false"]):empty::before { content: attr(data-placeholder); color: var(--ink-faint); }
 table.la-log td[contenteditable]:not([contenteditable="false"]) { min-width: 3em; }
 table.la-log td[contenteditable]:not([contenteditable="false"]):focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Agent and Strength are inputs, for the suggestion list (7 Nov 2026). They
+   are dressed to read as the cells beside them: no border, no background, the
+   table's own font. Only the focus ring and the browser's list affordance
+   tell them apart, which is the point — the row should still read as a row. */
+table.la-log td:has(> .la-input) { padding: 0; }
+.la-input {
+  width: 100%; min-width: 4.5em; box-sizing: border-box; font: inherit; color: inherit;
+  padding: 5px 6px; border: 0; background: none; border-radius: 0;
+}
+.la-input::placeholder { color: var(--ink-faint); opacity: 1; }
+.la-input:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 table.implant-log th { font-weight: 600; color: var(--ink-faint); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
 /* The sedation record. The same editable-cell behaviour as the LA log, which is
    why .sed-log is given the la-log rules too, plus a label/value list for the
@@ -1279,7 +1304,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-11-07.1';
+  var BUILD = '2026-11-07.2';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -5873,6 +5898,60 @@ label.pmpr input { margin-top: 4px; }
   var LA_COLS = [['agent', 'Agent'], ['strength', 'Strength'], ['amount', 'Amount'], ['technique', 'Technique'],
                  ['site', 'Site'], ['batch', 'Batch'], ['notes', 'Notes']];
 
+  /* ---- what to suggest in Agent and Strength (7 November 2026) ----
+     SUGGESTIONS, NOT A VOCABULARY. Both cells stay free text and the server
+     stores whatever is in them: an agent this list has never heard of must
+     reach the record exactly as dictated, because a local anaesthetic that
+     was given and is not in the notes is the failure that matters here. The
+     list only saves typing.
+
+     The presentations are the UK dental cartridges, read off a UK product
+     table rather than recalled — my recollection had two that do not exist
+     here. Lidocaine cartridges in the UK are 1:80,000, not 1:100,000; UK
+     prilocaine is 3% with felypressin, there being no 4% plain cartridge.
+     Articaine is 1:100,000 and 1:200,000 (a global review lists 1:400,000,
+     which is not what is sold here).
+
+     Bupivacaine is the exception and is deliberately in: it is not a dental
+     cartridge at all but an ampoule, and it is in because he does oral
+     surgery and uses it for post-operative analgesia. */
+  var LA_AGENTS = ['Lidocaine', 'Articaine', 'Prilocaine', 'Mepivacaine', 'Bupivacaine'];
+  var LA_STRENGTHS = {
+    Lidocaine: ['2% with adrenaline 1:80,000'],
+    Articaine: ['4% with adrenaline 1:100,000', '4% with adrenaline 1:200,000'],
+    Prilocaine: ['3% with felypressin 0.03 units/ml'],
+    Mepivacaine: ['3% plain', '2% with adrenaline 1:100,000'],
+    Bupivacaine: ['0.5% with adrenaline 1:200,000', '0.5% plain']
+  };
+  /* Which presentations to offer for whatever is in Agent. A recognised agent
+     narrows to its own; an empty or unrecognised one offers every presentation
+     rather than none, because narrowing to nothing just takes the help away
+     from the clinician who most needs to type it out.
+
+     They are offered BARE — "4% with adrenaline 1:100,000" and not "Articaine
+     4% with…" — because this list fills the Strength cell, and an agent name
+     landing in it would put the drug in the record twice. */
+  function laStrengthsFor(agent) {
+    var key = String(agent || '').trim().toLowerCase();
+    var hit = null;
+    LA_AGENTS.forEach(function (a) { if (a.toLowerCase() === key) hit = a; });
+    if (hit) return LA_STRENGTHS[hit].slice();
+    var all = [];
+    LA_AGENTS.forEach(function (a) {
+      LA_STRENGTHS[a].forEach(function (s) { if (all.indexOf(s) === -1) all.push(s); });
+    });
+    return all;
+  }
+
+  function laFillList(list, values) {
+    list.textContent = '';
+    values.forEach(function (v) {
+      var o = document.createElement('option');
+      o.value = v;
+      list.appendChild(o);
+    });
+  }
+
   function laRows(note) {
     return note && Array.isArray(note.laLog) ? note.laLog.filter(function (r) { return r && typeof r === 'object'; }) : [];
   }
@@ -5983,6 +6062,11 @@ label.pmpr input { margin-top: 4px; }
     };
 
     if (rows.length) {
+      // One agents list for the block; the strength lists are per row.
+      var agentList = document.createElement('datalist');
+      agentList.id = 'la-agents';
+      laFillList(agentList, LA_AGENTS);
+      wrap.appendChild(agentList);
       var table = document.createElement('table');
       table.className = 'implant-log la-log';
       var thead = document.createElement('tr');
@@ -5994,13 +6078,53 @@ label.pmpr input { margin-top: 4px; }
       table.appendChild(thead);
       rows.forEach(function (row, i) {
         var tr = document.createElement('tr');
+        /* Agent and Strength are real inputs with a suggestion list attached;
+           the other five stay contenteditable cells. Only these two have a
+           vocabulary worth offering, and <datalist> needs an <input> — it does
+           nothing on a contenteditable. Neither RESTRICTS what can be typed:
+           see LA_AGENTS. The strength list is per row and rebuilt whenever
+           that row's agent changes, so it follows the drug. */
+        var strengthList = document.createElement('datalist');
+        strengthList.id = 'la-strengths-' + i;
+        var agentInput = null;
         LA_COLS.forEach(function (c) {
           var td = document.createElement('td');
+          var label = 'Local anaesthetic ' + (i + 1) + ', ' + c[1].toLowerCase();
+          if (c[0] === 'agent' || c[0] === 'strength') {
+            var inp = document.createElement('input');
+            inp.type = 'text';
+            inp.className = 'la-input';
+            inp.value = hasText(row[c[0]]) ? String(row[c[0]]) : '';
+            inp.placeholder = '—';
+            inp.maxLength = 300;
+            inp.autocomplete = 'off';
+            inp.setAttribute('aria-label', label);
+            inp.setAttribute('list', c[0] === 'agent' ? 'la-agents' : strengthList.id);
+            inp.addEventListener('input', function () {
+              var v = inp.value.replace(/\s+/g, ' ').trim();
+              row[c[0]] = v ? v.slice(0, 300) : null;
+              // See the print rule: the cell carries the value so that PAPER
+              // can show it as wrapping text instead of a clipped input.
+              td.dataset.la = inp.value;
+              // Re-aim the strength list at the drug now named, without
+              // touching what is already typed in it.
+              if (c[0] === 'agent') laFillList(strengthList, laStrengthsFor(v));
+              S.edited = true;
+              refresh();
+              resetIdle();
+            });
+            if (c[0] === 'agent') agentInput = inp;
+            td.dataset.la = inp.value;
+            td.appendChild(inp);
+            if (c[0] === 'strength') td.appendChild(strengthList);
+            tr.appendChild(td);
+            return;
+          }
           td.textContent = hasText(row[c[0]]) ? String(row[c[0]]) : '';
           td.dataset.placeholder = '—';
           td.setAttribute('contenteditable', EDITABLE);
           td.setAttribute('role', 'textbox');
-          td.setAttribute('aria-label', 'Local anaesthetic ' + (i + 1) + ', ' + c[1].toLowerCase());
+          td.setAttribute('aria-label', label);
           td.addEventListener('paste', function (e) {
             e.preventDefault();
             document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
@@ -6014,6 +6138,7 @@ label.pmpr input { margin-top: 4px; }
           });
           tr.appendChild(td);
         });
+        laFillList(strengthList, laStrengthsFor(agentInput ? agentInput.value : row.agent));
         tr.appendChild(delButton('Remove local anaesthetic row ' + (i + 1),
           function () { removeRow('laLog', i); }));
         table.appendChild(tr);

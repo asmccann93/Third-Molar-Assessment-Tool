@@ -78,6 +78,13 @@ const PERIO_NOTE = {
     stability: 'unstable', riskFactors: 'current smoker 15 a day', quotes: []
   },
   bpe: { UR: '4', UA: '3', UL: '4', LR: '4', LA: '3', LL: '4', named: true, quotes: [] },
+  /* One LA row, because Agent and Strength became <input> on 7 November for
+     their suggestion lists, and an input prints as a BOX unless it is told not
+     to. That is the defect found three times already in this file, and jsdom
+     cannot see it: it has no cascade, so the print rule is only ever checked
+     there as source text. */
+  laLog: [{ agent: 'Articaine', strength: '4% with adrenaline 1:100,000', amount: 'Two cartridges',
+    technique: 'Buccal infiltration', site: 'UR6', batch: 'AB123', notes: null, quotes: [] }],
   sources: {}
 };
 const POSTOP = {
@@ -210,7 +217,12 @@ async function text(page) {
     await page.check('#consent');
     await page.click('#types button:text-is("Perio")');
     await page.click('#start');
-    await page.waitForTimeout(2200);
+    await page.waitForTimeout(1200);
+    // Dictate, because the page clears laLog outright when nothing was
+    // dictated (see anyDictation) — without this the LA table never renders
+    // and the assertions about how it prints would pass against no table.
+    await page.click('#dictate');
+    await page.waitForTimeout(1200);
     await page.click('#stop');
     await page.waitForSelector('#draft:not(.hidden)', { timeout: 60000 });
     await page.waitForTimeout(800);
@@ -225,6 +237,14 @@ async function text(page) {
     // not of the stylesheet: a hidden element has no box.
     const gridBoxes = await page.$$eval('.perio-grid', (els) => els.map((e) => !!e.getClientRects().length));
     const stmtBox = await page.$eval('.perio-statement', (e) => !!e.getClientRects().length);
+    /* Measured HERE, inside the print window. The first version of this asked
+       after emulateMedia('screen') had been restored and reported the inputs
+       as visible on paper, which is simply what they look like on screen. */
+    const laInputs = await page.$$eval('.la-input', (els) => els.map((e) => ({
+      v: e.value, shown: !!e.getClientRects().length
+    })));
+    const laCellText = await page.$$eval('table.la-log td[data-la]',
+      (els) => els.map((e) => getComputedStyle(e, '::before').content));
     await page.emulateMedia({ media: 'screen' });
 
     ok('the paper carries the BSP statement, in one sentence',
@@ -246,6 +266,45 @@ async function text(page) {
     ok('the paper states no stage or grade beyond the one in the note',
       stages.join(',') === 'stage iii' && grades.join(',') === 'grade b',
       JSON.stringify([stages, grades]));
+    // The LA inputs, asked of the layout rather than the stylesheet.
+    const laBoxes = laInputs;
+    ok('the LA inputs themselves are off the paper, the cell printing the value',
+      laBoxes.length === 2 && laBoxes.every((b) => !b.shown) &&
+      laBoxes[0].v === 'Articaine' && laBoxes[1].v === '4% with adrenaline 1:100,000',
+      JSON.stringify(laBoxes));
+    ok('and the cell prints the value in their place, in full',
+      laCellText.join(' | ') === '"Articaine" | "4% with adrenaline 1:100,000"',
+      laCellText.join(' | '));
+    /* And whether the drug actually lands on the PAPER, which innerText cannot
+       answer: an <input>'s value is not part of it, so a text scrape of this
+       page shows the row with the drug missing even though the browser prints
+       it. So this prints a real PDF and reads the text back out of it. The
+       whole reason this file exists is to ask the paper. */
+    const pdfPath = require('path').join(require('os').tmpdir(), 'la-print-check.pdf');
+    /* page.pdf() uses print media BY DEFAULT, but an explicit emulateMedia
+       overrides that and persists — so a PDF taken after the switch back to
+       'screen' above is a screen-media PDF, and reported the clipped input it
+       was meant to catch even after the print rule was right. Reset to the
+       default first, so this is the paper and not the screen on A4. */
+    await page.emulateMedia({ media: null });
+    await page.pdf({ path: pdfPath, format: 'A4', printBackground: false,
+      margin: { top: '14mm', bottom: '14mm', left: '14mm', right: '14mm' } });
+    const onPaper = require('child_process')
+      .execFileSync('pdftotext', [pdfPath, '-']).toString().replace(/\s+/g, ' ');
+    require('fs').unlinkSync(pdfPath);
+    /* The strength IN FULL is the assertion. Before the print rule this read
+       "4% with adrena": an <input> clips where a table cell wraps, and a
+       truncated drug strength in a clinical record is worse than an ugly one.
+       Cell boundaries and line wraps are not asserted — pdftotext reflows a
+       table however it likes, and "Two cartridges" comes back split. */
+    ok('and the printed PDF carries the drug and its strength in full',
+      /Articaine/.test(onPaper) && /4% with adrenaline 1:100,000/.test(onPaper) &&
+      /AB123/.test(onPaper) && !/4% with adrena /.test(onPaper),
+      (onPaper.match(/.{0,20}Articaine.{0,110}/) || ['Articaine not on the paper'])[0]);
+    ok('and the BSP statement is on it too, in the same print',
+      /Generalised periodontitis; stage III, grade B; currently unstable\./.test(onPaper),
+      (onPaper.match(/.{0,20}Periodontal diagnosis.{0,120}/) || ['not on the paper'])[0]);
+
     ok('and the block guidance is off it, like every other screen line',
       !/nothing above is worked out/.test(perio) && !/Check every part/.test(perio),
       (perio.match(/.{0,60}worked out.{0,60}/) || [''])[0]);
