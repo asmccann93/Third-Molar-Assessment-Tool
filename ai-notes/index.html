@@ -178,6 +178,25 @@ button:disabled { opacity: .45; cursor: default; }
     appearance: none; -webkit-appearance: none;
     border: none; background: none; padding: 0; font: inherit; color: inherit;
   }
+  /* An UNTICKED PMPR box is off the paper entirely (8 November 2026).
+     Printed, it read: "Carried out today — ☐ Full mouth professional
+     mechanical plaque removal (PMPR) carried out today". The sentence is
+     affirmative and the heading says it was done; only a small empty box says
+     otherwise, and a reader skimming a record will not weigh it. noteAsText()
+     leaves the line out altogether unless the box is ticked, so this is the
+     same rule as everywhere else in here — what the copy omits, the print
+     omits — and the third time it has been broken.
+
+     Done with :checked rather than a class, so it cannot go stale: ticking
+     the box re-renders nothing, and a class set at draw time would print the
+     state the note had when it was drawn. When it IS ticked the line prints
+     as a statement, without the box. */
+  /* Never clip a log on paper; on screen it is the table that scrolls. */
+  .log-scroll { overflow: visible !important; }
+
+  #pmpr-block:has(#pmpr:not(:checked)) { display: none !important; }
+  #pmpr-block input[type="checkbox"] { display: none !important; }
+
   /* The LA Agent and Strength inputs. On paper they are the drug and its
      strength, not two boxes to fill in — but an input is a single line that
      CLIPS rather than wraps, and a printed PDF showed "4% with adrena" where
@@ -504,6 +523,7 @@ button:disabled { opacity: .45; cursor: default; }
 }
 .field.is-dictated pre { border-left: 2px dashed var(--line); padding-left: 10px; }
 .dictated-heading { margin-top: 22px; padding-top: 14px; border-top: 1px dashed var(--line); font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
+.log-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table.implant-log { width: 100%; border-collapse: collapse; font-size: .85rem; margin: 6px 0 14px; }
 table.implant-log th, table.implant-log td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
 table.la-log td[contenteditable]:not([contenteditable="false"]):empty::before { content: attr(data-placeholder); color: var(--ink-faint); }
@@ -1319,7 +1339,7 @@ label.pmpr input { margin-top: 4px; }
      ================================================================== */
   // Shown in the footer and quotable in a governance query: "which build wrote
   // this note?". Bump it with any change that alters what the tool produces.
-  var BUILD = '2026-11-07.3';
+  var BUILD = '2026-11-08.1';
 
   // Two switches read from the query string. The URL is not storage — nothing is
   // remembered between visits — but it lets a surgery keep a home-screen
@@ -1791,7 +1811,18 @@ label.pmpr input { margin-top: 4px; }
       if (keep.length) out.push([String(sec[0]).slice(0, 40), keep]);
     });
     allKeys.forEach(function (k) { if (!seen[k]) added.push(k); });
-    if (added.length) out.push(['Added since you saved this', added.slice()]);
+    /* At the section limit the new fields join the last section rather than
+       getting a heading of their own: a thirteenth section is a layout the
+       validator rejects, so the clinician could read notes in it but never
+       save it again, including to fix it. Mirrors api/_layouts.mjs. The hint
+       below counts them either way, so nothing goes quiet. */
+    if (added.length) {
+      if (out.length >= MAX_LAYOUT_SECTIONS) {
+        out[out.length - 1][1] = out[out.length - 1][1].concat(added);
+      } else {
+        out.push(['Added since you saved this', added.slice()]);
+      }
+    }
     return { sections: out, added: added };
   }
 
@@ -5704,6 +5735,22 @@ label.pmpr input { margin-top: 4px; }
      A tick, not a model finding: the clinician says it was done, and the line
      goes into the note in fixed words. Kept through a redraft or a layout
      change; gone with the consultation. */
+  /* A seven-column log does not fit a phone (8 November 2026). At 390 px the
+     LA table wants about 520 px, and without this the whole PAGE scrolled
+     sideways — the note sliding under your thumb while you read it, which is
+     the worst place to put the scroll. The table scrolls inside its own box
+     instead, because the table is the part that cannot fit. Measured on a
+     390 px viewport: 133 px of page overflow before, none after. It was 148 px
+     before the LA inputs, so this is older than they are.
+
+     On paper it must not clip: the print rules below let it overflow. */
+  function logScroller(table) {
+    var box = document.createElement('div');
+    box.className = 'log-scroll';
+    box.appendChild(table);
+    return box;
+  }
+
   function pmprOn() { return !!S.pmpr && PMPR_TYPES.indexOf(S.consultType) !== -1; }
 
   function pmprBlock() {
@@ -6158,7 +6205,7 @@ label.pmpr input { margin-top: 4px; }
           function () { removeRow('laLog', i); }));
         table.appendChild(tr);
       });
-      wrap.appendChild(table);
+      wrap.appendChild(logScroller(table));
     }
     var add = document.createElement('button');
     add.type = 'button';
@@ -6516,7 +6563,7 @@ label.pmpr input { margin-top: 4px; }
         tr.appendChild(delButton('Remove increment ' + (i + 1), function () { removeIncrement(i); }));
         table.appendChild(tr);
       });
-      wrap.appendChild(table);
+      wrap.appendChild(logScroller(table));
     }
     var add = document.createElement('button');
     add.type = 'button';
@@ -6846,7 +6893,7 @@ label.pmpr input { margin-top: 4px; }
           function () { removeRow(key, i); }));
         table.appendChild(tr);
       });
-      wrap.appendChild(table);
+      wrap.appendChild(logScroller(table));
     }
 
     /* Ordering by tooth, on the diagnosis list only and on request only
@@ -7031,7 +7078,7 @@ label.pmpr input { margin-top: 4px; }
           function () { removeRow('implantLog', i); }));
         table.appendChild(tr);
       });
-      wrap.appendChild(table);
+      wrap.appendChild(logScroller(table));
     }
 
     var add = document.createElement('button');

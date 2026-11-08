@@ -204,6 +204,38 @@ async function runConsultation(ctx, note, turns, opts) {
    runner exits 1 for a failed assertion and for a throw alike. The error
    direction is at least the safe one (it cries uncaught when it caught), but
    it costs an afternoon either way. */
+/* Pin where the Dictate press lands in the recording (8 November 2026).
+
+   THE FLAKE THIS SUITE HAS HAD ALL WEEK. audioMs() on the page reads the
+   encoder's samplePosition, and the stub worklet above emits one page — 800 ms
+   of audio — every 8 ms of real time. So the dictation boundary is a function
+   of HOW MANY TIMER TICKS the machine managed between Start and Dictate: about
+   seven on an idle machine, which puts it at 5.6 s, but one or two on a loaded
+   CI runner, which puts it at 1.6 s or 2.4 s.
+
+   Several fixtures here put the patient conversation at 1 s to 2.5 s. A turn
+   the boundary falls INSIDE is correctly discarded as unsure — there are no
+   word timings to cut it by — so its quotes come back "No supporting words
+   found in the recording" and three assertions fail with nothing in the
+   message to say why. The page was right every time; the fixture had put the
+   conversation exactly where the simulated boundary can land.
+
+   This stops the page timer and hands the recorder a single page at a known
+   position, so the boundary is where the test says rather than where the
+   machine happened to be. Call it immediately before clicking Dictate. */
+function pinDictation(win, seconds = 50) {
+  const insts = (win.__encoder && win.__encoder.instances) || [];
+  const enc = insts[insts.length - 1];
+  if (!enc || !enc.port || typeof enc.port.onmessage !== 'function') {
+    throw new Error('pinDictation: no encoder to pin — has recording started?');
+  }
+  clearInterval(enc._timer);
+  const bytes = new Uint8Array(1900);
+  bytes.set([0x4f, 0x67, 0x67, 0x53]);
+  enc.port.onmessage({ data: { message: 'page', page: bytes, samplePosition: 48000 * seconds } });
+  return seconds;
+}
+
 async function waitFor(pred, what, budget = 6000, describe = null) {
   for (let waited = 0; waited < budget; waited += 10) {
     if (pred()) { await tick(20); return; }
@@ -5743,7 +5775,9 @@ async function testTreatmentToday() {
     let offset = 0;
     win.Date.now = () => realNow() + offset;
     offset += 5000;
-    if (dictate) { click($(doc, 'dictate')); await tick(20); }
+    // The conversation ends at 4 s and the dictation starts at 100 s, so
+    // 50 s sits in the gap with ~46 s of margin either side.
+    if (dictate) { pinDictation(win, 50); click($(doc, 'dictate')); await tick(20); }
     offset += 5000;
     click($(doc, 'stop'));
     await settle(doc);
@@ -5776,6 +5810,14 @@ async function testTreatmentToday() {
 
   const la = $(doc, 'la-block');
   ok('the LA given is set out as a table', !!la && la.querySelectorAll('tr').length === 5 && /AB123/.test(la.textContent));
+  /* Inside its own scroll box (8 November 2026). A seven-column log wants
+     about 520 px and a phone has 390, and without this the whole PAGE
+     scrolled sideways — the note sliding under your thumb as you read it.
+     Structural here; the width itself is measured in the browser harness,
+     jsdom having no layout to measure. */
+  ok('and the table is inside a scroll box, so the page does not slide sideways',
+    !!la.querySelector('.log-scroll > table.la-log'),
+    la.querySelector('table') ? la.querySelector('table').parentElement.className : 'no table');
 
   /* ---- the suggestion lists on Agent and Strength (7 November 2026) ----
      SUGGESTIONS, NOT A VOCABULARY, and the first case is the one that matters:
@@ -5984,7 +6026,10 @@ async function runType(onNote, { type = /Third molar/, dictate = false, turns = 
   let offset = 0;
   win.Date.now = () => realNow() + offset;
   offset += 5000;
-  if (dictate) { click($(doc, 'dictate')); await tick(20); }
+  // 4.8 + the 0.8 s buffered term below = 5.6 s, where an idle machine
+  // already lands. longTurns() carries no end times, so a later boundary
+  // would straddle — and discard — every turn before it.
+  if (dictate) { pinDictation(win, 4.8); click($(doc, 'dictate')); await tick(20); }
   offset += 5000;
   click($(doc, 'stop'));
   await settle(doc);
@@ -6563,6 +6608,68 @@ async function testMyLayouts() {
   await tick(20);
   ok('the clinician is told a field was added since they saved it',
     /field has been added since you saved it/.test(hint()), hint());
+
+  /* AND THE SAME LAYOUT AT THE SECTION LIMIT (found 8 November). Twelve
+     sections is the most that can be saved, so a thirteenth to hold the new
+     field hands back a layout the builder refuses to save — the clinician can
+     read notes in it and cannot save it again, including to fix it. At the
+     limit the field joins the last section instead, and the hint still counts
+     it. Driven through the real page, because the page carries its own copy
+     of this repair and the server's test cannot speak for it. */
+  {
+    // Local helpers: the builder's own are scoped to testLayoutBuilder.
+    const lbRows = (d) => [...$(d, 'lb-sections').querySelectorAll('.lb-sec')].map((sec) => [
+      sec.querySelector('input').value,
+      [...sec.querySelectorAll('.lb-row')].map((r) => r.dataset.key)
+    ]);
+    const lbPlaced = (d) => lbRows(d).flatMap((x) => x[1]);
+    const everyKey = LAYOUT['exam-recall'].sections.flatMap((sec) => sec[1].map((e) => e[0]));
+    const atLimit = { 'exam-recall': { sections: [] } };
+    const every = everyKey.filter((k) => k !== '@periodiag');
+    for (let i = 0; i < 11; i++) atLimit['exam-recall'].sections.push(['Sec ' + (i + 1), [every[i]]]);
+    atLimit['exam-recall'].sections.push(['Last', every.slice(11)]);
+    // Its own boot: withLayouts does not grant canSaveLayouts, and Rearrange
+    // is hidden without it. The posts array catches the save.
+    const posts = [];
+    const c = await boot({ onFetch: async (e, o) => {
+      if (e.url.includes('/api/auth') && e.method === 'GET') {
+        return json200({ authenticated: true, who: 'AM', admin: false, expiresIn: 40000,
+          canSaveLayouts: true, layouts: atLimit });
+      }
+      if (e.url.includes('/api/layouts') && e.method === 'POST') {
+        posts.push(JSON.parse(o.body));
+        return json200({ ok: true });
+      }
+      return null;
+    } });
+    await waitFor(() => [...$(c.doc, 'template-picker').querySelectorAll('button')].length > 0, 'the picker');
+    click(typeButtons(c.doc).find((b) => /^Exam/.test(b.textContent)));
+    await waitFor(() => [...$(c.doc, 'template-picker').querySelectorAll('button')].some((b) => b.textContent === 'Mine'),
+      'the saved layout');
+    click([...$(c.doc, 'template-picker').querySelectorAll('button')].find((b) => b.textContent === 'Mine'));
+    await tick(20);
+    ok('a layout already at the section limit is still told about the new field',
+      /field has been added since you saved it/.test($(c.doc, 'template-hint').textContent),
+      $(c.doc, 'template-hint').textContent);
+
+    click($(c.doc, 'layout-edit-setup'));
+    await waitFor(() => !$(c.doc, 'layout-builder').classList.contains('hidden'), 'the builder');
+    const secs = lbRows(c.doc);
+    ok('and it opens at twelve sections, not thirteen',
+      secs.length === 12, secs.map((x) => x[0]).join('|'));
+    ok('with the new field at the end of the last one, every field still in it',
+      secs[11][1][secs[11][1].length - 1] === '@periodiag' &&
+      lbPlaced(c.doc).length === everyKey.length && everyKey.every((k) => lbPlaced(c.doc).includes(k)),
+      JSON.stringify({ last: secs[11][1].slice(-2), placed: lbPlaced(c.doc).length, of: everyKey.length }));
+    /* The point of the whole fix: Save works. Before it, this refused with
+       "more than 12 sections" on a layout the clinician never made that way. */
+    click($(c.doc, 'lb-save'));
+    await waitFor(() => posts.length === 1 || /more than|too many/i.test($(c.doc, 'lb-msg').textContent),
+      'the save to be answered');
+    ok('and it can be saved again, which is what the thirteenth section stopped',
+      posts.length === 1 && posts[0].layout.sections.length === 12,
+      $(c.doc, 'lb-msg').textContent || JSON.stringify(posts[0] && posts[0].layout.sections.length));
+  }
 
   /* Behaviourally, not from the source text. The first version of this
      checked that the string "Added since you saved this" appears in the page

@@ -3483,6 +3483,42 @@ async function testSept27b() {
         JSON.stringify({ added: fixed.added, placed: placed.length, of: keys.length }));
       ok('and it says so, under a heading that explains itself',
         fixed.sections[fixed.sections.length - 1][0] === 'Added since you saved this');
+      /* AND THE CASE THAT LOCKED THE LAYOUT (found 8 November). A clinician
+         who has used all twelve sections was handed a THIRTEENTH to hold the
+         new field — a layout this module's own validator rejects. They could
+         go on reading notes in it and could never save it again, including to
+         fix it: the two-limits-disagree lockout the store ceilings were.
+         Whatever repair hands back must be saveable, at every section count. */
+      for (let n = 1; n <= L.MAX_SECTIONS; n++) {
+        const shy = keys.filter((k) => k !== '@periodiag');
+        const secs = [];
+        for (let i = 0; i < n - 1; i++) secs.push(['Sec ' + (i + 1), [shy[i]]]);
+        secs.push(['Sec ' + n, shy.slice(n - 1)]);
+        const r = L.repair({ sections: secs }, keys);
+        const back = L.validate({ sections: r.sections }, keys);
+        const got = r.sections.flatMap((s) => s[1]);
+        ok(`a layout saved with ${n} section${n === 1 ? '' : 's'} comes back saveable, with every field in it`,
+          back.ok && r.sections.length <= L.MAX_SECTIONS && got.length === keys.length &&
+          keys.every((k) => got.includes(k)) && r.added.join(',') === '@periodiag',
+          JSON.stringify({ sections: r.sections.length, problems: back.problems, got: got.length }));
+      }
+      {
+        // At the limit it joins the last section rather than inventing a
+        // heading; the caller still learns what was added, from `added`.
+        const shy = keys.filter((k) => k !== '@periodiag');
+        const secs = [];
+        for (let i = 0; i < L.MAX_SECTIONS - 1; i++) secs.push(['Sec ' + (i + 1), [shy[i]]]);
+        secs.push(['Last', shy.slice(L.MAX_SECTIONS - 1)]);
+        const r = L.repair({ sections: secs }, keys);
+        const last = r.sections[r.sections.length - 1];
+        ok('at the limit the new field joins the last section, under its own heading',
+          last[0] === 'Last' && last[1][last[1].length - 1] === '@periodiag',
+          JSON.stringify(last).slice(0, 110));
+        ok('and the clinician\'s own headings are left alone',
+          r.sections.map((s) => s[0]).every((h) => h === 'Last' || /^Sec /.test(h)),
+          r.sections.map((s) => s[0]).join('|'));
+      }
+
       const gone = L.repair({ sections: [['Mine', ['risks', 'wasRemoved']]] }, keys);
       ok('a field the tool no longer has is removed, and reported',
         gone.removed.join(',') === 'wasRemoved' && !gone.sections.flatMap((x) => x[1]).includes('wasRemoved'));

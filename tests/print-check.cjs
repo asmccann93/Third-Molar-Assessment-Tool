@@ -254,6 +254,56 @@ async function text(page) {
     await page.click('h1');
     await page.waitForTimeout(200);
 
+    /* The PMPR box, and whether an UNTICKED one reaches the paper. Printed, it
+       read "Carried out today — ☐ Full mouth professional mechanical plaque
+       removal (PMPR) carried out today": an affirmative sentence under an
+       affirmative heading, with only a small empty box against it. The copy
+       leaves the line out entirely unless it is ticked, so the paper must too.
+       Only a browser can answer this — it turns on :checked. */
+    ok('the PMPR box is on the screen to tick', await page.isVisible('#pmpr'));
+    await page.emulateMedia({ media: 'print' });
+    ok('an UNTICKED PMPR line is off the paper altogether',
+      !/plaque removal/i.test(await text(page)) &&
+      !(await page.$eval('#pmpr-block', (e) => !!e.getClientRects().length)),
+      (await text(page)).match(/.{0,40}plaque removal.{0,40}/) ? 'still on the paper' : 'hidden');
+    await page.emulateMedia({ media: 'screen' });
+    await page.check('#pmpr');
+    await page.emulateMedia({ media: 'print' });
+    const ticked = await text(page);
+    ok('and a TICKED one prints the line, without the box',
+      /Full mouth professional mechanical plaque removal \(PMPR\) carried out today/.test(ticked) &&
+      !(await page.$eval('#pmpr', (e) => !!e.getClientRects().length)),
+      (ticked.match(/.{0,20}plaque removal.{0,30}/) || ['not on the paper'])[0]);
+    await page.emulateMedia({ media: 'screen' });
+    await page.uncheck('#pmpr');
+
+    /* And the phone. The only harness with a layout engine, so the only place
+       this can be asked: a page that scrolls sideways on a phone is the note
+       moving under your thumb while you read it. */
+    const before = page.viewportSize();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(200);
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth - window.innerWidth);
+    const scrolls = await page.$eval('#la-block .log-scroll',
+      (e) => e.scrollWidth > e.clientWidth + 1);
+    await page.setViewportSize(before);
+    await page.waitForTimeout(200);
+    ok('on a phone the page does not scroll sideways', overflow <= 0, 'overflow ' + overflow + 'px');
+    ok('the wide log scrolls inside its own box instead', scrolls);
+
+    /* And that the scroll box does NOT clip on paper. This fixture's log fits
+       A4, so no amount of printing it can show the difference — what is
+       checked is therefore the rule itself, under print media. Said plainly
+       rather than dressed up as a content assertion that cannot fail: a
+       mutation sweep removing the print rule went unnoticed by the first
+       version of this, which asserted on a table narrow enough not to care. */
+    await page.emulateMedia({ media: 'print' });
+    const logOverflow = await page.$eval('#la-block .log-scroll',
+      (e) => getComputedStyle(e).overflowX);
+    await page.emulateMedia({ media: 'screen' });
+    ok('and on paper the box does not clip, however wide the log', logOverflow === 'visible', logOverflow);
+
     await page.emulateMedia({ media: 'print' });
     const perio = await text(page);
     // Whether the dropdowns are really off the paper, asked of the layout and

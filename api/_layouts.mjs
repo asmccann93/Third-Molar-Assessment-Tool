@@ -138,8 +138,22 @@ export function repair(layout, allKeys, { addedHeading = 'Added since you saved 
     /* Appended, not inserted. Guessing where a new field belongs in someone
        else's arrangement is worse than putting it somewhere obvious and
        saying so: they can move it, and until they do it is visible rather
-       than missing. */
-    kept.push([addedHeading, added.slice()]);
+       than missing.
+
+       Unless the layout is already at the section limit, in which case the new
+       fields join the LAST section instead of getting a heading of their own.
+       A thirteenth section would be a layout this module's own validator
+       rejects: the clinician could go on reading notes in it and could never
+       save it again, including to fix it, which is the two-limits-disagree
+       lockout the store ceilings were on 4 November. Nothing goes quiet — the
+       page says how many fields were added and that they are at the end,
+       from `added`, wherever they ended up. */
+    if (kept.length >= MAX_SECTIONS) {
+      const last = kept[kept.length - 1];
+      kept[kept.length - 1] = [last[0], last[1].concat(added)];
+    } else {
+      kept.push([addedHeading, added.slice()]);
+    }
   }
 
   return { sections: kept, added, removed, changed: added.length > 0 || removed.length > 0 };
